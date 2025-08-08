@@ -6,44 +6,66 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 function connect() {
-    ws = new WebSocket("wss://dragonspires.onrender.com"); // Change to Render WS URL when deployed
+    ws = new WebSocket("wss://dragonspires.onrender.com");
+
+    ws.onopen = () => {
+        console.log("WebSocket connected");
+        // Enable buttons here if you want to disable until connected
+    };
+
+    ws.onerror = (err) => console.error("WebSocket error", err);
+    ws.onclose = () => console.log("WebSocket closed");
 
     ws.onmessage = (msg) => {
+        console.log("Received from server:", msg.data);
         const data = JSON.parse(msg.data);
+
         if (data.type === 'login_success' || data.type === 'signup_success') {
             player = data.player;
             players[player.id] = player;
             document.getElementById('login').style.display = 'none';
-        }
-        else if (data.type === 'player_joined') {
+        } else if (data.type === 'player_joined') {
             players[data.player.id] = data.player;
-        }
-        else if (data.type === 'player_moved') {
+        } else if (data.type === 'player_moved') {
             if (players[data.id]) {
                 players[data.id].pos_x = data.x;
                 players[data.id].pos_y = data.y;
             }
-        }
-        else if (data.type === 'player_left') {
+        } else if (data.type === 'player_left') {
             delete players[data.id];
         }
     };
 }
 
+// Helper function to send messages only if ws is open
+function sendMessage(msg) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+    } else {
+        console.warn("WebSocket not connected, cannot send message");
+    }
+}
+
 function login() {
-    ws.send(JSON.stringify({
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+
+    sendMessage({
         type: 'login',
-        username: document.getElementById('username').value,
-        password: document.getElementById('password').value
-    }));
+        username,
+        password
+    });
 }
 
 function signup() {
-    ws.send(JSON.stringify({
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+
+    sendMessage({
         type: 'signup',
-        username: document.getElementById('username').value,
-        password: document.getElementById('password').value
-    }));
+        username,
+        password
+    });
 }
 
 document.addEventListener('keydown', (e) => {
@@ -54,20 +76,8 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft' || e.key === 'a') dx = -1;
     if (e.key === 'ArrowRight' || e.key === 'd') dx = 1;
     if (dx || dy) {
-        ws.send(JSON.stringify({ type: 'move', dx, dy }));
+        sendMessage({ type: 'move', dx, dy });
     }
 });
 
-function render() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (let id in players) {
-        let p = players[id];
-        ctx.fillStyle = (p.id === player?.id) ? 'blue' : 'red';
-        ctx.fillRect(p.pos_x * 20, p.pos_y * 20, 20, 20);
-    }
-    requestAnimationFrame(render);
-}
-
 connect();
-render();
-
