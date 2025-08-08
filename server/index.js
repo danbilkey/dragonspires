@@ -9,6 +9,12 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
+// Simple map dimensions (adjust to your actual map size)
+const map = {
+    width: 20,
+    height: 20
+};
+
 // HTTP server just for Render health checks + a friendly page
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -51,14 +57,40 @@ async function updatePosition(playerId, x, y) {
     );
 }
 
+async function getAllPlayers() {
+    const res = await pool.query(
+        'SELECT id, username, map_id, pos_x, pos_y FROM players'
+    );
+    return res.rows;
+}
+
+async function sendLoginSuccess(ws, player) {
+    const allPlayers = await getAllPlayers();
+
+    ws.send(JSON.stringify({
+        type: 'login_success',
+        player,
+        players: allPlayers.filter(p => p.id !== player.id)
+    }));
+
+    // Now broadcast to others that this player joined
+    broadcast({
+        type: 'player_joined',
+        player
+    });
+}
+
 wss.on('connection', (ws) => {
     console.log("New connection");
     let playerData = null;
 
     ws.on('message', async (msg) => {
         let data;
-        try { data = JSON.parse(msg); }
-        catch { return; }
+        try {
+            data = JSON.parse(msg);
+        } catch {
+            return;
+        }
 
         if (data.type === 'login') {
             const player = await loadPlayer(data.username);
@@ -70,8 +102,7 @@ wss.on('connection', (ws) => {
             if (match) {
                 playerData = player;
                 clients.set(ws, player.id);
-                ws.send(JSON.stringify({ type: 'login_success', player }));
-                broadcast({ type: 'player_joined', player });
+                await sendLoginSuccess(ws, player);
             } else {
                 ws.send(JSON.stringify({ type: 'login_error', message: 'Invalid password' }));
             }
@@ -85,14 +116,27 @@ wss.on('connection', (ws) => {
             const player = await createPlayer(data.username, data.password);
             playerData = player;
             clients.set(ws, player.id);
-            ws.send(JSON.stringify({ type: 'signup_success', player }));
-            broadcast({ type: 'player_joined', player });
+            await sendLoginSuccess(ws, player);
         }
         else if (data.type === 'move' && playerData) {
-            playerData.pos_x += data.dx;
-            playerData.pos_y += data.dy;
-            await updatePosition(playerData.id, playerData.pos_x, playerData.pos_y);
-            broadcast({ type: 'player_moved', id: playerData.id, x: playerData.pos_x, y: playerData.pos_y });
+            const newX = playerData.pos_x + data.dx;
+            const newY = playerData.pos_y + data.dy;
+
+            // Bounds check
+            if (newX >= 0 && newX < map.width && newY >= 0 && newY < map.height) {
+                playerData.pos_x = newX;
+                playerData.pos_y = newY;
+                await updatePosition(playerData.id, newX, newY);
+                broadcast({
+                    type: 'player_moved',
+                    id: playerData.id,
+                    x: newX,
+                    y: newY
+                });
+            } else {
+                // Optionally send error or ignore
+                console.log(`Move blocked for player ${playerData.username}: (${newX}, ${newY}) out of bounds`);
+            }
         }
     });
 
