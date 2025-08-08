@@ -6,7 +6,7 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
 function connect() {
-    ws = new WebSocket("wss://https://dragonspires.onrender.com"); // Change to Render WS URL when deployed
+    ws = new WebSocket("wss://dragonspires.onrender.com"); // Change to Render WS URL when deployed
 
     ws.onmessage = (msg) => {
         const data = JSON.parse(msg.data);
