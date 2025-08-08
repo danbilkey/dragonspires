@@ -11,8 +11,8 @@ const pool = new Pool({
 
 // Simple map dimensions (adjust to your actual map size)
 const map = {
-    width: 20,
-    height: 20
+    width: 10,
+    height: 10
 };
 
 // HTTP server just for Render health checks + a friendly page
