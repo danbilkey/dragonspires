@@ -13,7 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let player = null;
   let players = {};
 
-  // Connect to WebSocket server
   function connect() {
     ws = new WebSocket("wss://dragonspires.onrender.com");
 
@@ -24,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     ws.onerror = (err) => console.error("WebSocket error", err);
+
     ws.onclose = () => {
       console.log("WebSocket closed");
       document.getElementById('loginBtn').disabled = true;
@@ -36,6 +36,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.type === 'login_success' || data.type === 'signup_success') {
         player = data.player;
         players[player.id] = player;
+
+        // Merge existing players sent by server
+        if (data.players && Array.isArray(data.players)) {
+          data.players.forEach(p => {
+            players[p.id] = p;
+          });
+        }
+
         document.getElementById('loginContainer').style.display = 'none';
       } else if (data.type === 'player_joined') {
         players[data.player.id] = data.player;
@@ -50,7 +58,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  // Send a JSON message if WS is open
   function sendMessage(msg) {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
@@ -59,21 +66,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Login handler
   function login() {
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     sendMessage({ type: 'login', username, password });
   }
 
-  // Signup handler
   function signup() {
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     sendMessage({ type: 'signup', username, password });
   }
 
-  // Convert tile coords to isometric screen coords
   function isoCoords(x, y) {
     return {
       screenX: (x - y) * tileWidth / 2 + canvas.width / 2 - tileWidth / 2,
@@ -126,20 +130,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Movement with arrow keys / WASD
+  // Movement with arrow keys / WASD + bounds check client-side
   document.addEventListener('keydown', (e) => {
-    if (!player) return;
+    if (!player || !map) return;
+
     let dx = 0, dy = 0;
     if (e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') dy = -1;
     else if (e.key === 'ArrowDown' || e.key.toLowerCase() === 's') dy = 1;
     else if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') dx = -1;
     else if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') dx = 1;
+
     if (dx !== 0 || dy !== 0) {
-      sendMessage({ type: 'move', dx, dy });
+      const newX = player.pos_x + dx;
+      const newY = player.pos_y + dy;
+
+      if (
+        newX >= 0 &&
+        newX < map.width &&
+        newY >= 0 &&
+        newY < map.height
+      ) {
+        sendMessage({ type: 'move', dx, dy });
+      } else {
+        console.log("Move blocked: outside map bounds");
+      }
     }
   });
 
-  // Load map JSON then start
   fetch('map.json')
     .then(res => res.json())
     .then(data => {
@@ -149,7 +166,6 @@ document.addEventListener('DOMContentLoaded', () => {
     })
     .catch(err => console.error("Failed to load map.json:", err));
 
-  // Expose login/signup for buttons
   window.login = login;
   window.signup = signup;
 });
