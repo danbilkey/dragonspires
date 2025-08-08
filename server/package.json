@@ -1,1 +1,15 @@
-{}
+{
+  "name": "dragonspires-server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "dotenv": "^16.0.3",
+    "pg": "^8.10.0",
+    "ws": "^8.13.0"
+  }
+}
+
