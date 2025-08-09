@@ -1,275 +1,224 @@
-// client.js
-document.addEventListener('DOMContentLoaded', () => {
-  // --- Config ---
-  const WS_URL = "wss://dragonspires.onrender.com";   // your Render WS endpoint
-  const canvas = document.getElementById('gameCanvas');
-  const ctx = canvas.getContext('2d');
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+canvas.width = 640;
+canvas.height = 480;
 
-  // canvas size (feel free to tweak)
-  canvas.width = 1024;
-  canvas.height = 640;
+let ws;
+let connected = false;
+let loggedIn = false;
+let assetsLoaded = false;
 
-  // isometric tile size (classic 2:1)
-  const tileW = 64;
-  const tileH = 32;
+const images = {
+    title: loadImage("/assets/title.GIF"),
+    border: loadImage("/assets/game_border_2025.gif"),
+    player: loadImage("/assets/player.png"), // placeholder sprite
+};
 
-  // --- Game state ---
-  let ws = null;
-  let map = null;                  // loaded map.json
-  let player = null;               // logged-in player's record {id, username, pos_x, pos_y}
-  let players = {};                // id -> {id, username, pos_x, pos_y}
+let player = { x: 5, y: 5 };
+let otherPlayers = [];
 
-  // --- Helpers ---
-  function connect() {
-    ws = new WebSocket(WS_URL);
+const TILE_SIZE = 32;
+const MAP_WIDTH = 10;
+const MAP_HEIGHT = 10;
 
+// UI form values
+let username = "";
+let password = "";
+let activeField = null;
+
+function loadImage(src) {
+    const img = new Image();
+    img.src = src;
+    img.onload = () => { checkAssetsLoaded(); };
+    return img;
+}
+
+function checkAssetsLoaded() {
+    assetsLoaded = Object.values(images).every(img => img.complete);
+}
+
+function connectToServer() {
+    ws = new WebSocket(`wss://${window.location.host}`);
     ws.onopen = () => {
-      console.log("WebSocket connected");
-      const loginBtn = document.getElementById('loginBtn');
-      const signupBtn = document.getElementById('signupBtn');
-      if (loginBtn) loginBtn.disabled = false;
-      if (signupBtn) signupBtn.disabled = false;
+        connected = true;
     };
-
-    ws.onmessage = (evt) => {
-      try {
-        const data = JSON.parse(evt.data);
-        handleServerMessage(data);
-      } catch (e) {
-        console.warn("Invalid server message", e, evt.data);
-      }
-    };
-
-    ws.onerror = (err) => console.error("WebSocket error", err);
-
-    ws.onclose = () => {
-      console.log("WebSocket closed");
-      const loginBtn = document.getElementById('loginBtn');
-      const signupBtn = document.getElementById('signupBtn');
-      if (loginBtn) loginBtn.disabled = true;
-      if (signupBtn) signupBtn.disabled = true;
-    };
-  }
-
-  function sendMessage(obj) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(obj));
-    } else {
-      console.warn("WS not open; cannot send:", obj);
-    }
-  }
-
-  // Convert tile coords -> isometric base coords (top-left of tile bounding box)
-  function isoBase(x, y) {
-    return {
-      x: (x - y) * (tileW / 2),
-      y: (x + y) * (tileH / 2)
-    };
-  }
-
-  // Convert tile coords -> screen coords (apply camera so player stays centered)
-  function isoScreen(x, y) {
-    // if player isn't set yet, fall back to centering map
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-
-    // base coords in world space
-    const base = isoBase(x, y);
-
-    // camera center base coords (player)
-    const cam = player ? isoBase(player.pos_x, player.pos_y) : { x: (map.width - 1 - (map.height - 1)) * (tileW/2) / 2, y: (map.width - 1 + map.height - 1) * (tileH/2) / 2 };
-
-    // We want the tile's bounding box to be positioned so that:
-    // top-left = center - tileW/2, center - tileH/2 + (base - cam)
-    const screenX = centerX - tileW / 2 + (base.x - cam.x);
-    const screenY = centerY - tileH / 2 + (base.y - cam.y);
-
-    return { screenX, screenY };
-  }
-
-  // Draw a diamond tile whose bounding box top-left is (screenX, screenY)
-  function drawTileAt(screenX, screenY, type = 0) {
-    ctx.beginPath();
-    ctx.moveTo(screenX, screenY + tileH / 2);                // left
-    ctx.lineTo(screenX + tileW / 2, screenY);                // top
-    ctx.lineTo(screenX + tileW, screenY + tileH / 2);        // right
-    ctx.lineTo(screenX + tileW / 2, screenY + tileH);        // bottom
-    ctx.closePath();
-
-    if (type === 0) ctx.fillStyle = '#2E8B57'; // grass
-    else if (type === 1) ctx.fillStyle = '#C68642'; // path
-    else ctx.fillStyle = '#666';
-
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-    ctx.stroke();
-  }
-
-  function drawPlayerSprite(p) {
-    const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
-    // player center position:
-    const cx = screenX + tileW / 2;
-    const cy = screenY + tileH / 2;
-    // simple ellipse avatar
-    ctx.beginPath();
-    ctx.ellipse(cx, cy - 8, 12, 16, 0, 0, Math.PI * 2);
-    ctx.fillStyle = (player && p.id === player.id) ? '#1E90FF' : '#FF6347';
-    ctx.fill();
-    ctx.strokeStyle = '#000';
-    ctx.stroke();
-
-    // optional name tag
-    ctx.font = "12px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#fff";
-    ctx.fillText(p.username || `#${p.id}`, cx, cy - 18);
-  }
-
-  // --- Server message handler ---
-  function handleServerMessage(data) {
-    switch (data.type) {
-      case 'login_success':
-      case 'signup_success': {
-        // server sends { player, players: [ ...otherPlayers ] }
-        player = data.player;
-        // clear existing and set players
-        players = {};
-        players[player.id] = player;
-        if (Array.isArray(data.players)) {
-          data.players.forEach(p => (players[p.id] = p));
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === "login_success") {
+            loggedIn = true;
+            player = data.player;
         }
-        // hide login UI (ensure your HTML uses this id)
-        const lc = document.getElementById('loginContainer');
-        if (lc) lc.style.display = 'none';
-        console.log("Logged in as", player.username);
-        break;
-      }
-      case 'player_joined': {
-        if (data.player) players[data.player.id] = data.player;
-        break;
-      }
-      case 'player_moved': {
-        // update or create
-        if (!players[data.id]) players[data.id] = { id: data.id, username: data.id, pos_x: data.x, pos_y: data.y };
-        else { players[data.id].pos_x = data.x; players[data.id].pos_y = data.y; }
-        // if it's the server's authoritative position for our player, sync local player too
-        if (player && data.id === player.id) {
-          player.pos_x = data.x; player.pos_y = data.y;
-          players[player.id] = player;
+        else if (data.type === "player_joined") {
+            otherPlayers.push(data.player);
         }
-        break;
-      }
-      case 'player_left': {
-        delete players[data.id];
-        break;
-      }
-      case 'login_error':
-      case 'signup_error': {
-        console.warn(data.message || "Auth error");
-        alert(data.message || "Auth error");
-        break;
-      }
-      default:
-        // ignore unknown
-        break;
-    }
-  }
+        else if (data.type === "player_moved") {
+            const p = otherPlayers.find(p => p.id === data.id);
+            if (p) {
+                p.pos_x = data.x;
+                p.pos_y = data.y;
+            }
+        }
+        else if (data.type === "player_left") {
+            otherPlayers = otherPlayers.filter(p => p.id !== data.id);
+        }
+    };
+}
 
-  // --- Rendering ---
-  function draw() {
+function sendLogin() {
+    ws.send(JSON.stringify({
+        type: "login",
+        username,
+        password
+    }));
+}
+
+function sendSignup() {
+    ws.send(JSON.stringify({
+        type: "signup",
+        username,
+        password
+    }));
+}
+
+function gameLoop() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (!map) {
-      // draw "loading map"
-      ctx.fillStyle = "#999";
-      ctx.fillText("Loading map...", 20, 20);
-      return;
+    if (!connected) {
+        // Title screen with connecting message
+        ctx.drawImage(images.title, 0, 0);
+        ctx.fillStyle = "yellow";
+        ctx.font = "16px Arial";
+        ctx.fillText("Connecting to server...", 47, 347);
+    }
+    else if (!loggedIn) {
+        // Login screen with border and GUI inputs
+        ctx.drawImage(images.border, 0, 0);
+        ctx.fillStyle = "white";
+        ctx.font = "14px Arial";
+        ctx.fillText("Username:", 236, 40);
+        ctx.fillText("Password:", 236, 60);
+
+        // Input boxes
+        ctx.strokeStyle = activeField === "username" ? "yellow" : "white";
+        ctx.strokeRect(310, 28, 200, 20);
+        ctx.strokeStyle = activeField === "password" ? "yellow" : "white";
+        ctx.strokeRect(310, 48, 200, 20);
+
+        ctx.fillStyle = "black";
+        ctx.fillRect(311, 29, 198, 18);
+        ctx.fillRect(311, 49, 198, 18);
+
+        ctx.fillStyle = "white";
+        ctx.fillText(username, 315, 43);
+        ctx.fillText("*".repeat(password.length), 315, 63);
+
+        // Buttons
+        ctx.strokeStyle = "white";
+        ctx.strokeRect(520, 28, 80, 20);
+        ctx.strokeRect(520, 48, 80, 20);
+        ctx.fillText("Login", 540, 43);
+        ctx.fillText("Create Account", 522, 63);
+    }
+    else {
+        // Render the game world with player centered
+        for (let y = 0; y < MAP_HEIGHT; y++) {
+            for (let x = 0; x < MAP_WIDTH; x++) {
+                ctx.fillStyle = "#444";
+                ctx.fillRect(
+                    430 - player.pos_x * TILE_SIZE + x * TILE_SIZE,
+                    142 - player.pos_y * TILE_SIZE + y * TILE_SIZE,
+                    TILE_SIZE,
+                    TILE_SIZE
+                );
+                ctx.strokeStyle = "#222";
+                ctx.strokeRect(
+                    430 - player.pos_x * TILE_SIZE + x * TILE_SIZE,
+                    142 - player.pos_y * TILE_SIZE + y * TILE_SIZE,
+                    TILE_SIZE,
+                    TILE_SIZE
+                );
+            }
+        }
+
+        // Draw player at fixed position
+        ctx.drawImage(images.player, 430, 142, TILE_SIZE, TILE_SIZE);
+
+        // Draw other players
+        for (const op of otherPlayers) {
+            ctx.drawImage(
+                images.player,
+                430 - (player.pos_x - op.pos_x) * TILE_SIZE,
+                142 - (player.pos_y - op.pos_y) * TILE_SIZE,
+                TILE_SIZE,
+                TILE_SIZE
+            );
+        }
+
+        // Overlay border with white transparent
+        const borderCanvas = document.createElement("canvas");
+        borderCanvas.width = images.border.width;
+        borderCanvas.height = images.border.height;
+        const bctx = borderCanvas.getContext("2d");
+        bctx.drawImage(images.border, 0, 0);
+        const imgData = bctx.getImageData(0, 0, borderCanvas.width, borderCanvas.height);
+        for (let i = 0; i < imgData.data.length; i += 4) {
+            if (
+                imgData.data[i] > 240 &&
+                imgData.data[i + 1] > 240 &&
+                imgData.data[i + 2] > 240
+            ) {
+                imgData.data[i + 3] = 0; // make transparent
+            }
+        }
+        bctx.putImageData(imgData, 0, 0);
+        ctx.drawImage(borderCanvas, 0, 0);
     }
 
-    // Draw tiles (we must use row-major map.tiles[y][x])
-    for (let y = 0; y < map.height; y++) {
-      if (!Array.isArray(map.tiles[y])) continue;
-      for (let x = 0; x < map.width; x++) {
-        const t = map.tiles[y][x];
-        const { screenX, screenY } = isoScreen(x, y);
-        drawTileAt(screenX, screenY, t);
-      }
+    requestAnimationFrame(gameLoop);
+}
+
+canvas.addEventListener("mousedown", (e) => {
+    if (!loggedIn && connected) {
+        const mx = e.offsetX;
+        const my = e.offsetY;
+
+        // Check if clicking inside username box
+        if (mx >= 310 && mx <= 510 && my >= 28 && my <= 48) {
+            activeField = "username";
+        }
+        // Check if clicking inside password box
+        else if (mx >= 310 && mx <= 510 && my >= 48 && my <= 68) {
+            activeField = "password";
+        }
+        // Login button
+        else if (mx >= 520 && mx <= 600 && my >= 28 && my <= 48) {
+            sendLogin();
+        }
+        // Signup button
+        else if (mx >= 520 && mx <= 600 && my >= 48 && my <= 68) {
+            sendSignup();
+        }
     }
-
-    // Draw players sorted by y for simple depth (optional)
-    const drawOrder = Object.values(players).sort((a, b) => (a.pos_x + a.pos_y) - (b.pos_x + b.pos_y));
-    drawOrder.forEach(drawPlayerSprite);
-  }
-
-  function loop() {
-    draw();
-    requestAnimationFrame(loop);
-  }
-
-  // --- Input & movement (client side bounds check; server also enforces) ---
-  document.addEventListener('keydown', (e) => {
-    if (!player || !map) return;
-
-    let dx = 0, dy = 0;
-    const k = e.key.toLowerCase();
-    if (k === 'arrowup' || k === 'w') dy = -1;
-    else if (k === 'arrowdown' || k === 's') dy = 1;
-    else if (k === 'arrowleft' || k === 'a') dx = -1;
-    else if (k === 'arrowright' || k === 'd') dx = 1;
-    else return;
-
-    const newX = player.pos_x + dx;
-    const newY = player.pos_y + dy;
-
-    if (newX >= 0 && newX < map.width && newY >= 0 && newY < map.height) {
-      // optimistic client move (instant feedback)
-      player.pos_x = newX;
-      player.pos_y = newY;
-      players[player.id] = player;
-
-      // send intended movement (server will validate)
-      sendMessage({ type: 'move', dx, dy });
-    } else {
-      // outside bounds
-      // optionally play a bump sound / animation
-      console.log("Blocked: outside map");
-    }
-  });
-
-  // --- Auth helpers (exposed to global for onclick handlers) ---
-  function login() {
-    const username = document.getElementById('username')?.value;
-    const password = document.getElementById('password')?.value;
-    if (!username || !password) { alert("Enter username & password"); return; }
-    sendMessage({ type: 'login', username, password });
-  }
-  function signup() {
-    const username = document.getElementById('username')?.value;
-    const password = document.getElementById('password')?.value;
-    if (!username || !password) { alert("Enter username & password"); return; }
-    sendMessage({ type: 'signup', username, password });
-  }
-  window.login = login;
-  window.signup = signup;
-
-  // --- Start: load map, connect, start loop ---
-  fetch('map.json')
-    .then(r => r.json())
-    .then(m => {
-      // Validate shape
-      if (!m.width || !m.height || !Array.isArray(m.tiles)) {
-        console.error("Invalid map.json format", m);
-        alert("map.json invalid");
-        return;
-      }
-      map = m;
-      // connect after map is loaded (so we can use map size if needed)
-      connect();
-      // start render loop
-      requestAnimationFrame(loop);
-    })
-    .catch(err => {
-      console.error("Failed to load map.json", err);
-      alert("Failed to load map.json");
-    });
 });
+
+window.addEventListener("keydown", (e) => {
+    if (!loggedIn && connected && activeField) {
+        if (e.key === "Backspace") {
+            if (activeField === "username") {
+                username = username.slice(0, -1);
+            } else {
+                password = password.slice(0, -1);
+            }
+        }
+        else if (e.key.length === 1) {
+            if (activeField === "username") {
+                username += e.key;
+            } else {
+                password += e.key;
+            }
+        }
+    }
+});
+
+connectToServer();
+gameLoop();
