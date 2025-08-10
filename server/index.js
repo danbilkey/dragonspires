@@ -10,12 +10,12 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// Map size (authoritative bounds)
+// Map bounds
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
 
-// Chat limits / filters
-const MAX_CHAT_LEN = 200; // reasonable anti-spam cap
+// Chat guardrails
+const MAX_CHAT_LEN = 200;
 const sqlLikePattern = /(select|insert|update|delete|drop|alter|truncate|merge|exec|union|;|--|\/\*|\*\/|xp_)/i;
 function looksMalicious(text) {
   if (!text || typeof text !== 'string') return true;
@@ -23,27 +23,22 @@ function looksMalicious(text) {
   return sqlLikePattern.test(text);
 }
 
-// HTTP health check
 const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.writeHead(200, {'Content-Type':'text/plain'});
   res.end('DragonSpires server is running\n');
 });
 
 const wss = new WebSocket.Server({ server });
 
-// Active sessions
-const clients = new Map();      // Map<ws, player>
+const clients = new Map();      // Map<ws, playerData>
 const usernameToWs = new Map(); // Map<username, ws>
 
-// DB helpers
 async function loadPlayer(username) {
   const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
   return r.rows[0];
 }
-
 async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
-  // relying on DB defaults for new stats columns
   const r = await pool.query(
     `INSERT INTO players (username, password, map_id, pos_x, pos_y)
      VALUES ($1, $2, 1, 5, 5) RETURNING *`,
@@ -51,12 +46,19 @@ async function createPlayer(username, password) {
   );
   return r.rows[0];
 }
-
 async function updatePosition(playerId, x, y) {
   await pool.query('UPDATE players SET pos_x=$1, pos_y=$2 WHERE id=$3', [x, y, playerId]);
 }
+async function updateStatsInDb(id, fields) {
+  const cols = [], vals = [];
+  let idx = 1;
+  for (const [k,v] of Object.entries(fields)) { cols.push(`${k}=$${idx++}`); vals.push(v); }
+  vals.push(id);
+  if (!cols.length) return;
+  const sql = `UPDATE players SET ${cols.join(', ')} WHERE id=$${idx}`;
+  await pool.query(sql, vals);
+}
 
-// Messaging helpers
 function broadcast(obj) {
   const s = JSON.stringify(obj);
   for (const [ws] of clients.entries()) {
@@ -74,7 +76,6 @@ wss.on('connection', (ws) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
-    // LOGIN
     if (msg.type === 'login') {
       try {
         const found = await loadPlayer(msg.username);
@@ -83,30 +84,29 @@ wss.on('connection', (ws) => {
         const ok = await bcrypt.compare(msg.password, found.password);
         if (!ok) return send(ws, { type: 'login_error', message: 'Invalid password' });
 
-        // Kick previous session if any
-        const existingWs = usernameToWs.get(found.username);
-        if (existingWs && existingWs !== ws) {
-          try { send(existingWs, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
-          try { existingWs.close(); } catch {}
+        // single-session: kick prior
+        const prev = usernameToWs.get(found.username);
+        if (prev && prev !== ws) {
+          try { send(prev, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
+          try { prev.close(); } catch {}
         }
 
-        // Prepare playerData with extended fields
         playerData = {
           id: found.id,
           username: found.username,
           map_id: found.map_id,
           pos_x: found.pos_x,
           pos_y: found.pos_y,
-          stamina: found.stamina,
-          max_stamina: found.max_stamina,
-          life: found.life,
-          max_life: found.max_life,
-          magic: found.magic,
-          max_magic: found.max_magic,
-          gold: found.gold,
-          weapon: found.weapon,
-          armor: found.armor,
-          hands: found.hands,
+          stamina: found.stamina ?? 10,
+          max_stamina: found.max_stamina ?? 10,
+          life: found.life ?? 20,
+          max_life: found.max_life ?? 20,
+          magic: found.magic ?? 0,
+          max_magic: found.max_magic ?? 0,
+          gold: found.gold ?? 0,
+          weapon: found.weapon ?? '',
+          armor: found.armor ?? '',
+          hands: found.hands ?? ''
         };
 
         clients.set(ws, playerData);
@@ -114,7 +114,6 @@ wss.on('connection', (ws) => {
 
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
         send(ws, { type: 'login_success', player: playerData, players: others });
-
         broadcast({ type: 'player_joined', player: playerData });
       } catch (e) {
         console.error('Login error', e);
@@ -122,7 +121,6 @@ wss.on('connection', (ws) => {
       }
     }
 
-    // SIGNUP
     else if (msg.type === 'signup') {
       try {
         const existing = await loadPlayer(msg.username);
@@ -130,11 +128,10 @@ wss.on('connection', (ws) => {
 
         const created = await createPlayer(msg.username, msg.password);
 
-        // if some old session (unlikely)
-        const existingWs = usernameToWs.get(created.username);
-        if (existingWs && existingWs !== ws) {
-          try { send(existingWs, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
-          try { existingWs.close(); } catch {}
+        const prev = usernameToWs.get(created.username);
+        if (prev && prev !== ws) {
+          try { send(prev, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
+          try { prev.close(); } catch {}
         }
 
         playerData = {
@@ -143,16 +140,16 @@ wss.on('connection', (ws) => {
           map_id: created.map_id,
           pos_x: created.pos_x,
           pos_y: created.pos_y,
-          stamina: created.stamina,
-          max_stamina: created.max_stamina,
-          life: created.life,
-          max_life: created.max_life,
-          magic: created.magic,
-          max_magic: created.max_magic,
-          gold: created.gold,
-          weapon: created.weapon,
-          armor: created.armor,
-          hands: created.hands,
+          stamina: created.stamina ?? 10,
+          max_stamina: created.max_stamina ?? 10,
+          life: created.life ?? 20,
+          max_life: created.max_life ?? 20,
+          magic: created.magic ?? 0,
+          max_magic: created.max_magic ?? 0,
+          gold: created.gold ?? 0,
+          weapon: created.weapon ?? '',
+          armor: created.armor ?? '',
+          hands: created.hands ?? ''
         };
 
         clients.set(ws, playerData);
@@ -160,7 +157,6 @@ wss.on('connection', (ws) => {
 
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
         send(ws, { type: 'signup_success', player: playerData, players: others });
-
         broadcast({ type: 'player_joined', player: playerData });
       } catch (e) {
         console.error('Signup error', e);
@@ -168,30 +164,25 @@ wss.on('connection', (ws) => {
       }
     }
 
-    // MOVE
     else if (msg.type === 'move') {
       if (!playerData) return;
       const dx = Number(msg.dx) || 0;
       const dy = Number(msg.dy) || 0;
-      const newX = playerData.pos_x + dx;
-      const newY = playerData.pos_y + dy;
-      if (newX >= 0 && newX < MAP_WIDTH && newY >= 0 && newY < MAP_HEIGHT) {
-        playerData.pos_x = newX;
-        playerData.pos_y = newY;
-        updatePosition(playerData.id, newX, newY).catch(err => console.error('DB update pos failed', err));
-        broadcast({ type: 'player_moved', id: playerData.id, x: newX, y: newY });
+      const nx = playerData.pos_x + dx;
+      const ny = playerData.pos_y + dy;
+      if (nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT) {
+        playerData.pos_x = nx;
+        playerData.pos_y = ny;
+        updatePosition(playerData.id, nx, ny).catch(e => console.error('pos update fail', e));
+        broadcast({ type: 'player_moved', id: playerData.id, x: nx, y: ny });
       }
     }
 
-    // CHAT
     else if (msg.type === 'chat') {
       if (!playerData || typeof msg.text !== 'string') return;
-      const text = msg.text.trim();
-      if (looksMalicious(text)) {
-        return send(ws, { type: 'chat_error' });
-      }
-      const line = `${playerData.username}: ${text}`;
-      broadcast({ type: 'chat', text: line });
+      const t = msg.text.trim();
+      if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
+      broadcast({ type: 'chat', text: `${playerData.username}: ${t}` });
     }
   });
 
@@ -203,12 +194,62 @@ wss.on('connection', (ws) => {
     }
   });
 
-  ws.on('error', (err) => {
-    console.warn('WS error', err);
-  });
+  ws.on('error', (err) => console.warn('WS error', err));
 });
 
+// ---------- Regeneration Loops ----------
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+// Every 3s: stamina +10% max
+setInterval(async () => {
+  const updates = [];
+  for (const [ws, p] of clients.entries()) {
+    const inc = Math.floor((p.max_stamina ?? 0) * 0.10);
+    const next = clamp((p.stamina ?? 0) + inc, 0, p.max_stamina ?? 0);
+    if (next !== p.stamina) {
+      p.stamina = next;
+      updates.push({ id: p.id, stamina: p.stamina });
+      send(ws, { type: 'stats_update', id: p.id, stamina: p.stamina });
+    }
+  }
+  // batch DB updates (one-by-one to keep simple)
+  for (const u of updates) {
+    try { await updateStatsInDb(u.id, { stamina: u.stamina }); } catch(e){ console.error('stam regen db', e); }
+  }
+}, 3000);
+
+// Every 5s: life +5% max
+setInterval(async () => {
+  const updates = [];
+  for (const [ws, p] of clients.entries()) {
+    const inc = Math.max(1, Math.floor((p.max_life ?? 0) * 0.05));
+    const next = clamp((p.life ?? 0) + inc, 0, p.max_life ?? 0);
+    if (next !== p.life) {
+      p.life = next;
+      updates.push({ id: p.id, life: p.life });
+      send(ws, { type: 'stats_update', id: p.id, life: p.life });
+    }
+  }
+  for (const u of updates) {
+    try { await updateStatsInDb(u.id, { life: u.life }); } catch(e){ console.error('life regen db', e); }
+  }
+}, 5000);
+
+// Every 30s: magic +5 flat
+setInterval(async () => {
+  const updates = [];
+  for (const [ws, p] of clients.entries()) {
+    const next = clamp((p.magic ?? 0) + 5, 0, p.max_magic ?? 0);
+    if (next !== p.magic) {
+      p.magic = next;
+      updates.push({ id: p.id, magic: p.magic });
+      send(ws, { type: 'stats_update', id: p.id, magic: p.magic });
+    }
+  }
+  for (const u of updates) {
+    try { await updateStatsInDb(u.id, { magic: u.magic }); } catch(e){ console.error('magic regen db', e); }
+  }
+}, 30000);
+
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on port ${PORT}`);
-});
+server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
