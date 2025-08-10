@@ -1,7 +1,7 @@
 // client.js
-// Isometric rendering, GUI login on canvas, chat box overlay, sprite offsets,
-// "Press any key to enter!" flow, PLAYER_OFFSET_X = -32, border white transparency,
-// fixed password hitbox, welcome message, join/leave names, centered name labels.
+// Isometric map, canvas GUI login, chat overlay (transparent bg, black text),
+// sprite anchor correction (+32, -16), border color-key transparency (0,0,82),
+// title never shown after continuing, precise input hitboxes.
 
 document.addEventListener('DOMContentLoaded', () => {
   // ---------- CONFIG ----------
@@ -17,51 +17,54 @@ document.addEventListener('DOMContentLoaded', () => {
   canvas.width = CANVAS_W; canvas.height = CANVAS_H;
 
   const TILE_W = 64, TILE_H = 32;
+
+  // Player screen anchor and sprite offset
   const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
-  const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16; // requested offsets
+  const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16;     // previous sheet alignment
+  const ANCHOR_SHIFT_X = 32,   ANCHOR_SHIFT_Y = -16;       // NEW: shift base tile by (+32, -16)
 
   // GUI placement (moved +50,+50 earlier)
-  // reduce field height to avoid overlap; use same rect for draw/hit
   const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
-  const FIELD_H = 16;       // was 18; tighter to avoid overlap
-  const FIELD_TOP = (y) => (y - 13); // drawing/hit top
+  const FIELD_H = 16;
+  const FIELD_TOP = (y) => (y - 13);
   const GUI = {
     username: { x: 260 + GUI_OFFSET_X, y: 34 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
     password: { x: 260 + GUI_OFFSET_X, y: 58 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
-    loginBtn: { x: 260 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 },
-    signupBtn:{ x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
+    loginBtn:  { x: 260 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 },
+    signupBtn: { x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
   };
 
-  // Chat box region (UPDATED size/position and layering over border)
+  // Chat box region (topmost overlay)
   const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
 
   // ---------- STATE ----------
   let ws = null;
-  let connected = false;        // websocket open
-  let connectionPaused = false; // after ws open, waiting for user key/click to proceed
-  let showLoginGUI = false;     // becomes true after user presses key/click
+  let connected = false;
+  let connectionPaused = false; // after ws open; wait for key/click to continue
+  let showLoginGUI = false;     // title should never render once this is true
   let loggedIn = false;
 
-  let mapSpec = { width: 10, height: 10, tiles: [] }; // replaced by map.json if available
+  let mapSpec = { width: 10, height: 10, tiles: [] }; // will load from map.json
 
   let usernameStr = "";
   let passwordStr = "";
   let activeField = null; // 'username'|'password'|null
 
   let localPlayer = null; // {id, username, pos_x, pos_y}
-  let otherPlayers = {};  // id -> player obj
+  let otherPlayers = {};  // id -> player
 
-  let messages = []; // chat messages; new appended to end -> draw bottom-up
+  let messages = [];      // chat lines (bottom-up render)
 
-  // Assets
+  // ---------- ASSETS ----------
   const imgTitle = new Image();
   imgTitle.src = "/assets/title.GIF";
 
   const imgBorder = new Image();
   imgBorder.src = "/assets/game_border_2025.gif";
-  let borderProcessed = null; // offscreen canvas with white made transparent
+  let borderProcessed = null; // offscreen canvas with color-key transparency
 
   imgBorder.onload = () => {
+    // Make RGB (0, 0, 82) fully transparent
     try {
       const w = imgBorder.width, h = imgBorder.height;
       const off = document.createElement('canvas');
@@ -70,14 +73,16 @@ document.addEventListener('DOMContentLoaded', () => {
       octx.drawImage(imgBorder, 0, 0);
       const data = octx.getImageData(0, 0, w, h);
       const d = data.data;
-      // Make (near) white fully transparent
       for (let i = 0; i < d.length; i += 4) {
-        if (d[i] > 240 && d[i+1] > 240 && d[i+2] > 240) d[i+3] = 0;
+        const r = d[i], g = d[i+1], b = d[i+2];
+        if (r === 0 && g === 0 && b === 82) {
+          d[i+3] = 0; // transparent
+        }
       }
       octx.putImageData(data, 0, 0);
       borderProcessed = off;
     } catch (e) {
-      console.warn("Border transparency processing failed (CORS?) — falling back to opaque border.");
+      console.warn("Border transparency processing failed (likely CORS). Using opaque border.");
       borderProcessed = null;
     }
   };
@@ -87,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let playerSprite = null;
   imgPlayerSrc.onload = () => {
-    // try to crop and alpha out black; fallback to full image if CORS blocks
+    // Crop (264,1)-(308,56) → 44x55, make black transparent; fallback if CORS blocks.
     try {
       const sx = 264, sy = 1, sw = 44, sh = 55;
       const off = document.createElement('canvas');
@@ -103,17 +108,16 @@ document.addEventListener('DOMContentLoaded', () => {
       img.src = off.toDataURL();
       playerSprite = img;
     } catch (e) {
-      console.warn("Could not process player.gif in browser (CORS?). Using source image as fallback.");
+      console.warn("Could not process player.gif in browser (CORS?). Using source image.");
       playerSprite = imgPlayerSrc;
     }
   };
 
   // ---------- MAP LOAD ----------
-  fetch('map.json').then(r => r.json()).then(m => {
-    if (m && m.width && m.height && Array.isArray(m.tiles)) mapSpec = m;
-  }).catch(err => {
-    console.warn("Could not load map.json; using fallback 10x10", err);
-  });
+  fetch('map.json')
+    .then(r => r.json())
+    .then(m => { if (m && m.width && m.height && Array.isArray(m.tiles)) mapSpec = m; })
+    .catch(err => console.warn("Could not load map.json; using fallback 10x10", err));
 
   // ---------- WEBSOCKET ----------
   function connectToServer() {
@@ -122,9 +126,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     ws.onopen = () => {
       connected = true;
-      // Show "Press any key to enter!" and wait for user input before showing login GUI
-      connectionPaused = true;
-      showLoginGUI = false;
+      connectionPaused = true;  // show "Press any key to enter!"
+      showLoginGUI = false;     // title still shows UNTIL user presses a key; then never again
     };
     ws.onmessage = (ev) => {
       const data = safeParse(ev.data);
@@ -134,7 +137,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ws.onerror = (e) => console.error("WS error", e);
     ws.onclose = () => {
       connected = false;
-      // reset to initial state
       connectionPaused = false;
       showLoginGUI = false;
       loggedIn = false;
@@ -144,9 +146,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   connectToServer();
 
-  function safeParse(s) { try { return JSON.parse(s); } catch(e) { return null; } }
+  function safeParse(s) { try { return JSON.parse(s); } catch(_) { return null; } }
   function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
-
   function pushChat(text) {
     messages.push(String(text));
     if (messages.length > 200) messages.shift();
@@ -162,15 +163,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Array.isArray(msg.players)) {
           msg.players.forEach(p => { if (!localPlayer || p.id !== localPlayer.id) otherPlayers[p.id] = p; });
         }
-        // Welcome message for the local player
+        // Welcome message for current user
         pushChat("Welcome to DragonSpires!");
         break;
 
       case 'player_joined':
-        // Only track/show other players
+        // Only add & announce other players
         if (!localPlayer || msg.player.id !== localPlayer.id) {
           otherPlayers[msg.player.id] = msg.player;
-          // Join chat by name (fallback to id if missing)
           const name = msg.player.username || msg.player.id;
           pushChat(`${name} has entered DragonSpires!`);
         }
@@ -180,18 +180,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (localPlayer && msg.id === localPlayer.id) {
           localPlayer.pos_x = msg.x; localPlayer.pos_y = msg.y;
         } else {
-          if (!otherPlayers[msg.id]) otherPlayers[msg.id] = { id: msg.id, username: `#${msg.id}`, pos_x: msg.x, pos_y: msg.y };
-          else { otherPlayers[msg.id].pos_x = msg.x; otherPlayers[msg.id].pos_y = msg.y; }
+          if (!otherPlayers[msg.id]) {
+            otherPlayers[msg.id] = { id: msg.id, username: `#${msg.id}`, pos_x: msg.x, pos_y: msg.y };
+          } else {
+            otherPlayers[msg.id].pos_x = msg.x; otherPlayers[msg.id].pos_y = msg.y;
+          }
         }
         break;
 
       case 'player_left': {
-        // Only show leave for other players; try to use their name if we have it
         const p = otherPlayers[msg.id];
         const name = p?.username ?? msg.id;
-        if (!localPlayer || msg.id !== localPlayer.id) {
-          pushChat(`${name} has left DragonSpires.`);
-        }
+        if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
         delete otherPlayers[msg.id];
         break;
       }
@@ -205,21 +205,19 @@ document.addEventListener('DOMContentLoaded', () => {
         pushChat(msg.message || 'Auth error');
         break;
 
-      default:
-        break;
+      default: break;
     }
   }
 
   // ---------- INPUT ----------
-  // proceed after connected: any key or any click
   window.addEventListener('keydown', (e) => {
     if (connected && connectionPaused) {
       connectionPaused = false;
-      showLoginGUI = true;   // title will no longer render after this
+      showLoginGUI = true;   // after this, title should never render again
       return;
     }
 
-    // If logged in, movement keys
+    // Movement
     if (loggedIn && localPlayer) {
       const k = e.key.toLowerCase();
       let dx = 0, dy = 0;
@@ -231,7 +229,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const nx = localPlayer.pos_x + dx;
         const ny = localPlayer.pos_y + dy;
         if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
-          // optimistic
           localPlayer.pos_x = nx; localPlayer.pos_y = ny;
           send({ type: 'move', dx, dy });
         }
@@ -258,14 +255,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const r = canvas.getBoundingClientRect();
     const mx = e.clientX - r.left, my = e.clientY - r.top;
 
-    // If connected and paused, clicking proceeds to login GUI
     if (connected && connectionPaused) {
       connectionPaused = false;
-      showLoginGUI = true; // title stops rendering here too
+      showLoginGUI = true; // title stops rendering after this
       return;
     }
 
-    // GUI interactions (use exact same rects as drawing; no overlap)
     if (connected && showLoginGUI && !loggedIn) {
       const u = GUI.username;
       const p = GUI.password;
@@ -292,9 +287,14 @@ document.addEventListener('DOMContentLoaded', () => {
   function isoBase(x, y) { return { x: (x - y) * (TILE_W/2), y: (x + y) * (TILE_H/2) }; }
   function isoScreen(x, y) {
     const base = isoBase(x, y);
-    const camBase = localPlayer ? isoBase(localPlayer.pos_x, localPlayer.pos_y) : isoBase(Math.floor(mapSpec.width/2), Math.floor(mapSpec.height/2));
-    const screenX = PLAYER_SCREEN_X - TILE_W/2 + (base.x - camBase.x);
-    const screenY = PLAYER_SCREEN_Y - TILE_H/2 + (base.y - camBase.y);
+    const camBase = localPlayer ? isoBase(localPlayer.pos_x, localPlayer.pos_y)
+                                : isoBase(Math.floor(mapSpec.width/2), Math.floor(mapSpec.height/2));
+    // Base screen position of tile top-left
+    let screenX = PLAYER_SCREEN_X - TILE_W/2 + (base.x - camBase.x);
+    let screenY = PLAYER_SCREEN_Y - TILE_H/2 + (base.y - camBase.y);
+    // Apply requested (+32, -16) anchor shift
+    screenX += ANCHOR_SHIFT_X;
+    screenY += ANCHOR_SHIFT_Y;
     return { screenX, screenY };
   }
 
@@ -312,26 +312,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawPlayer(p, isLocal) {
+    // Get shifted tile screen position (includes +32,-16)
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
+
+    // Final sprite placement = shifted tile + sprite offset
     const drawX = screenX + PLAYER_OFFSET_X;
     const drawY = screenY + PLAYER_OFFSET_Y;
 
     if (playerSprite && playerSprite.complete) {
-      // use natural image size
       const w = playerSprite.naturalWidth || playerSprite.width;
       const h = playerSprite.naturalHeight || playerSprite.height;
       ctx.drawImage(playerSprite, drawX, drawY, w, h);
     } else {
-      // fallback ellipse centered on tile
+      // fallback ellipse roughly at tile center (account for shift)
       ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
       ctx.beginPath();
       ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
       ctx.fill();
     }
 
-    // Name tag: center over tile center (not sprite width) so it doesn't drift with name length
+    // Name label centered over the tile center (independent of sprite width)
     const nameX = screenX + TILE_W / 2;
-    const nameY = screenY - 10; // a bit above tile
+    const nameY = screenY - 10;
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
     ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
@@ -342,20 +344,18 @@ document.addEventListener('DOMContentLoaded', () => {
   function drawChatBox() {
     const { x1,y1,x2,y2,pad } = CHAT;
     const w = x2 - x1, h = y2 - y1;
-    // background
-    ctx.fillStyle = 'rgba(0,0,0,0.7)';
-    ctx.fillRect(x1, y1, w, h);
-    ctx.strokeStyle = '#999'; ctx.strokeRect(x1, y1, w, h);
 
-    // text (bottom-up)
+    // Transparent background requested: do NOT draw any bg or border.
+
+    // Text (bottom-up), in BLACK
     ctx.font = '12px monospace';
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = '#000';
     ctx.textAlign = 'left';
     const lineH = 16;
     let y = y2 - pad;
     for (let i = messages.length - 1; i >= 0; i--) {
       const text = messages[i];
-      // naive clip if too wide
+      // simple clip if too long
       let line = text;
       while (ctx.measureText(line).width > w - pad*2 && line.length > 1) {
         line = line.slice(0, -1);
@@ -369,20 +369,22 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---------- DRAW SCENES ----------
   function drawConnecting() {
     // Title only while not yet proceeded; once showLoginGUI=true we never draw title again
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     if (!showLoginGUI) {
       if (imgTitle && imgTitle.complete) ctx.drawImage(imgTitle, 0, 0, CANVAS_W, CANVAS_H);
       else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
     } else {
+      // explicit solid background; NO title anymore
       ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     }
-
     ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
     if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
     else ctx.fillText('Connecting to server...', 47, 347);
   }
 
   function drawLogin() {
-    // border background (with white transparent if processed)
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    // border background (with color-key transparency if processed)
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
     else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
@@ -408,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.fillStyle = '#000';
     ctx.fillText('*'.repeat(passwordStr.length), GUI.password.x + 4, GUI.password.y + 2);
 
-    // buttons below (visible)
+    // buttons
     ctx.fillStyle = '#ddd'; ctx.strokeStyle = '#000';
     ctx.fillRect(GUI.loginBtn.x, GUI.loginBtn.y, GUI.loginBtn.w, GUI.loginBtn.h);
     ctx.strokeRect(GUI.loginBtn.x, GUI.loginBtn.y, GUI.loginBtn.w, GUI.loginBtn.h);
@@ -418,12 +420,13 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.fillText('Login', GUI.loginBtn.x + GUI.loginBtn.w/2, GUI.loginBtn.y + GUI.loginBtn.h - 6);
     ctx.fillText('Create Account', GUI.signupBtn.x + GUI.signupBtn.w/2, GUI.signupBtn.y + GUI.signupBtn.h - 6);
 
-    // chat overlays the border
+    // chat (transparent bg, black text) OVER the border
     drawChatBox();
   }
 
   function drawGame() {
-    // clear
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    // world
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
 
@@ -436,20 +439,20 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // draw players sorted by depth
+    // players sorted by depth
     const all = Object.values(otherPlayers).concat(localPlayer ? [localPlayer] : []);
     all.sort((a,b) => (a.pos_x + a.pos_y) - (b.pos_x + b.pos_y));
     all.forEach(p => {
-      const isLocal = localPlayer && p.id === localPlayer.id;
+      const isLocal = !!(localPlayer && p.id === localPlayer.id);
       if (isLocal) drawPlayer(localPlayer, true);
       else drawPlayer(p, false);
     });
 
-    // draw border (processed transparent white if available)
+    // border (color-key transparent if processed)
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
 
-    // chat OVER the border (requested)
+    // chat on top
     drawChatBox();
   }
 
@@ -457,20 +460,21 @@ document.addEventListener('DOMContentLoaded', () => {
   function loop() {
     if (!connected) drawConnecting();
     else if (connected && connectionPaused) drawConnecting();
-    else if (connected && !showLoginGUI) drawConnecting(); // no title after you proceed
+    else if (connected && !showLoginGUI) drawConnecting(); // title won't draw after proceed
     else if (connected && showLoginGUI && !loggedIn) drawLogin();
     else if (connected && loggedIn) drawGame();
     requestAnimationFrame(loop);
   }
   loop();
 
-  // Kick off input handlers after DOM ready
-  (function initInputHandlers() {
-    // initial click to try connect if not connected
-    canvas.addEventListener('mousedown', () => {
-      if (!connected) { connectToServer(); return; }
-    });
-  })();
+  // minimal click handler bootstrap
+  canvas.addEventListener('mousedown', () => {
+    if (!connected) { connectToServer(); return; }
+    if (connected && connectionPaused) {
+      connectionPaused = false;
+      showLoginGUI = true;
+    }
+  });
 
   // expose connect for debug
   window.connectToServer = connectToServer;
