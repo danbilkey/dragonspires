@@ -1,6 +1,8 @@
 // client.js
-// Alignment tweaks, stat overlay after border, magic text with black outline and new position,
-// gold y+6, chat input y+2, and refined centering offsets for tile/name (-5 x) and sprite (-41,+4).
+// - Name label adjusted x:-2, y:-14
+// - Movement costs 5 stamina (client-side guard + server authoritative)
+// - "-pos" chat command (client-side)
+// - Everything else preserved: magenta keyed border, GUI login, isometric, stats, etc.
 
 document.addEventListener('DOMContentLoaded', () => {
   // ---------- CONFIG ----------
@@ -20,20 +22,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // Base camera anchor for local tile
   const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
 
-  // Existing global shift
+  // Existing global/world and centering offsets
   const WORLD_SHIFT_X = -32, WORLD_SHIFT_Y = 16;
-
-  // Previously tuned centering for tile/name:
   const CENTER_LOC_ADJ_X = 32, CENTER_LOC_ADJ_Y = -8;
-  // Your new correction for actual player location (applied on top):
-  const CENTER_LOC_FINE_X = -5, CENTER_LOC_FINE_Y = 0;
+  const CENTER_LOC_FINE_X = -5, CENTER_LOC_FINE_Y = 0; // new fine tune
 
-  // Sprite-specific extra nudges (previous) plus new correction:
-  const SPRITE_CENTER_ADJ_X = 64 - 41; // 23
-  const SPRITE_CENTER_ADJ_Y = -24 + 4; // -20
-
-  // Sprite sheet base offset
+  // Sprite offsets (base + refined)
   const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16;
+  const SPRITE_CENTER_ADJ_X = 23; // = 64 - 41
+  const SPRITE_CENTER_ADJ_Y = -20; // = -24 + 4
 
   // GUI placement (+50,+50)
   const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
@@ -206,7 +203,6 @@ document.addEventListener('DOMContentLoaded', () => {
         pushChat('~ The game has rejected your message due to bad language.');
         break;
       case 'stats_update': {
-        // update local or other player values that exist in the payload
         const apply = (obj) => {
           if (!obj) return;
           if ('stamina' in msg) obj.stamina = msg.stamina;
@@ -233,20 +229,36 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Chat toggle/submit
+    // Toggle / submit chat
     if (e.key === 'Enter' && loggedIn) {
-      if (!chatMode) { chatMode = true; typingBuffer = ""; }
-      else {
+      if (!chatMode) {
+        chatMode = true;
+        typingBuffer = "";
+      } else {
         const toSend = typingBuffer.trim();
-        if (toSend.length > 0) send({ type: 'chat', text: toSend.slice(0, CHAT_INPUT.maxLen) });
-        typingBuffer = ""; chatMode = false;
+
+        // Client-side special command: -pos
+        if (toSend === '-pos' && localPlayer) {
+          pushChat(`~ ${localPlayer.username} is currently on Map ${localPlayer.map_id ?? 1} at location x:${localPlayer.pos_x}, y:${localPlayer.pos_y}.`);
+        } else if (toSend.length > 0) {
+          send({ type: 'chat', text: toSend.slice(0, CHAT_INPUT.maxLen) });
+        }
+
+        typingBuffer = "";
+        chatMode = false;
       }
-      e.preventDefault(); return;
+      e.preventDefault();
+      return;
     }
 
+    // While chatting, capture text only
     if (chatMode) {
-      if (e.key === 'Backspace') { typingBuffer = typingBuffer.slice(0, -1); e.preventDefault(); }
-      else if (e.key.length === 1 && typingBuffer.length < CHAT_INPUT.maxLen) typingBuffer += e.key;
+      if (e.key === 'Backspace') {
+        typingBuffer = typingBuffer.slice(0, -1);
+        e.preventDefault();
+      } else if (e.key.length === 1) {
+        if (typingBuffer.length < CHAT_INPUT.maxLen) typingBuffer += e.key;
+      }
       return;
     }
 
@@ -266,8 +278,9 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Movement
+    // Movement (block if no stamina)
     if (loggedIn && localPlayer) {
+      if ((localPlayer.stamina ?? 0) <= 0) return;
       const k = e.key.toLowerCase();
       let dx = 0, dy = 0;
       if (k === 'arrowup' || k === 'w') dy = -1;
@@ -277,6 +290,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (dx || dy) {
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
+          // Optimistic local stamina drain
+          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 5);
           localPlayer.pos_x = nx; localPlayer.pos_y = ny;
           send({ type: 'move', dx, dy });
         }
@@ -314,12 +329,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let screenX = PLAYER_SCREEN_X - TILE_W/2 + (base.x - camBase.x);
     let screenY = PLAYER_SCREEN_Y - TILE_H/2 + (base.y - camBase.y);
 
-    // world shift
-    screenX += WORLD_SHIFT_X; screenY += WORLD_SHIFT_Y;
-    // prior centering for tile/name
-    screenX += CENTER_LOC_ADJ_X; screenY += CENTER_LOC_ADJ_Y;
-    // fine-tune correction you requested
-    screenX += CENTER_LOC_FINE_X; screenY += CENTER_LOC_FINE_Y;
+    // world + centering offsets
+    screenX += WORLD_SHIFT_X + CENTER_LOC_ADJ_X + CENTER_LOC_FINE_X;
+    screenY += WORLD_SHIFT_Y + CENTER_LOC_ADJ_Y + CENTER_LOC_FINE_Y;
 
     return { screenX, screenY };
   }
@@ -340,9 +352,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
 
-    // Name centered and a bit higher
-    const nameX = screenX + TILE_W / 2;
-    const nameY = screenY - 20;
+    // Name label: centered, then adjusted by x:-2, y:-14 as requested
+    const nameX = screenX + TILE_W / 2 - 2;
+    const nameY = screenY - 20 - 14; // previously -20
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
     ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
@@ -383,7 +395,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.fillStyle = '#ff0000';
     ctx.fillRect(211, lFillY, 13, bottomY - lFillY);
 
-    // Magic text at (184,239) adjusted by x:-7, y:+8 -> (177,247) with black outline
+    // Magic text at original (184,239) but adjusted by x:-7, y:+8 -> (177,247) WITH black outline
     const mx = 177, my = 247;
     const mCur = localPlayer.magic ?? 0, mMax = localPlayer.max_magic ?? 0;
     ctx.font = '14px monospace';
@@ -462,7 +474,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
     else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
 
-    // WHITE labels, nudged up by 2px
+    // WHITE labels, nudged up by 2px to align
     ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.textAlign = 'left';
     ctx.fillText('Username:', GUI.username.x - 70, GUI.username.y + 2);
     ctx.fillText('Password:', GUI.password.x - 70, GUI.password.y + 2);
@@ -493,7 +505,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.fillText('Login', GUI.loginBtn.x + GUI.loginBtn.w/2, GUI.loginBtn.y + GUI.loginBtn.h - 6);
     ctx.fillText('Create Account', GUI.signupBtn.x + GUI.signupBtn.w/2, GUI.signupBtn.y + GUI.signupBtn.h - 6);
 
-    // Chat history
     drawChatHistory();
   }
 
@@ -520,7 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
 
-    // Stats AFTER border (so they’re on top)
+    // Stats AFTER border (on top)
     drawBarsAndStats();
 
     // Chat layers
