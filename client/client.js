@@ -1,6 +1,6 @@
 // client.js
 // Isometric map, canvas GUI login, chat overlay (transparent bg, black text),
-// sprite anchor correction (+32, -16), border color-key transparency (0,0,82),
+// sprite anchor correction (+32, -16), border color-key transparency (255,0,255),
 // title never shown after continuing, precise input hitboxes.
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -20,10 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Player screen anchor and sprite offset
   const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
-  const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16;     // previous sheet alignment
-  const ANCHOR_SHIFT_X = 32,   ANCHOR_SHIFT_Y = -16;       // NEW: shift base tile by (+32, -16)
+  const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16;     // sprite placement offset
+  const ANCHOR_SHIFT_X = 32,   ANCHOR_SHIFT_Y = -16;       // shift base tile by (+32, -16)
 
-  // GUI placement (moved +50,+50 earlier)
+  // GUI placement (moved +50,+50)
   const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
   const FIELD_H = 16;
   const FIELD_TOP = (y) => (y - 13);
@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let borderProcessed = null; // offscreen canvas with color-key transparency
 
   imgBorder.onload = () => {
-    // Make RGB (0, 0, 82) fully transparent
+    // Make pure magenta (255,0,255) fully transparent
     try {
       const w = imgBorder.width, h = imgBorder.height;
       const off = document.createElement('canvas');
@@ -75,7 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const d = data.data;
       for (let i = 0; i < d.length; i += 4) {
         const r = d[i], g = d[i+1], b = d[i+2];
-        if (r === 0 && g === 0 && b === 82) {
+        if (r === 255 && g === 0 && b === 255) {
           d[i+3] = 0; // transparent
         }
       }
