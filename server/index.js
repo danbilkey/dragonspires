@@ -11,7 +11,7 @@ const pool = new Pool({
 });
 
 const MAP_WIDTH = 64;
-const MAP_HEIGHT = 64;
+the MAP_HEIGHT = 64;
 
 const MAX_CHAT_LEN = 200;
 const sqlLikePattern = /(select|insert|update|delete|drop|alter|truncate|merge|exec|union|;|--|\/\*|\*\/|xp_)/i;
@@ -81,7 +81,7 @@ wss.on('connection', (ws) => {
         const ok = await bcrypt.compare(msg.password, found.password);
         if (!ok) return send(ws, { type: 'login_error', message: 'Invalid password' });
 
-        // single-session: kick prior
+        // single session: kick previous
         const prev = usernameToWs.get(found.username);
         if (prev && prev !== ws) {
           try { send(prev, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
@@ -163,29 +163,23 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'move') {
       if (!playerData) return;
-
-      // stamina gate
       if ((playerData.stamina ?? 0) <= 0) {
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
         return;
       }
-
       const dx = Number(msg.dx) || 0;
       const dy = Number(msg.dy) || 0;
       const nx = playerData.pos_x + dx;
       const ny = playerData.pos_y + dy;
-
       if (nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT) {
-        // Decrement stamina by **1**
+        // stamina cost = 1
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
         playerData.pos_y = ny;
-
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
           updatePosition(playerData.id, nx, ny)
         ]).catch(()=>{});
-
         broadcast({ type: 'player_moved', id: playerData.id, x: nx, y: ny });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       }
@@ -196,6 +190,13 @@ wss.on('connection', (ws) => {
       const t = msg.text.trim();
       if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
       broadcast({ type: 'chat', text: `${playerData.username}: ${t}` });
+    }
+
+    // NEW: Map editor auth
+    else if (msg.type === 'mapeditor_request') {
+      if (!playerData) return;
+      const ok = playerData.username === 'Ashe';
+      send(ws, { type: 'mapeditor_auth', ok });
     }
   });
 
@@ -213,7 +214,6 @@ wss.on('connection', (ws) => {
 // ---------- Regeneration Loops ----------
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
-// Every 3s: stamina +10% max
 setInterval(async () => {
   const updates = [];
   for (const [ws, p] of clients.entries()) {
@@ -226,11 +226,10 @@ setInterval(async () => {
     }
   }
   for (const u of updates) {
-    try { await updateStatsInDb(u.id, { stamina: u.stamina }); } catch(e){ console.error('stam regen db', e); }
+    try { await updateStatsInDb(u.id, { stamina: u.stamina }); } catch(e){}
   }
 }, 3000);
 
-// Every 5s: life +5% max (min +1)
 setInterval(async () => {
   const updates = [];
   for (const [ws, p] of clients.entries()) {
@@ -243,11 +242,10 @@ setInterval(async () => {
     }
   }
   for (const u of updates) {
-    try { await updateStatsInDb(u.id, { life: u.life }); } catch(e){ console.error('life regen db', e); }
+    try { await updateStatsInDb(u.id, { life: u.life }); } catch(e){}
   }
 }, 5000);
 
-// Every 30s: magic +5 flat
 setInterval(async () => {
   const updates = [];
   for (const [ws, p] of clients.entries()) {
@@ -259,7 +257,7 @@ setInterval(async () => {
     }
   }
   for (const u of updates) {
-    try { await updateStatsInDb(u.id, { magic: u.magic }); } catch(e){ console.error('magic regen db', e); }
+    try { await updateStatsInDb(u.id, { magic: u.magic }); } catch(e){}
   }
 }, 30000);
 
