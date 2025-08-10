@@ -176,11 +176,22 @@ document.addEventListener('DOMContentLoaded', () => {
       tilesReady = true;
 
       // load map AFTER tiles are ready
-      fetch('map.json')
-        .then(r => r.json())
-        .then(m => { if (m && m.width && m.height && Array.isArray(m.tiles)) { mapSpec = m; } })
-        .catch(() => {})
-        .finally(() => { mapReady = true; });
+fetch('map.json')
+  .then(r => r.json())
+  .then(m => {
+    if (m && m.width && m.height) {
+      const tiles = Array.isArray(m.tiles) ? m.tiles : (Array.isArray(m.tilemap) ? m.tilemap : null);
+      mapSpec = {
+        width: m.width,
+        height: m.height,
+        tiles: tiles || [],
+        items: Array.isArray(m.items) ? m.items : []
+      };
+    }
+  })
+  .catch(() => {})
+  .finally(() => { mapReady = true; });
+
 
     } catch (e) {
       console.error("Floor tile extraction failed:", e);
@@ -451,6 +462,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+function drawItemAtTile(screenX, screenY, itemIndex) {
+  if (typeof window.itemsReady !== 'function' || !window.itemsReady()) return;
+  if (typeof window.getItemSprite !== 'function') return;
+
+  const spr = window.getItemSprite(itemIndex);
+  if (!spr || !spr.complete) return;
+
+  // Tile bottom-center anchor
+  const tileBottomCenterX = screenX + TILE_W / 2;
+  const tileBottomCenterY = screenY + TILE_H;
+
+  // Each item sprite is bottom-right–justified inside its own canvas.
+  // So place the sprite's bottom-right at the tile bottom-center.
+  const dx = tileBottomCenterX - spr.width;
+  const dy = tileBottomCenterY - spr.height;
+
+  ctx.drawImage(spr, dx, dy);
+}
+
+
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
     // Name centered, adjusted x:-2, y:-14 from previous baseline
@@ -602,6 +633,12 @@ document.addEventListener('DOMContentLoaded', () => {
           const t = (mapSpec.tiles && mapSpec.tiles[y] && typeof mapSpec.tiles[y][x] !== 'undefined') ? mapSpec.tiles[y][x] : 0;
           const { screenX, screenY } = isoScreen(x, y);
           drawTile(screenX, screenY, t);
+          // Draw item at this tile (1-based item index; 0 means none)
+          const it = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined')
+            ? mapSpec.items[y][x]
+            : 0;
+          if (it > 0) drawItemAtTile(screenX, screenY, it);
+
         }
       }
     }
