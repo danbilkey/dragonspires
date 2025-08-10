@@ -204,7 +204,7 @@ fetch('map.json')
     }
   };
 
-// ---------- ITEMS (sheet + coords, true magenta keyed) ----------
+// ---------- ITEMS (sheet + coords, true magenta keyed, formula-based anchoring) ----------
 (() => {
   const imgItems = new Image();
   imgItems.src = "/assets/item.gif";
@@ -213,21 +213,9 @@ fetch('map.json')
     .then(r => r.json())
     .catch(() => null);
 
-  const itemSprites = []; // 1-based: itemSprites[1] is first entry in item_coords
+  const itemSprites = []; // 1-based
+  const itemMeta = [];    // 1-based: { img, w, h, leftPad, anchorX }
   let itemsReady = false;
-
-  function makeMagentaTransparent(ctx, w, h) {
-    try {
-      const data = ctx.getImageData(0, 0, w, h);
-      const d = data.data;
-      for (let i = 0; i < d.length; i += 4) {
-        if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
-      }
-      ctx.putImageData(data, 0, 0);
-    } catch {
-      // ignore (e.g., CORS or security context), we'll just use the raw pixels
-    }
-  }
 
   function waitImage(img) {
     return new Promise((resolve) => {
@@ -248,21 +236,57 @@ fetch('map.json')
       off.width = sw; off.height = sh;
       octx.clearRect(0, 0, sw, sh);
       octx.drawImage(imgItems, sx, sy, sw, sh, 0, 0, sw, sh);
-      makeMagentaTransparent(octx, sw, sh);
 
+      // Make true magenta transparent + compute leftPad (first opaque column)
+      let leftPad = 0;
+      try {
+        const data = octx.getImageData(0, 0, sw, sh);
+        const d = data.data;
+
+        // magenta -> transparent
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
+        }
+
+        // find first opaque column from the left
+        leftPad = sw; // default "none found"
+        outer:
+        for (let x = 0; x < sw; x++) {
+          for (let y = 0; y < sh; y++) {
+            const a = d[((y * sw) + x) * 4 + 3];
+            if (a !== 0) { leftPad = x; break outer; }
+          }
+        }
+        if (leftPad === sw) leftPad = 0; // all transparent (safety)
+
+        octx.putImageData(data, 0, 0);
+      } catch {
+        leftPad = 0; // fallback if canvas is tainted (shouldn't be here)
+      }
+
+      // Bottom-center anchor inside the sprite (relative to left edge)
+      // Rightmost opaque column is at sw - 1 (bottom-right justified),
+      // so center between leftPad and (sw - 1).
+      const anchorX = (leftPad + (sw - 1)) / 2;
+
+      // Freeze the processed pixels into an <img>
       const sprite = new Image();
       sprite.src = off.toDataURL();
-      itemSprites[idx + 1] = sprite; // 1-based indexing
+
+      itemSprites[idx + 1] = sprite;
+      itemMeta[idx + 1] = { img: sprite, w: sw, h: sh, leftPad, anchorX };
     });
 
     itemsReady = true;
   });
 
-  // Simple accessors (optional)
+  // accessors
   window.getItemSprite = (i) => itemSprites[i] || null;
+  window.getItemMeta   = (i) => itemMeta[i] || null;
   window.itemSpriteCount = () => itemSprites.length - 1;
   window.itemsReady = () => itemsReady;
 })();
+
 
 
   // ---------- WS ----------
@@ -468,48 +492,23 @@ fetch('map.json')
   }
 
 function drawItemAtTile(sx, sy, itemIndex) {
-  // Requires /assets/item.gif + /assets/item.json loader you already added (window.getItemSprite)
-  if (!window.getItemSprite) return;
-  const spr = window.getItemSprite(itemIndex);
-  if (!spr || !spr.complete) return;
+  if (!window.getItemMeta) return;
+  const meta = window.getItemMeta(itemIndex);
+  if (!meta) return;
 
-  // Base the placement on the tile’s bottom-center
-  const tileBottomCenterX = sx + TILE_W / 2;
-  const tileBottomCenterY = sy + TILE_H / 2;
+  const { img, w, h, anchorX } = meta;
+  if (!img || !img.complete) return;
 
-  // Items are bottom-right justified inside their own sprite rects.
-  // We want that bottom-right to sit on the tile’s bottom-center,
-  // with a small nudge so they look centered on the diamond.
-  const dx = tileBottomCenterX - spr.width + ITEM_X_NUDGE; // x:+3
-  const dy = tileBottomCenterY - spr.height - ITEM_Y_NUDGE; // y:-11 (lift)
+  // Tile center (contact point on the ground plane)
+  const cx = sx + TILE_W / 2;
+  const cy = sy + TILE_H / 2;
 
-  try {
-    // In case magenta wasn’t stripped by the loader for some reason (belt & suspenders)
-    const off = document.createElement('canvas');
-    off.width = spr.naturalWidth || spr.width;
-    off.height = spr.naturalHeight || spr.height;
-    const octx = off.getContext('2d');
-    octx.drawImage(spr, 0, 0);
-    const data = octx.getImageData(0, 0, off.width, off.height);
-    const d = data.data;
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
-    }
-    octx.putImageData(data, 0, 0);
-    // Draw processed (cached by browser by data URL)
-    const mag = new Image();
-    mag.src = off.toDataURL();
-    // If it’s already ready, draw; otherwise, draw the original as fallback now and the magenta-safe one next frame
-    if (mag.complete) {
-      ctx.drawImage(mag, dx, dy);
-    } else {
-      ctx.drawImage(spr, dx, dy);
-      mag.onload = () => { /* next frame it’ll be used */ };
-    }
-  } catch {
-    // Normal path (your loader already keyed magenta) — draw directly
-    ctx.drawImage(spr, dx, dy);
-  }
+  // Place the sprite so its bottom-center of opaque content
+  // sits on the tile center.
+  const drawX = Math.round(cx - anchorX);
+  const drawY = Math.round(cy - h);
+
+  ctx.drawImage(img, drawX, drawY);
 }
 
 
