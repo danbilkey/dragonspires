@@ -188,6 +188,67 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+// ---------- ITEMS (sheet + coords, true magenta keyed) ----------
+(() => {
+  const imgItems = new Image();
+  imgItems.src = "/assets/item.gif";
+
+  const itemsJsonPromise = fetch("/assets/item.json")
+    .then(r => r.json())
+    .catch(() => null);
+
+  const itemSprites = []; // 1-based: itemSprites[1] is first entry in item_coords
+  let itemsReady = false;
+
+  function makeMagentaTransparent(ctx, w, h) {
+    try {
+      const data = ctx.getImageData(0, 0, w, h);
+      const d = data.data;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
+      }
+      ctx.putImageData(data, 0, 0);
+    } catch {
+      // ignore (e.g., CORS or security context), we'll just use the raw pixels
+    }
+  }
+
+  function waitImage(img) {
+    return new Promise((resolve) => {
+      if (img.complete) return resolve();
+      img.onload = resolve;
+      img.onerror = resolve;
+    });
+  }
+
+  Promise.all([waitImage(imgItems), itemsJsonPromise]).then(([_, meta]) => {
+    if (!meta || !Array.isArray(meta.item_coords)) return;
+
+    const off = document.createElement("canvas");
+    const octx = off.getContext("2d");
+
+    meta.item_coords.forEach((quad, idx) => {
+      const [sx, sy, sw, sh] = quad;
+      off.width = sw; off.height = sh;
+      octx.clearRect(0, 0, sw, sh);
+      octx.drawImage(imgItems, sx, sy, sw, sh, 0, 0, sw, sh);
+      makeMagentaTransparent(octx, sw, sh);
+
+      const sprite = new Image();
+      sprite.src = off.toDataURL();
+      itemSprites[idx + 1] = sprite; // 1-based indexing
+    });
+
+    itemsReady = true;
+  });
+
+  // Simple accessors (optional)
+  window.getItemSprite = (i) => itemSprites[i] || null;
+  window.itemSpriteCount = () => itemSprites.length - 1;
+  window.itemsReady = () => itemsReady;
+})();
+
+
   // ---------- WS ----------
   function connectToServer() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
