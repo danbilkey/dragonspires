@@ -1,313 +1,318 @@
-// server.js
-// Postgres-backed server using the existing `players` table.
-// Features: signup/login (bcrypt), single-session per user, online-players only,
-// 52x100 (from map{map_id}.json) movement bounds, move stamina cost=1,
-// regen timers, chat with -refresh PLAYER (admin only).
-
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const http = require('http');
 const WebSocket = require('ws');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-const fs = require('fs');
-const path = require('path');
 
-// ---------- DB (Postgres) ----------
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
-// Helpers
+// --- HTTP (health) ---
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('DragonSpires server is running\n');
+});
+
+// --- WS ---
+const wss = new WebSocket.Server({ server });
+
+// Track sessions: ws -> playerId; username -> ws
+const wsToPlayer = new Map();
+const usernameToWs = new Map();
+
+// Simple helpers
+function send(ws, obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+function broadcast(obj, exceptWs) {
+  const str = JSON.stringify(obj);
+  for (const ws of wsToPlayer.keys()) {
+    if (ws !== exceptWs && ws.readyState === WebSocket.OPEN) ws.send(str);
+  }
+}
 async function getPlayerByUsername(username) {
-  const r = await pool.query(`SELECT * FROM players WHERE username=$1`, [username]);
+  const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
   return r.rows[0] || null;
 }
-async function createPlayer({ username, password }) {
+async function getPlayerById(id) {
+  const r = await pool.query('SELECT * FROM players WHERE id=$1', [id]);
+  return r.rows[0] || null;
+}
+async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
-  // Defaults; make sure these columns exist in your `players` table.
   const r = await pool.query(
-    `INSERT INTO players
-      (username, password, role, map_id, pos_x, pos_y,
-       stamina, max_stamina, life, max_life, magic, max_magic,
-       gold, weapon, armor, hands)
-     VALUES ($1,$2,COALESCE($3,'user'),COALESCE($4,1),COALESCE($5,26),COALESCE($6,50),
-             COALESCE($7,100),COALESCE($8,100),COALESCE($9,100),COALESCE($10,100),
-             COALESCE($11,30),COALESCE($12,30),COALESCE($13,0),
-             COALESCE($14,''),COALESCE($15,''),COALESCE($16,''))
+    `INSERT INTO players (username, password, map_id, pos_x, pos_y,
+      stamina, max_stamina, life, max_life, magic, max_magic, gold, weapon, armor, hands, role)
+     VALUES ($1,$2,$3,$4,$5,  $6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      RETURNING *`,
-    [username, hashed, 'user', 1, 26, 50, 100, 100, 100, 100, 30, 30, 0, '', '', '']
+    [
+      username, hashed, 'lev01', 5, 5,
+      100, 100, 100, 100, 30, 30, 0, '', '', '', 'player'
+    ]
   );
   return r.rows[0];
 }
-async function updatePlayerFields(id, fields) {
+async function updatePositionAndStamina(id, x, y, stamina) {
+  await pool.query(
+    'UPDATE players SET pos_x=$1,pos_y=$2,stamina=$3 WHERE id=$4',
+    [x, y, stamina, id]
+  );
+}
+async function updateVitals(id, fields) {
   const keys = Object.keys(fields);
   if (!keys.length) return;
-  const set = keys.map((k, i) => `${k}=$${i+2}`).join(', ');
+  const sets = keys.map((k, i) => `${k}=$${i + 1}`);
   const vals = keys.map(k => fields[k]);
-  await pool.query(`UPDATE players SET ${set} WHERE id=$1`, [id, ...vals]);
+  vals.push(id);
+  await pool.query(`UPDATE players SET ${sets.join(',')} WHERE id=$${vals.length}`, vals);
+}
+async function listOnlinePlayers() {
+  const ids = Array.from(wsToPlayer.values());
+  if (!ids.length) return [];
+  const r = await pool.query(`SELECT id,username,pos_x,pos_y FROM players WHERE id = ANY($1)`, [ids]);
+  return r.rows;
 }
 
-// ---------- Map bounds via map{map_id}.json ----------
-const mapCache = new Map(); // map_id -> {width,height}
-function getMapDims(map_id = 1) {
-  if (mapCache.has(map_id)) return mapCache.get(map_id);
-  try {
-    const file = path.join(__dirname, `map${map_id}.json`);
-    const raw = fs.readFileSync(file, 'utf8');
-    const m = JSON.parse(raw);
-    const dims = { width: Number(m.width) || 52, height: Number(m.height) || 100 };
-    mapCache.set(map_id, dims);
-    return dims;
-  } catch {
-    const dims = { width: 52, height: 100 };
-    mapCache.set(map_id, dims);
-    return dims;
+// --- Map loading (Java-like) ---
+const MW = 52, MH = 100;
+const mapCache = new Map(); // key: 'lev01' -> { width,height,tilemap[x][y],itemmap[x][y] }
+
+function decode2(a, b) {
+  if (a == null || b == null) return 0;
+  return ((a & 0xFF) << 8) | (b & 0xFF); // big-endian
+}
+function loadDsMap(mapId, floorCount, itemCount) {
+  const key = String(mapId || 'lev01');
+  if (mapCache.has(key)) return mapCache.get(key);
+
+  const file = path.join(__dirname, 'maps', `${key}.dsmap`);
+  const buf = fs.readFileSync(file);
+
+  const pairsNeeded = MW * MH * 2; // tile + item blocks (each pair is 2 bytes)
+  const bytesNeeded = pairsNeeded * 2;
+  if (buf.length < bytesNeeded) {
+    throw new Error(`${key}.dsmap too small: ${buf.length} < ${bytesNeeded}`);
   }
-}
 
-// ---------- HTTP + WS ----------
-const server = http.createServer((req, res) => {
-  res.writeHead(200, {'Content-Type':'text/plain'});
-  res.end('DragonSpires server is running\n');
-});
-const wss = new WebSocket.Server({ server });
+  const tilemap = Array.from({ length: MW }, () => new Array(MH).fill(0));
+  const itemmap = Array.from({ length: MW }, () => new Array(MH).fill(0));
 
-// Online state
-const clients = new Map();        // ws -> session
-const byUsername = new Map();     // username -> ws
-
-function send(ws, obj) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
-}
-function broadcast(obj, exceptWs = null) {
-  const s = JSON.stringify(obj);
-  wss.clients.forEach((c) => {
-    if (c.readyState === WebSocket.OPEN && c !== exceptWs) c.send(s);
-  });
-}
-function sanitizePlayer(p) {
-  return {
-    id: p.id, username: p.username,
-    map_id: p.map_id, pos_x: p.pos_x, pos_y: p.pos_y,
-    stamina: p.stamina, max_stamina: p.max_stamina,
-    life: p.life, max_life: p.max_life,
-    magic: p.magic, max_magic: p.max_magic,
-    gold: p.gold, weapon: p.weapon, armor: p.armor, hands: p.hands,
-    role: p.role
-  };
-}
-function onlineList(exceptUsername) {
-  const arr = [];
-  for (const [ws, p] of clients.entries()) {
-    if (p.username !== exceptUsername) {
-      arr.push({ id: p.id, username: p.username, pos_x: p.pos_x, pos_y: p.pos_y });
+  let p = 0;
+  // tiles
+  for (let x = 0; x < MW; x++) {
+    for (let y = 0; y < MH; y++) {
+      let v = decode2(buf[p++], buf[p++]);
+      if (v < 0 || v >= floorCount) v = 0;
+      tilemap[x][y] = v; // x-major, matches Java
     }
   }
-  return arr;
-}
-
-// Chat validation
-const CHAT_MAX = 200;
-const BAD_RE = /(--|;|\/\*|\*\/|\b(drop|delete|insert|update|select|union|alter|create|grant)\b)/i;
-
-// ---------- Regen ----------
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-function statsPacket(p) {
-  return {
-    type: 'stats_update',
-    stats: {
-      stamina: p.stamina, max_stamina: p.max_stamina,
-      life: p.life, max_life: p.max_life,
-      magic: p.magic, max_magic: p.max_magic,
-      gold: p.gold, weapon: p.weapon, armor: p.armor, hands: p.hands
+  // items
+  for (let x = 0; x < MW; x++) {
+    for (let y = 0; y < MH; y++) {
+      let v = decode2(buf[p++], buf[p++]);
+      if (v < 0 || v >= itemCount) v = 0;
+      itemmap[x][y] = v;
     }
-  };
+  }
+
+  const out = { width: MW, height: MH, tilemap, itemmap };
+  mapCache.set(key, out);
+  return out;
 }
+
+// Counts (set these to your actual extracted totals)
+const FLOOR_COUNT = 99;  // number of tiles in /assets/floor.png (0-based last index = FLOOR_COUNT-1)
+const ITEM_COUNT = 512;
+
+// --- Regen loops ---
 setInterval(async () => {
-  for (const [ws, p] of clients.entries()) {
-    const inc = Math.max(1, Math.floor((p.max_stamina || 0) * 0.10));
-    const before = p.stamina || 0;
-    p.stamina = clamp(before + inc, 0, p.max_stamina || before);
-    if (p.stamina !== before) {
-      send(ws, statsPacket(p));
-      await updatePlayerFields(p.id, { stamina: p.stamina });
+  // stamina +10% max every 3s
+  for (const [ws, pid] of wsToPlayer.entries()) {
+    const p = await getPlayerById(pid);
+    if (!p) continue;
+    const inc = Math.max(1, Math.floor(p.max_stamina * 0.10));
+    const ns = Math.min(p.max_stamina, (p.stamina || 0) + inc);
+    if (ns !== p.stamina) {
+      await updateVitals(p.id, { stamina: ns });
+      send(ws, { type: 'vitals', stamina: ns });
     }
   }
 }, 3000);
+
 setInterval(async () => {
-  for (const [ws, p] of clients.entries()) {
-    const inc = Math.max(1, Math.floor((p.max_life || 0) * 0.05));
-    const before = p.life || 0;
-    p.life = clamp(before + inc, 0, p.max_life || before);
-    if (p.life !== before) {
-      send(ws, statsPacket(p));
-      await updatePlayerFields(p.id, { life: p.life });
+  // life +5% max every 5s
+  for (const [ws, pid] of wsToPlayer.entries()) {
+    const p = await getPlayerById(pid);
+    if (!p) continue;
+    const inc = Math.max(1, Math.floor(p.max_life * 0.05));
+    const nv = Math.min(p.max_life, (p.life || 0) + inc);
+    if (nv !== p.life) {
+      await updateVitals(p.id, { life: nv });
+      send(ws, { type: 'vitals', life: nv });
     }
   }
 }, 5000);
+
 setInterval(async () => {
-  for (const [ws, p] of clients.entries()) {
-    const before = p.magic || 0;
-    p.magic = clamp(before + 5, 0, p.max_magic || before);
-    if (p.magic !== before) {
-      send(ws, statsPacket(p));
-      await updatePlayerFields(p.id, { magic: p.magic });
+  // magic +5 flat every 30s
+  for (const [ws, pid] of wsToPlayer.entries()) {
+    const p = await getPlayerById(pid);
+    if (!p) continue;
+    const inc = 5;
+    const nm = Math.min(p.max_magic, (p.magic || 0) + inc);
+    if (nm !== p.magic) {
+      await updateVitals(p.id, { magic: nm });
+      send(ws, { type: 'vitals', magic: nm });
     }
   }
 }, 30000);
 
-// ---------- WS handlers ----------
+// --- WS handlers ---
 wss.on('connection', (ws) => {
+  let playerId = null;
+
   ws.on('message', async (raw) => {
-    let msg; try { msg = JSON.parse(raw); } catch { return; }
-    const me = clients.get(ws);
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
 
-    // --- SIGNUP ---
-    if (msg.type === 'signup') {
-      const { username, password } = msg;
-      if (!username || !password) { send(ws, { type: 'signup_error', message: 'Missing fields' }); return; }
-      try {
-        const existing = await getPlayerByUsername(username);
-        if (existing) { send(ws, { type: 'signup_error', message: 'Username taken' }); return; }
-        const row = await createPlayer({ username, password });
-        const p = sanitizePlayer(row);
-
-        // attach session
-        clients.set(ws, p);
-        byUsername.set(p.username, ws);
-
-        send(ws, { type: 'signup_success', player: p, players: onlineList(p.username) });
-        broadcast({ type: 'player_joined', player: { id: p.id, username: p.username, pos_x: p.pos_x, pos_y: p.pos_y } }, ws);
-      } catch (e) {
-        console.error('signup', e);
-        send(ws, { type: 'signup_error', message: 'Signup failed' });
-      }
-      return;
-    }
-
-    // --- LOGIN ---
     if (msg.type === 'login') {
-      const { username, password } = msg;
-      if (!username || !password) { send(ws, { type: 'login_error', message: 'Missing fields' }); return; }
+      const user = await getPlayerByUsername(msg.username);
+      if (!user) return send(ws, { type: 'login_error', message: 'User not found' });
+      const ok = await bcrypt.compare(msg.password, user.password);
+      if (!ok) return send(ws, { type: 'login_error', message: 'Invalid password' });
 
-      try {
-        const row = await getPlayerByUsername(username);
-        if (!row) { send(ws, { type: 'login_error', message: 'Invalid credentials' }); return; }
+      // single-session: kick any existing
+      const prev = usernameToWs.get(user.username);
+      if (prev && prev !== ws) {
+        send(prev, { type: 'chat', text: 'Disconnected: logged in from another game instance.' });
+        try { prev.close(); } catch {}
+      }
 
-        // Support hashed or legacy plaintext
-        const stored = row.password || '';
-        let ok = false;
-        if (stored.startsWith('$2')) {
-          try { ok = await bcrypt.compare(password, stored); } catch { ok = false; }
+      playerId = user.id;
+      wsToPlayer.set(ws, playerId);
+      usernameToWs.set(user.username, ws);
+
+      // map by varchar id (e.g., "lev01")
+      const map = loadDsMap(user.map_id || 'lev01', FLOOR_COUNT, ITEM_COUNT);
+
+      const online = await listOnlinePlayers();
+      send(ws, {
+        type: 'login_success',
+        player: user,
+        players: online.filter(p => p.id !== user.id),
+        map
+      });
+      broadcast({ type: 'player_joined', player: { id: user.id, username: user.username, pos_x: user.pos_x, pos_y: user.pos_y } }, ws);
+      return;
+    }
+
+    if (msg.type === 'signup') {
+      const exists = await getPlayerByUsername(msg.username);
+      if (exists) return send(ws, { type: 'signup_error', message: 'Username taken' });
+
+      const user = await createPlayer(msg.username, msg.password);
+      playerId = user.id;
+      wsToPlayer.set(ws, playerId);
+      usernameToWs.set(user.username, ws);
+
+      const map = loadDsMap('lev01', FLOOR_COUNT, ITEM_COUNT);
+      const online = await listOnlinePlayers();
+
+      send(ws, {
+        type: 'signup_success',
+        player: user,
+        players: online.filter(p => p.id !== user.id),
+        map
+      });
+      broadcast({ type: 'player_joined', player: { id: user.id, username: user.username, pos_x: user.pos_x, pos_y: user.pos_y } }, ws);
+      return;
+    }
+
+    if (msg.type === 'move' && playerId) {
+      const p = await getPlayerById(playerId);
+      if (!p) return;
+      // stamina gate (cost 1)
+      if ((p.stamina || 0) <= 0) return; // can't move
+      const nx = p.pos_x + (msg.dx | 0);
+      const ny = p.pos_y + (msg.dy | 0);
+      if (nx < 0 || nx >= MW || ny < 0 || ny >= MH) return;
+
+      const newStam = Math.max(0, (p.stamina || 0) - 1);
+      await updatePositionAndStamina(p.id, nx, ny, newStam);
+      broadcast({ type: 'player_moved', id: p.id, x: nx, y: ny });
+      send(ws, { type: 'vitals', stamina: newStam });
+      return;
+    }
+
+    if (msg.type === 'chat' && playerId) {
+      const p = await getPlayerById(playerId);
+      if (!p) return;
+
+      const text = String(msg.text || '');
+      // basic validations
+      const MAX = 200;
+      if (!text || text.length > MAX) {
+        return send(ws, { type: 'chat', text: '~ The game has rejected your message due to bad language.' });
+      }
+      // very naive SQL-ish filter
+      const bad = /(union\s+select|insert\s+into|drop\s+table|;--|--|\/\*|\*\/)/i.test(text);
+      if (bad) {
+        return send(ws, { type: 'chat', text: '~ The game has rejected your message due to bad language.' });
+      }
+
+      // admin refresh: "-refresh PLAYER"
+      if (/^-refresh\s+\S+/i.test(text)) {
+        if ((p.role || '').toLowerCase() === 'admin') {
+          const targetName = text.trim().split(/\s+/)[1];
+          const tWs = usernameToWs.get(targetName);
+          if (tWs) {
+            const tRow = await getPlayerByUsername(targetName);
+            if (tRow) {
+              const fields = {
+                stamina: tRow.max_stamina,
+                life: tRow.max_life,
+                magic: tRow.max_magic
+              };
+              await updateVitals(tRow.id, fields);
+              send(tWs, { type: 'vitals', ...fields });
+              send(ws, { type: 'chat', text: `~ Refreshed ${targetName}.` });
+            }
+          } else {
+            send(ws, { type: 'chat', text: `~ Player ${targetName} is not online.` });
+          }
         } else {
-          ok = stored === password;
-        }
-        if (!ok) { send(ws, { type: 'login_error', message: 'Invalid credentials' }); return; }
-
-        // Kick previous session (if any)
-        const prev = byUsername.get(username);
-        if (prev && prev !== ws) {
-          try { send(prev, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
-          try { prev.close(); } catch {}
-        }
-
-        const p = sanitizePlayer(row);
-        clients.set(ws, p);
-        byUsername.set(p.username, ws);
-
-        send(ws, { type: 'login_success', player: p, players: onlineList(p.username) });
-        broadcast({ type: 'player_joined', player: { id: p.id, username: p.username, pos_x: p.pos_x, pos_y: p.pos_y } }, ws);
-      } catch (e) {
-        console.error('login', e);
-        send(ws, { type: 'login_error', message: 'Login failed' });
-      }
-      return;
-    }
-
-    // From here on, must be authenticated
-    if (!me) return;
-
-    // --- MOVE ---
-    if (msg.type === 'move') {
-      const dx = Number(msg.dx) || 0;
-      const dy = Number(msg.dy) || 0;
-
-      // stamina gate
-      if ((me.stamina || 0) <= 0) {
-        send(ws, statsPacket(me));
-        return;
-      }
-
-      const { width, height } = getMapDims(me.map_id || 1);
-      const nx = me.pos_x + dx, ny = me.pos_y + dy;
-      if (nx < 0 || ny < 0 || nx >= width || ny >= height) return;
-
-      me.pos_x = nx; me.pos_y = ny;
-      me.stamina = Math.max(0, (me.stamina || 0) - 1);
-
-      // persist pos + stamina
-      try { await updatePlayerFields(me.id, { pos_x: me.pos_x, pos_y: me.pos_y, stamina: me.stamina }); } catch {}
-
-      // echo to mover + others
-      send(ws, { type: 'player_moved', id: me.id, username: me.username, x: me.pos_x, y: me.pos_y });
-      send(ws, statsPacket(me));
-      broadcast({ type: 'player_moved', id: me.id, username: me.username, x: me.pos_x, y: me.pos_y }, ws);
-      return;
-    }
-
-    // --- CHAT ---
-    if (msg.type === 'chat' && typeof msg.text === 'string') {
-      const text = msg.text.trim();
-
-      // admin -refresh PLAYER
-      if (text.toLowerCase().startsWith('-refresh ')) {
-        if ((me.role || '').toLowerCase() !== 'admin') {
           send(ws, { type: 'chat', text: '~ You are not authorized to take that action.' });
-          return;
         }
-        const targetName = text.slice(9).trim();
-        const tWs = byUsername.get(targetName);
-        if (!tWs) { send(ws, { type: 'chat', text: `~ Could not find player "${targetName}" online.` }); return; }
-        const tp = clients.get(tWs);
-        if (!tp) { send(ws, { type: 'chat', text: `~ Could not find player "${targetName}" online.` }); return; }
-
-        tp.stamina = tp.max_stamina;
-        tp.life = tp.max_life;
-        tp.magic = tp.max_magic;
-        try { await updatePlayerFields(tp.id, { stamina: tp.stamina, life: tp.life, magic: tp.magic }); } catch {}
-
-        send(tWs, statsPacket(tp));
-        send(ws, { type: 'chat', text: `~ Refreshed ${tp.username}.` });
         return;
       }
 
-      if (!text || text.length > CHAT_MAX || BAD_RE.test(text)) {
-        send(ws, { type: 'chat', text: '~ The game has rejected your message due to bad language.' });
-        return;
-      }
-
-      broadcast({ type: 'chat', text: `${me.username}: ${text}` });
+      // normal broadcast
+      const out = { type: 'chat', text: `${p.username}: ${text}` };
+      broadcast(out);
+      send(ws, out);
       return;
     }
   });
 
   ws.on('close', async () => {
-    const p = clients.get(ws);
-    if (!p) return;
-    clients.delete(ws);
-    if (byUsername.get(p.username) === ws) byUsername.delete(p.username);
-
-    // persist last-known position/stats (best-effort)
-    try { await updatePlayerFields(p.id, {
-      pos_x: p.pos_x, pos_y: p.pos_y,
-      stamina: p.stamina, life: p.life, magic: p.magic
-    }); } catch {}
-
-    broadcast({ type: 'player_left', id: p.id });
+    if (playerId) {
+      const p = await getPlayerById(playerId).catch(() => null);
+      if (p) broadcast({ type: 'player_left', id: p.id });
+      wsToPlayer.delete(ws);
+      if (p) {
+        const cur = usernameToWs.get(p.username);
+        if (cur === ws) usernameToWs.delete(p.username);
+      }
+    }
   });
 });
 
-// ---- Listen on 0.0.0.0 for Render ----
+// --- Listen ---
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server listening on ${PORT}`);
+});
