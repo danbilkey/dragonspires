@@ -1,262 +1,294 @@
-// server/index.js
-require('dotenv').config();
+// server.js
+// WS game server with: login, movement (costs 1 stamina), regen (stam/life/magic),
+// chat validation, admin "-refresh PLAYER", single-session per username,
+// map bounds checking from map1.json (width/height), stats_update pushes.
+
 const http = require('http');
 const WebSocket = require('ws');
-const { Pool } = require('pg');
-const bcrypt = require('bcrypt');
+const fs = require('fs');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+const PORT = process.env.PORT || 3000;
 
-// ---- Map registry (expand as you add more maps) ----
-const MAPS = {
-  1: { width: 52, height: 100 },
-  // 2: { width: 52, height: 100 }, // etc.
-};
-
-function getMapSize(mapId) {
-  const m = MAPS[mapId] || MAPS[1];
-  return { w: m.width, h: m.height };
+// ---- Load map1 for bounds ----
+let map1 = { width: 52, height: 100 };
+try {
+  const raw = fs.readFileSync('./map1.json', 'utf8');
+  const m = JSON.parse(raw);
+  if (m && m.width && m.height) map1 = m;
+} catch (e) {
+  console.warn('Could not load map1.json, using defaults 52x100.');
 }
 
-// ---- Chat guard / limits (unchanged) ----
-const MAX_CHAT_LEN = 200;
-const sqlLikePattern = /(select|insert|update|delete|drop|alter|truncate|merge|exec|union|;|--|\/\*|\*\/|xp_)/i;
-const looksMalicious = (t) =>
-  !t || typeof t !== 'string' || t.length > MAX_CHAT_LEN || sqlLikePattern.test(t);
+// ---- Very simple "DB" placeholders ----
+// Replace these with your real DB calls.
+const USERS = new Map(); // username -> record
+function ensureUser(username, password) {
+  if (!USERS.has(username)) {
+    USERS.set(username, {
+      username,
+      password,     // DO NOT store plaintext in prod
+      role: 'user', // or 'admin'
+      map_id: 1,
+      pos_x: 26, pos_y: 50,
+      stamina: 100, max_stamina: 100,
+      life: 100,    max_life: 100,
+      magic: 30,    max_magic: 30,
+      gold: 0,
+      weapon: '', armor: '', hands: ''
+    });
+  }
+  return USERS.get(username);
+}
+function authUser(username, password) {
+  const u = USERS.get(username);
+  if (!u) return null;
+  if (u.password !== password) return null;
+  return u;
+}
 
-// ---- HTTP (Render health) ----
-const server = http.createServer((req, res) => {
-  res.writeHead(200, {'Content-Type':'text/plain'});
-  res.end('DragonSpires server is running\n');
-});
-
-// ---- WebSocket ----
+// ---- Connections / sessions ----
+const server = http.createServer();
 const wss = new WebSocket.Server({ server });
 
-const clients = new Map();      // Map<ws, playerData>
-const usernameToWs = new Map(); // Map<username, ws>
+let nextId = 1;
+const clients = new Map();      // ws -> player
+const byId = new Map();         // id -> { ... }
+const byUsername = new Map();   // username -> ws
 
-// ---- DB helpers ----
-async function loadPlayer(username) {
-  const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
-  return r.rows[0];
-}
-async function createPlayer(username, password) {
-  const hashed = await bcrypt.hash(password, 10);
-  const r = await pool.query(
-    `INSERT INTO players (username, password, map_id, pos_x, pos_y)
-     VALUES ($1, $2, 1, 5, 5) RETURNING *`,
-    [username, hashed]
-  );
-  return r.rows[0];
-}
-async function updatePosition(id, x, y) {
-  await pool.query('UPDATE players SET pos_x=$1, pos_y=$2 WHERE id=$3', [x, y, id]);
-}
-async function updateStatsInDb(id, fields) {
-  const sets = [], vals = [];
-  let i = 1;
-  for (const [k, v] of Object.entries(fields)) {
-    sets.push(`${k}=$${i++}`); vals.push(v);
-  }
-  if (!sets.length) return;
-  vals.push(id);
-  await pool.query(`UPDATE players SET ${sets.join(', ')} WHERE id=$${i}`, vals);
-}
-
-// ---- Messaging ----
-const send = (ws, obj) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); };
 function broadcast(obj) {
   const s = JSON.stringify(obj);
-  for (const [ws] of clients) if (ws.readyState === WebSocket.OPEN) ws.send(s);
+  wss.clients.forEach(c => {
+    if (c.readyState === WebSocket.OPEN) c.send(s);
+  });
+}
+function send(ws, obj) {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
-// ---- WebSocket events ----
+function sendStats(ws, p) {
+  send(ws, {
+    type: 'stats_update',
+    stats: {
+      stamina: p.stamina,
+      max_stamina: p.max_stamina,
+      life: p.life,
+      max_life: p.max_life,
+      magic: p.magic,
+      max_magic: p.max_magic,
+      gold: p.gold,
+      weapon: p.weapon,
+      armor: p.armor,
+      hands: p.hands
+    }
+  });
+}
+
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+// very basic "naughty" filter (also blocks obvious SQL words/symbols)
+const CHAT_MAX = 200;
+const BAD_RE = /(--|;|\/\*|\*\/|\b(drop|delete|insert|update|select|union|alter|create|grant)\b)/i;
+
 wss.on('connection', (ws) => {
-  let player = null;
+  ws.on('message', (data) => {
+    let msg = null;
+    try { msg = JSON.parse(data); } catch { return; }
+    const me = clients.get(ws);
 
-  ws.on('message', async (raw) => {
-    let msg; try { msg = JSON.parse(raw); } catch { return; }
-
-    // LOGIN
-    if (msg.type === 'login') {
-      try {
-        const row = await loadPlayer(msg.username);
-        if (!row) return send(ws, { type: 'login_error', message: 'User not found' });
-        const ok = await bcrypt.compare(msg.password, row.password);
-        if (!ok) return send(ws, { type: 'login_error', message: 'Invalid password' });
-
-        const prev = usernameToWs.get(row.username);
-        if (prev && prev !== ws) {
-          try { send(prev, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
-          try { prev.close(); } catch {}
-        }
-
-        player = {
-          id: row.id,
-          username: row.username,
-          map_id: row.map_id || 1,
-          pos_x: row.pos_x, pos_y: row.pos_y,
-          stamina: row.stamina ?? 10, max_stamina: row.max_stamina ?? 10,
-          life: row.life ?? 20, max_life: row.max_life ?? 20,
-          magic: row.magic ?? 0, max_magic: row.max_magic ?? 0,
-          gold: row.gold ?? 0, weapon: row.weapon ?? '', armor: row.armor ?? '', hands: row.hands ?? ''
-        };
-
-        clients.set(ws, player);
-        usernameToWs.set(player.username, ws);
-
-        const others = Array.from(clients.values()).filter(p => p.id !== player.id);
-        const { w, h } = getMapSize(player.map_id);
-
-        send(ws, { type: 'login_success', player, players: others, map: { width: w, height: h, map_id: player.map_id } });
-        broadcast({ type: 'player_joined', player });
-      } catch (e) {
-        console.error('login error', e);
-        send(ws, { type: 'login_error', message: 'Server error' });
-      }
-      return;
-    }
-
-    // SIGNUP
+    // ---- login/signup ----
     if (msg.type === 'signup') {
-      try {
-        const exists = await loadPlayer(msg.username);
-        if (exists) return send(ws, { type: 'signup_error', message: 'Username taken' });
-
-        const row = await createPlayer(msg.username, msg.password);
-
-        const prev = usernameToWs.get(row.username);
-        if (prev && prev !== ws) {
-          try { send(prev, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
-          try { prev.close(); } catch {}
-        }
-
-        player = {
-          id: row.id,
-          username: row.username,
-          map_id: row.map_id || 1,
-          pos_x: row.pos_x, pos_y: row.pos_y,
-          stamina: row.stamina ?? 10, max_stamina: row.max_stamina ?? 10,
-          life: row.life ?? 20, max_life: row.max_life ?? 20,
-          magic: row.magic ?? 0, max_magic: row.max_magic ?? 0,
-          gold: row.gold ?? 0, weapon: row.weapon ?? '', armor: row.armor ?? '', hands: row.hands ?? ''
-        };
-
-        clients.set(ws, player);
-        usernameToWs.set(player.username, ws);
-
-        const others = Array.from(clients.values()).filter(p => p.id !== player.id);
-        const { w, h } = getMapSize(player.map_id);
-
-        send(ws, { type: 'signup_success', player, players: others, map: { width: w, height: h, map_id: player.map_id } });
-        broadcast({ type: 'player_joined', player });
-      } catch (e) {
-        console.error('signup error', e);
-        send(ws, { type: 'signup_error', message: 'Server error' });
+      if (!msg.username || !msg.password) return;
+      const u = ensureUser(msg.username, msg.password);
+      // force logout any existing session with same user
+      const old = byUsername.get(u.username);
+      if (old && old !== ws) {
+        const oldP = clients.get(old);
+        try { send(old, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
+        try { old.close(); } catch {}
       }
+
+      const id = nextId++;
+      const p = {
+        id,
+        username: u.username,
+        role: u.role || 'user',
+        map_id: u.map_id || 1,
+        pos_x: u.pos_x || 26, pos_y: u.pos_y || 50,
+        stamina: u.stamina, max_stamina: u.max_stamina,
+        life: u.life,       max_life: u.max_life,
+        magic: u.magic,     max_magic: u.max_magic,
+        gold: u.gold,
+        weapon: u.weapon, armor: u.armor, hands: u.hands
+      };
+
+      clients.set(ws, p);
+      byId.set(p.id, p);
+      byUsername.set(p.username, ws);
+
+      send(ws, { type: 'signup_success', player: p });
+      // announce to others
+      wss.clients.forEach(c => {
+        if (c !== ws && c.readyState === WebSocket.OPEN) {
+          c.send(JSON.stringify({ type: 'player_joined', player: { id: p.id, username: p.username, pos_x: p.pos_x, pos_y: p.pos_y } }));
+        }
+      });
       return;
     }
 
-    // MOVE
-    if (msg.type === 'move') {
-      if (!player) return;
+    if (msg.type === 'login') {
+      if (!msg.username || !msg.password) return;
+      const u = authUser(msg.username, msg.password);
+      if (!u) { send(ws, { type: 'login_error', message: 'Invalid credentials' }); return; }
 
-      if ((player.stamina ?? 0) <= 0) {
-        send(ws, { type: 'stats_update', id: player.id, stamina: player.stamina });
+      // prevent multi-session: kick old
+      const old = byUsername.get(u.username);
+      if (old && old !== ws) {
+        const oldP = clients.get(old);
+        try { send(old, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
+        try { old.close(); } catch {}
+      }
+
+      const id = nextId++;
+      const p = {
+        id,
+        username: u.username,
+        role: u.role || 'user',
+        map_id: u.map_id || 1,
+        pos_x: u.pos_x || 26, pos_y: u.pos_y || 50,
+        stamina: u.stamina, max_stamina: u.max_stamina,
+        life: u.life,       max_life: u.max_life,
+        magic: u.magic,     max_magic: u.max_magic,
+        gold: u.gold,
+        weapon: u.weapon, armor: u.armor, hands: u.hands
+      };
+
+      clients.set(ws, p);
+      byId.set(p.id, p);
+      byUsername.set(p.username, ws);
+
+      send(ws, { type: 'login_success', player: p });
+
+      // tell others this player joined
+      wss.clients.forEach(c => {
+        if (c !== ws && c.readyState === WebSocket.OPEN) {
+          c.send(JSON.stringify({ type: 'player_joined', player: { id: p.id, username: p.username, pos_x: p.pos_x, pos_y: p.pos_y } }));
+        }
+      });
+      return;
+    }
+
+    // everything below requires being logged in
+    if (!me) return;
+
+    if (msg.type === 'move') {
+      const dx = Number(msg.dx) || 0;
+      const dy = Number(msg.dy) || 0;
+
+      // stamina gate (cost 1)
+      if ((me.stamina || 0) <= 0) {
+        send(ws, { type: 'stats_update', stats: { stamina: me.stamina, max_stamina: me.max_stamina } });
         return;
       }
 
-      const dx = Number(msg.dx) || 0;
-      const dy = Number(msg.dy) || 0;
-      const nx = player.pos_x + dx;
-      const ny = player.pos_y + dy;
-      const { w, h } = getMapSize(player.map_id);
+      const nx = me.pos_x + dx;
+      const ny = me.pos_y + dy;
 
-      if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-        // stamina cost 1 per move
-        player.stamina = Math.max(0, (player.stamina ?? 0) - 1);
-        player.pos_x = nx; player.pos_y = ny;
+      const w = map1.width || 52;
+      const h = map1.height || 100;
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) return;
 
-        Promise.allSettled([
-          updateStatsInDb(player.id, { stamina: player.stamina }),
-          updatePosition(player.id, nx, ny)
-        ]).catch(() => {});
+      me.pos_x = nx; me.pos_y = ny;
+      me.stamina = Math.max(0, me.stamina - 1);
 
-        broadcast({ type: 'player_moved', id: player.id, x: nx, y: ny });
-        send(ws, { type: 'stats_update', id: player.id, stamina: player.stamina });
-      }
+      // echo to mover (pos + stamina), and broadcast movement
+      send(ws, { type: 'player_moved', id: me.id, username: me.username, x: me.pos_x, y: me.pos_y });
+      sendStats(ws, me);
+
+      wss.clients.forEach(c => {
+        if (c !== ws && c.readyState === WebSocket.OPEN) {
+          c.send(JSON.stringify({ type: 'player_moved', id: me.id, username: me.username, x: me.pos_x, y: me.pos_y }));
+        }
+      });
       return;
     }
 
-    // CHAT
     if (msg.type === 'chat') {
-      if (!player || typeof msg.text !== 'string') return;
-      const t = msg.text.trim();
-      if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
-      broadcast({ type: 'chat', text: `${player.username}: ${t}` });
+      if (typeof msg.text !== 'string') return;
+      const raw = msg.text.trim();
+
+      // admin -refresh PLAYER
+      if (raw.toLowerCase().startsWith('-refresh ')) {
+        if ((me.role || '').toLowerCase() !== 'admin') {
+          send(ws, { type: 'chat', text: '~ You are not authorized to take that action.' });
+          return;
+        }
+        const targetName = raw.slice(9).trim();
+        const tWs = byUsername.get(targetName);
+        if (!tWs) { send(ws, { type: 'chat', text: `~ Could not find player "${targetName}" online.` }); return; }
+        const tp = clients.get(tWs);
+        if (!tp) { send(ws, { type: 'chat', text: `~ Could not find player "${targetName}" online.` }); return; }
+
+        tp.stamina = tp.max_stamina;
+        tp.life    = tp.max_life;
+        tp.magic   = tp.max_magic;
+
+        sendStats(tWs, tp);
+        send(ws, { type: 'chat', text: `~ Refreshed ${tp.username}.` });
+        return;
+      }
+
+      // normal chat validation
+      if (raw.length === 0 || raw.length > CHAT_MAX || BAD_RE.test(raw)) {
+        send(ws, { type: 'chat', text: '~ The game has rejected your message due to bad language.' });
+        return;
+      }
+
+      // broadcast in "Player: msg" format
+      const out = `${me.username}: ${raw}`;
+      broadcast({ type: 'chat', text: out });
       return;
     }
   });
 
   ws.on('close', () => {
-    if (player) {
-      clients.delete(ws);
-      usernameToWs.delete(player.username);
-      broadcast({ type: 'player_left', id: player.id });
-    }
+    const p = clients.get(ws);
+    if (!p) return;
+    clients.delete(ws);
+    byId.delete(p.id);
+    const curr = byUsername.get(p.username);
+    if (curr === ws) byUsername.delete(p.username);
+    broadcast({ type: 'player_left', id: p.id });
   });
-
-  ws.on('error', (e) => console.warn('WS error', e));
 });
 
-// ---- Regeneration loops (unchanged) ----
-const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
-setInterval(async () => {
-  const ups = [];
-  for (const [ws, p] of clients) {
-    const inc = Math.floor((p.max_stamina ?? 0) * 0.10);
-    const next = clamp((p.stamina ?? 0) + inc, 0, p.max_stamina ?? 0);
-    if (next !== p.stamina) {
-      p.stamina = next;
-      ups.push({ id: p.id, stamina: p.stamina });
-      send(ws, { type: 'stats_update', id: p.id, stamina: p.stamina });
-    }
-  }
-  for (const u of ups) try { await updateStatsInDb(u.id, { stamina: u.stamina }); } catch {}
+// ---- REGEN TIMERS ----
+setInterval(() => {
+  // stamina +10% max every 3s (min +1)
+  clients.forEach((p, ws) => {
+    const inc = Math.max(1, Math.floor((p.max_stamina || 0) * 0.10));
+    const before = p.stamina || 0;
+    p.stamina = clamp(before + inc, 0, p.max_stamina || before);
+    if (p.stamina !== before) sendStats(ws, p);
+  });
 }, 3000);
 
-setInterval(async () => {
-  const ups = [];
-  for (const [ws, p] of clients) {
-    const inc = Math.max(1, Math.floor((p.max_life ?? 0) * 0.05));
-    const next = clamp((p.life ?? 0) + inc, 0, p.max_life ?? 0);
-    if (next !== p.life) {
-      p.life = next;
-      ups.push({ id: p.id, life: p.life });
-      send(ws, { type: 'stats_update', id: p.id, life: p.life });
-    }
-  }
-  for (const u of ups) try { await updateStatsInDb(u.id, { life: u.life }); } catch {}
+setInterval(() => {
+  // life +5% max every 5s (min +1)
+  clients.forEach((p, ws) => {
+    const inc = Math.max(1, Math.floor((p.max_life || 0) * 0.05));
+    const before = p.life || 0;
+    p.life = clamp(before + inc, 0, p.max_life || before);
+    if (p.life !== before) sendStats(ws, p);
+  });
 }, 5000);
 
-setInterval(async () => {
-  const ups = [];
-  for (const [ws, p] of clients) {
-    const next = clamp((p.magic ?? 0) + 5, 0, p.max_magic ?? 0);
-    if (next !== p.magic) {
-      p.magic = next;
-      ups.push({ id: p.id, magic: p.magic });
-      send(ws, { type: 'stats_update', id: p.id, magic: p.magic });
-    }
-  }
-  for (const u of ups) try { await updateStatsInDb(u.id, { magic: u.magic }); } catch {}
+setInterval(() => {
+  // magic +5 every 30s
+  clients.forEach((p, ws) => {
+    const before = p.magic || 0;
+    p.magic = clamp(before + 5, 0, p.max_magic || before);
+    if (p.magic !== before) sendStats(ws, p);
+  });
 }, 30000);
 
-// ---- Start ----
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
+server.listen(PORT, () => console.log('WS server on', PORT));
