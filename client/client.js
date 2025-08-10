@@ -15,6 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Logical diamond for positioning
   const TILE_W = 64, TILE_H = 32;
 
+  const ITEM_Y_NUDGE = 4; // lift items slightly so they don’t sit too low
+
   // Screen anchor for local tile
   const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
 
@@ -476,7 +478,7 @@ function drawItemAtTile(screenX, screenY, itemIndex) {
   // Each item sprite is bottom-right–justified inside its own canvas.
   // So place the sprite's bottom-right at the tile bottom-center.
   const dx = tileBottomCenterX - spr.width;
-  const dy = tileBottomCenterY - spr.height;
+  const dy = tileBottomCenterY - spr.height - ITEM_Y_NUDGE;
 
   ctx.drawImage(spr, dx, dy);
 }
@@ -633,15 +635,23 @@ function drawItemAtTile(screenX, screenY, itemIndex) {
           const t = (mapSpec.tiles && mapSpec.tiles[y] && typeof mapSpec.tiles[y][x] !== 'undefined') ? mapSpec.tiles[y][x] : 0;
           const { screenX, screenY } = isoScreen(x, y);
           drawTile(screenX, screenY, t);
-          // Draw item at this tile (1-based item index; 0 means none)
-          const it = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined')
-            ? mapSpec.items[y][x]
-            : 0;
-          if (it > 0) drawItemAtTile(screenX, screenY, it);
 
         }
       }
     }
+
+  // Second pass: draw items after the entire floor is rendered
+  if (tilesReady && mapReady && mapSpec.items && mapSpec.items.length) {
+    for (let y = 0; y < mapSpec.height; y++) {
+      for (let x = 0; x < mapSpec.width; x++) {
+        const it = (mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') ? mapSpec.items[y][x] : 0;
+        if (it > 0) {
+          const { screenX, screenY } = isoScreen(x, y);
+          drawItemAtTile(screenX, screenY, it);
+        }
+      }
+    }
+  }
 
     // Players
     const all = Object.values(otherPlayers).concat(localPlayer ? [localPlayer] : []);
