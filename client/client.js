@@ -1,64 +1,67 @@
 // client.js
+// Updated client: isometric rendering, GUI login on canvas, chat box, sprite offsets,
+// "Connected - press any key to continue" flow, PLAYER_OFFSET_X = -32.
+
 document.addEventListener('DOMContentLoaded', () => {
-  // Config
+  // ---------- CONFIG ----------
   const PROD_WS = "wss://dragonspires.onrender.com";
   const DEV_WS = "ws://localhost:3000";
   const WS_URL = location.hostname.includes('localhost') ? DEV_WS : PROD_WS;
 
   const canvas = document.getElementById('gameCanvas');
-  if (!canvas) { console.error("Missing canvas element with id 'gameCanvas'"); return; }
+  if (!canvas) { console.error('Missing <canvas id="gameCanvas">'); return; }
   const ctx = canvas.getContext('2d');
 
-  // Canvas size
-  canvas.width = 640;
-  canvas.height = 480;
+  const CANVAS_W = 640, CANVAS_H = 480;
+  canvas.width = CANVAS_W; canvas.height = CANVAS_H;
 
-  // Tile sizes (isometric)
-  const TILE_W = 64;
-  const TILE_H = 32;
+  const TILE_W = 64, TILE_H = 32;
+  const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
+  const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16; // requested offsets
 
-  // Player fixed screen pos
-  const PLAYER_SCREEN_X = 430;
-  const PLAYER_SCREEN_Y = 142;
-  const PLAYER_OFFSET_X = -32; // shift all players left by 16 pixels
-  const PLAYER_OFFSET_Y = -16; // shift all players up by 16 pixels
-
-  // Map defaults; will load map.json
-  let mapSpec = { width: 10, height: 10, tiles: [] };
-
-  // GUI layout (moved +50,+50 earlier)
+  // GUI placement (moved +50,+50 earlier)
   const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
   const GUI = {
     username: { x: 260 + GUI_OFFSET_X, y: 34 + GUI_OFFSET_Y, w: 240, h: 18 },
     password: { x: 260 + GUI_OFFSET_X, y: 58 + GUI_OFFSET_Y, w: 240, h: 18 },
-    loginBtn: { x: 260 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }, // below boxes
-    signupBtn: { x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 } // beside login
+    loginBtn: { x: 260 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 },
+    signupBtn: { x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
   };
 
-  // Chat box coords: between 156,89 and 618,407
-  const CHAT = { x1: 156, y1: 89, x2: 618, y2: 407, padding: 8 };
+  // Chat box region
+  const CHAT = { x1: 156, y1: 89, x2: 618, y2: 407, pad: 8 };
 
-  // State
+  // ---------- STATE ----------
   let ws = null;
-  let connected = false;
+  let connected = false;     // websocket open
+  let connectionPaused = false; // after ws open, waiting for user key/click to proceed
+  let shownContinuePrompt = false; // whether we've switched to "Connected - press any key..."
+  let showLoginGUI = false;  // set true after user pressed key/click to continue
   let loggedIn = false;
-  let localPlayer = null;   // {id, username, pos_x, pos_y}
-  let otherPlayers = {};    // id -> player
+
+  let mapSpec = { width: 10, height: 10, tiles: [] }; // replaced by map.json if available
+
   let usernameStr = "";
   let passwordStr = "";
   let activeField = null; // 'username'|'password'|null
-  let messages = []; // chat messages array of strings
+
+  let localPlayer = null; // {id, username, pos_x, pos_y}
+  let otherPlayers = {};  // id -> player obj
+
+  let messages = []; // chat messages; new appended to end -> draw bottom-up
 
   // Assets
-  const imgTitle = new Image(); imgTitle.src = "/assets/title.GIF";
-  const imgBorder = new Image(); imgBorder.src = "/assets/game_border_2025.gif";
-  const imgPlayerSrc = new Image(); imgPlayerSrc.src = "/assets/player.gif";
+  const imgTitle = new Image();
+  imgTitle.src = "/assets/title.GIF";
+  const imgBorder = new Image();
+  imgBorder.src = "/assets/game_border_2025.gif";
+  const imgPlayerSrc = new Image();
+  imgPlayerSrc.src = "/assets/player.gif";
 
-  let playerSprite = null; // Image of cropped sprite
-  // process sprite when loaded
+  let playerSprite = null;
   imgPlayerSrc.onload = () => {
+    // try to crop and alpha out black; fallback to full image if CORS blocks
     try {
-      // crop area 264,1 -> 308,56 (44x55)
       const sx = 264, sy = 1, sw = 44, sh = 55;
       const off = document.createElement('canvas');
       off.width = sw; off.height = sh;
@@ -66,57 +69,68 @@ document.addEventListener('DOMContentLoaded', () => {
       octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
       const data = octx.getImageData(0,0,sw,sh);
       for (let i = 0; i < data.data.length; i += 4) {
-        if (data.data[i] < 16 && data.data[i+1] < 16 && data.data[i+2] < 16) {
-          data.data[i+3] = 0;
-        }
+        if (data.data[i] < 16 && data.data[i+1] < 16 && data.data[i+2] < 16) data.data[i+3] = 0;
       }
       octx.putImageData(data, 0, 0);
       const img = new Image();
       img.src = off.toDataURL();
       playerSprite = img;
     } catch (e) {
-      // CORS or error — fallback to using source image (draw part of it)
-      console.warn("Sprite processing failed (CORS?). Using source GIF as fallback.");
-      playerSprite = imgPlayerSrc; // may draw entire gif; alignment uses crop offset below
+      console.warn("Could not process player.gif in browser (CORS?). Using source image as fallback.");
+      playerSprite = imgPlayerSrc;
     }
   };
 
-  // WebSocket connect
-  function connect() {
+  // ---------- MAP LOAD ----------
+  fetch('map.json').then(r => r.json()).then(m => {
+    if (m && m.width && m.height && Array.isArray(m.tiles)) mapSpec = m;
+  }).catch(err => {
+    console.warn("Could not load map.json; using fallback 10x10", err);
+  });
+
+  // ---------- WEBSOCKET ----------
+  function connectToServer() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     ws = new WebSocket(WS_URL);
 
-    ws.onopen = () => { connected = true; console.log("WS connected"); };
+    ws.onopen = () => {
+      connected = true;
+      // after open show "Connected - press any key..." state, wait for user to continue
+      connectionPaused = true;
+      shownContinuePrompt = true;
+      showLoginGUI = false;
+    };
     ws.onmessage = (ev) => {
       const data = safeParse(ev.data);
       if (!data) return;
       handleServerMessage(data);
     };
-    ws.onerror = (e) => { console.error("WS error", e); };
-    ws.onclose = () => { connected = false; console.log("WS closed"); };
+    ws.onerror = (e) => console.error("WS error", e);
+    ws.onclose = () => {
+      connected = false;
+      // if connection lost, force back to initial state
+      connectionPaused = false;
+      shownContinuePrompt = false;
+      showLoginGUI = false;
+      loggedIn = false;
+      localPlayer = null;
+      otherPlayers = {};
+    };
   }
-  connect(); // try to connect early so connecting message shows during cold-start
-
-  function send(msg) {
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-    else console.warn("WS not open - not sending", msg);
-  }
+  connectToServer();
 
   function safeParse(s) { try { return JSON.parse(s); } catch(e) { return null; } }
+  function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
 
-  // Server messages handling
   function handleServerMessage(msg) {
     switch (msg.type) {
       case 'login_success':
       case 'signup_success':
         loggedIn = true;
         localPlayer = msg.player;
-        // Rebuild otherPlayers from server-provided list (server only sends logged-in players)
         otherPlayers = {};
         if (Array.isArray(msg.players)) {
-          msg.players.forEach(p => {
-            if (!localPlayer || p.id !== localPlayer.id) otherPlayers[p.id] = p;
-          });
+          msg.players.forEach(p => { if (!localPlayer || p.id !== localPlayer.id) otherPlayers[p.id] = p; });
         }
         break;
       case 'player_joined':
@@ -134,250 +148,246 @@ document.addEventListener('DOMContentLoaded', () => {
         delete otherPlayers[msg.id];
         break;
       case 'chat':
-        if (typeof msg.text === 'string') pushChatMessage(msg.text);
+        if (typeof msg.text === 'string') {
+          messages.push(msg.text);
+          if (messages.length > 200) messages.shift();
+        }
         break;
       case 'login_error':
       case 'signup_error':
-        pushChatMessage(msg.message || 'Auth error');
+        messages.push(msg.message || 'Auth error');
+        if (messages.length > 200) messages.shift();
         break;
       default:
-        console.log("Unknown server message:", msg);
+        break;
     }
   }
 
-  // Chat handling: push message to array, keep max messages, show at bottom of box
-  function pushChatMessage(text) {
-    const line = String(text);
-    messages.push(line);
-    // Keep recent 200 messages limit
-    if (messages.length > 200) messages.shift();
-  }
+  // ---------- INPUT ----------
+  // proceed after connected: any key or any click
+  window.addEventListener('keydown', (e) => {
+    if (connected && connectionPaused) {
+      // proceed to show login GUI
+      connectionPaused = false;
+      showLoginGUI = true;
+      return;
+    }
 
-  // Input handlers for canvas-based GUI
-  function startInputHandlers() {
-    canvas.addEventListener('mousedown', (e) => {
-      const r = canvas.getBoundingClientRect();
-      const mx = e.clientX - r.left;
-      const my = e.clientY - r.top;
-
-      if (!connected) { connect(); return; }
-
-      if (!loggedIn) {
-        // username box
-        const u = GUI.username;
-        if (mx >= u.x && mx <= u.x + u.w && my >= u.y - 14 && my <= u.y + u.h) { activeField = 'username'; return; }
-        const p = GUI.password;
-        if (mx >= p.x && mx <= p.x + p.w && my >= p.y - 14 && my <= p.y + p.h) { activeField = 'password'; return; }
-        // login button
-        const lb = GUI.loginBtn;
-        if (mx >= lb.x && mx <= lb.x + lb.w && my >= lb.y && my <= lb.y + lb.h) {
-          send({ type: 'login', username: usernameStr, password: passwordStr });
-          return;
-        }
-        const sb = GUI.signupBtn;
-        if (mx >= sb.x && mx <= sb.x + sb.w && my >= sb.y && my <= sb.y + sb.h) {
-          send({ type: 'signup', username: usernameStr, password: passwordStr });
-          return;
-        }
-        activeField = null;
-      }
-    });
-
-    window.addEventListener('keydown', (e) => {
-      if (!connected) return;
-      if (!loggedIn && activeField) {
-        if (e.key === 'Backspace') {
-          if (activeField === 'username') usernameStr = usernameStr.slice(0, -1);
-          else passwordStr = passwordStr.slice(0, -1);
-          e.preventDefault();
-          return;
-        } else if (e.key === 'Enter') {
-          send({ type: 'login', username: usernameStr, password: passwordStr });
-          e.preventDefault();
-          return;
-        } else if (e.key.length === 1) {
-          if (activeField === 'username') usernameStr += e.key;
-          else passwordStr += e.key;
+    // If logged in, movement keys
+    if (loggedIn && localPlayer) {
+      const k = e.key.toLowerCase();
+      let dx = 0, dy = 0;
+      if (k === 'arrowup' || k === 'w') dy = -1;
+      else if (k === 'arrowdown' || k === 's') dy = 1;
+      else if (k === 'arrowleft' || k === 'a') dx = -1;
+      else if (k === 'arrowright' || k === 'd') dx = 1;
+      if (dx !== 0 || dy !== 0) {
+        const nx = localPlayer.pos_x + dx;
+        const ny = localPlayer.pos_y + dy;
+        if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
+          // optimistic update
+          localPlayer.pos_x = nx; localPlayer.pos_y = ny;
+          send({ type: 'move', dx, dy });
         }
       }
+    }
 
-      // movement keys post-login
-      if (loggedIn && localPlayer) {
-        const k = e.key.toLowerCase();
-        let dx = 0, dy = 0;
-        if (k === 'arrowup' || k === 'w') dy = -1;
-        else if (k === 'arrowdown' || k === 's') dy = 1;
-        else if (k === 'arrowleft' || k === 'a') dx = -1;
-        else if (k === 'arrowright' || k === 'd') dx = 1;
-        if (dx !== 0 || dy !== 0) {
-          const nx = localPlayer.pos_x + dx;
-          const ny = localPlayer.pos_y + dy;
-          if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
-            // optimistic
-            localPlayer.pos_x = nx; localPlayer.pos_y = ny;
-            send({ type: 'move', dx, dy });
-          }
-        }
+    // GUI typing
+    if (!loggedIn && showLoginGUI && activeField) {
+      if (e.key === 'Backspace') {
+        if (activeField === 'username') usernameStr = usernameStr.slice(0, -1);
+        else passwordStr = passwordStr.slice(0, -1);
+        e.preventDefault();
+      } else if (e.key === 'Enter') {
+        send({ type: 'login', username: usernameStr, password: passwordStr });
+        e.preventDefault();
+      } else if (e.key.length === 1) {
+        if (activeField === 'username') usernameStr += e.key;
+        else passwordStr += e.key;
       }
-    });
-  }
+    }
+  });
 
-  // Iso helpers: convert tile coords to screen coordinates centered on localPlayer at PLAYER_SCREEN_X/Y
-  function isoBase(x, y) {
-    return { x: (x - y) * (TILE_W / 2), y: (x + y) * (TILE_H / 2) };
-  }
+  canvas.addEventListener('mousedown', (e) => {
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+
+    // If connected and paused, clicking proceeds to login GUI
+    if (connected && connectionPaused) {
+      connectionPaused = false;
+      showLoginGUI = true;
+      return;
+    }
+
+    // GUI interactions
+    if (connected && showLoginGUI && !loggedIn) {
+      const u = GUI.username;
+      const p = GUI.password;
+      const lb = GUI.loginBtn;
+      const sb = GUI.signupBtn;
+      if (mx >= u.x && mx <= u.x + u.w && my >= u.y - 14 && my <= u.y + u.h) {
+        activeField = 'username'; return;
+      } else if (mx >= p.x && mx <= p.x + p.w && my >= p.y - 14 && my <= p.y + p.h) {
+        activeField = 'password'; return;
+      } else if (mx >= lb.x && mx <= lb.x + lb.w && my >= lb.y && my <= lb.y + lb.h) {
+        send({ type: 'login', username: usernameStr, password: passwordStr }); return;
+      } else if (mx >= sb.x && mx <= sb.x + sb.w && my >= sb.y && my <= sb.y + sb.h) {
+        send({ type: 'signup', username: usernameStr, password: passwordStr }); return;
+      }
+      activeField = null;
+    }
+  });
+
+  // ---------- RENDER HELPERS ----------
+  function isoBase(x, y) { return { x: (x - y) * (TILE_W/2), y: (x + y) * (TILE_H/2) }; }
   function isoScreen(x, y) {
-    const centerX = PLAYER_SCREEN_X;
-    const centerY = PLAYER_SCREEN_Y;
     const base = isoBase(x, y);
     const camBase = localPlayer ? isoBase(localPlayer.pos_x, localPlayer.pos_y) : isoBase(Math.floor(mapSpec.width/2), Math.floor(mapSpec.height/2));
-    const screenX = centerX - TILE_W/2 + (base.x - camBase.x);
-    const screenY = centerY - TILE_H/2 + (base.y - camBase.y);
+    const screenX = PLAYER_SCREEN_X - TILE_W/2 + (base.x - camBase.x);
+    const screenY = PLAYER_SCREEN_Y - TILE_H/2 + (base.y - camBase.y);
     return { screenX, screenY };
   }
 
-  // Draw tile diamond
-  function drawTile(screenX, screenY, t) {
+  function drawTile(sx, sy, t) {
     ctx.beginPath();
-    ctx.moveTo(screenX, screenY + TILE_H/2);
-    ctx.lineTo(screenX + TILE_W/2, screenY);
-    ctx.lineTo(screenX + TILE_W, screenY + TILE_H/2);
-    ctx.lineTo(screenX + TILE_W/2, screenY + TILE_H);
+    ctx.moveTo(sx, sy + TILE_H/2);
+    ctx.lineTo(sx + TILE_W/2, sy);
+    ctx.lineTo(sx + TILE_W, sy + TILE_H/2);
+    ctx.lineTo(sx + TILE_W/2, sy + TILE_H);
     ctx.closePath();
-    ctx.fillStyle = t === 1 ? "#C68642" : "#8DBF63";
+    ctx.fillStyle = t === 1 ? '#C68642' : '#8DBF63';
     ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
     ctx.stroke();
   }
 
-  // Draw player with natural sprite dimensions and offset (-16,-16)
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
     const drawX = screenX + PLAYER_OFFSET_X;
     const drawY = screenY + PLAYER_OFFSET_Y;
     if (playerSprite && playerSprite.complete) {
-      // draw at natural dimensions
+      // use natural image size
       const w = playerSprite.naturalWidth || playerSprite.width;
       const h = playerSprite.naturalHeight || playerSprite.height;
-      // Draw with top-left anchored using offsets
       ctx.drawImage(playerSprite, drawX, drawY, w, h);
     } else {
-      // fallback: small rectangle centered on tile
-      ctx.fillStyle = isLocal ? "#1E90FF" : "#FF6347";
-      ctx.fillRect(drawX + 8, drawY + 8, TILE_W/2, TILE_H/2);
+      ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
+      ctx.beginPath();
+      ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
+      ctx.fill();
     }
-    // Name tag above head
-    const cx = drawX + (playerSprite && playerSprite.naturalWidth ? (playerSprite.naturalWidth/2) : (TILE_W/2));
+    // name tag
+    const cx = drawX + ((playerSprite && playerSprite.naturalWidth) ? (playerSprite.naturalWidth/2) : TILE_W/2);
     const cy = drawY - 6;
-    ctx.font = "12px sans-serif";
-    ctx.textAlign = "center";
-    ctx.lineWidth = 3; ctx.strokeStyle = "black"; ctx.strokeText(p.username || `#${p.id}`, cx, cy);
-    ctx.fillStyle = "white"; ctx.fillText(p.username || `#${p.id}`, cx, cy);
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, cx, cy);
+    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, cx, cy);
     ctx.lineWidth = 1;
   }
 
-  // Chat rendering: draw background, then last messages bottom-up
   function drawChatBox() {
-    const { x1, y1, x2, y2, padding } = CHAT;
-    const width = x2 - x1;
-    const height = y2 - y1;
-    // background
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.fillRect(x1, y1, width, height);
-    // border
-    ctx.strokeStyle = "#666";
-    ctx.strokeRect(x1, y1, width, height);
+    const { x1,y1,x2,y2,pad } = CHAT;
+    const w = x2 - x1, h = y2 - y1;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(x1, y1, w, h);
+    ctx.strokeStyle = '#666'; ctx.strokeRect(x1, y1, w, h);
 
-    // text area: render messages from bottom up
-    ctx.font = "12px monospace";
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#fff";
-    const lineHeight = 16;
-    let y = y2 - padding; // start bottom
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'left';
+    const lineH = 16;
+    let y = y2 - pad;
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      // wrap long lines simply by clipping (can be improved)
-      const words = msg.split(' ');
-      let line = "";
-      // attempt to fit as many words per line as width allows
-      for (let w = 0; w < words.length; w++) {
-        const test = line.length ? (line + " " + words[w]) : words[w];
-        // measure width
-        if (ctx.measureText(test).width > width - padding*2) {
-          // render current line and move up
-          ctx.fillText(line, x1 + padding, y);
-          y -= lineHeight;
-          line = words[w];
-        } else {
-          line = test;
+      // simple wrapping: if line too long, clip
+      const text = msg;
+      const measured = ctx.measureText(text).width;
+      if (measured <= w - pad*2) {
+        ctx.fillText(text, x1 + pad, y);
+        y -= lineH;
+      } else {
+        // naive wrap: split into chunks of characters
+        let chunk = text;
+        while (chunk.length > 0 && y >= y1 + pad) {
+          let fit = chunk;
+          // shorten until fits
+          while (ctx.measureText(fit).width > w - pad*2 && fit.length > 1) fit = fit.slice(0, -1);
+          ctx.fillText(fit, x1 + pad, y);
+          y -= lineH;
+          chunk = chunk.slice(fit.length);
         }
       }
-      // render remaining
-      if (line) {
-        ctx.fillText(line, x1 + padding, y);
-        y -= lineHeight;
-      }
-      // stop when out of box
-      if (y < y1 + padding) break;
+      if (y < y1 + pad) break;
     }
   }
 
-  // Draw login GUI with black text and black borders, buttons under boxes
-  function drawLoginGUI() {
-    // draw border image background if available
-    if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, canvas.width, canvas.height);
-    else { ctx.fillStyle = "#123"; ctx.fillRect(0,0,canvas.width,canvas.height); }
+  // ---------- DRAW SCENES ----------
+  function drawConnecting() {
+    if (imgTitle && imgTitle.complete) ctx.drawImage(imgTitle, 0, 0, CANVAS_W, CANVAS_H);
+    else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
+    ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
+    if (connectionPaused) ctx.fillText('Connected - press any key to continue', 47, 347);
+    else ctx.fillText('Connecting to server...', 47, 347);
+  }
 
-    // Labels - black
-    ctx.fillStyle = "#000";
-    ctx.font = "14px sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText("Username:", GUI.username.x - 70, GUI.username.y + 4);
-    ctx.fillText("Password:", GUI.password.x - 70, GUI.password.y + 4);
+  function drawLogin() {
+    // border image background
+    if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
+    else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
 
-    // username box (white bg, black border, black typed text)
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(GUI.username.x, GUI.username.y - 14, GUI.username.w, GUI.username.h);
-    ctx.strokeStyle = "#000";
-    ctx.strokeRect(GUI.username.x, GUI.username.y - 14, GUI.username.w, GUI.username.h);
-    ctx.fillStyle = "#000";
-    ctx.font = "12px sans-serif";
-    ctx.fillText(usernameStr || "", GUI.username.x + 4, GUI.username.y + 2);
+    // labels black
+    ctx.fillStyle = '#000'; ctx.font = '14px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('Username:', GUI.username.x - 70, GUI.username.y + 4);
+    ctx.fillText('Password:', GUI.password.x - 70, GUI.password.y + 4);
 
-    // password box
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(GUI.password.x, GUI.password.y - 14, GUI.password.w, GUI.password.h);
-    ctx.strokeStyle = "#000";
-    ctx.strokeRect(GUI.password.x, GUI.password.y - 14, GUI.password.w, GUI.password.h);
-    ctx.fillStyle = "#000";
-    ctx.fillText("*".repeat(passwordStr.length), GUI.password.x + 4, GUI.password.y + 2);
+    // username field: highlight if active
+    if (activeField === 'username') {
+      ctx.fillStyle = 'rgb(153,213,255)';
+      ctx.fillRect(GUI.username.x, GUI.username.y - 14, GUI.username.w, GUI.username.h);
+    } else {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(GUI.username.x, GUI.username.y - 14, GUI.username.w, GUI.username.h);
+    }
+    // border black
+    ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.username.x, GUI.username.y - 14, GUI.username.w, GUI.username.h);
+    // typed text black
+    ctx.fillStyle = '#000'; ctx.font = '12px sans-serif';
+    ctx.fillText(usernameStr || '', GUI.username.x + 4, GUI.username.y + 2);
 
-    // Buttons below text boxes (visible)
-    ctx.fillStyle = "#ddd"; ctx.strokeStyle = "#000";
+    // password field
+    if (activeField === 'password') {
+      ctx.fillStyle = 'rgb(153,213,255)';
+      ctx.fillRect(GUI.password.x, GUI.password.y - 14, GUI.password.w, GUI.password.h);
+    } else {
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(GUI.password.x, GUI.password.y - 14, GUI.password.w, GUI.password.h);
+    }
+    ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.password.x, GUI.password.y - 14, GUI.password.w, GUI.password.h);
+    ctx.fillStyle = '#000';
+    ctx.fillText('*'.repeat(passwordStr.length), GUI.password.x + 4, GUI.password.y + 2);
+
+    // buttons below (visible)
+    ctx.fillStyle = '#ddd'; ctx.strokeStyle = '#000';
     ctx.fillRect(GUI.loginBtn.x, GUI.loginBtn.y, GUI.loginBtn.w, GUI.loginBtn.h);
     ctx.strokeRect(GUI.loginBtn.x, GUI.loginBtn.y, GUI.loginBtn.w, GUI.loginBtn.h);
     ctx.fillRect(GUI.signupBtn.x, GUI.signupBtn.y, GUI.signupBtn.w, GUI.signupBtn.h);
     ctx.strokeRect(GUI.signupBtn.x, GUI.signupBtn.y, GUI.signupBtn.w, GUI.signupBtn.h);
-    ctx.fillStyle = "#000"; ctx.textAlign = "center"; ctx.font = "13px sans-serif";
-    ctx.fillText("Login", GUI.loginBtn.x + GUI.loginBtn.w/2, GUI.loginBtn.y + GUI.loginBtn.h - 6);
-    ctx.fillText("Create Account", GUI.signupBtn.x + GUI.signupBtn.w/2, GUI.signupBtn.y + GUI.signupBtn.h - 6);
+    ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.font = '13px sans-serif';
+    ctx.fillText('Login', GUI.loginBtn.x + GUI.loginBtn.w/2, GUI.loginBtn.y + GUI.loginBtn.h - 6);
+    ctx.fillText('Create Account', GUI.signupBtn.x + GUI.signupBtn.w/2, GUI.signupBtn.y + GUI.signupBtn.h - 6);
+
+    // show chat box on the login screen as well
+    drawChatBox();
   }
 
-  // Draw connecting screen when not connected
-  function drawConnecting() {
-    if (imgTitle && imgTitle.complete) ctx.drawImage(imgTitle, 0, 0, canvas.width, canvas.height);
-    else { ctx.fillStyle = "#222"; ctx.fillRect(0,0,canvas.width,canvas.height); }
-    ctx.fillStyle = "yellow"; ctx.font = "16px sans-serif";
-    ctx.fillText("Connecting to server...", 47, 347);
-  }
+  function drawGame() {
+    // clear
+    ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
 
-  // Draw the isometric world and players
-  function drawWorld() {
-    // clear background
-    ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0,0,canvas.width,canvas.height);
     if (!localPlayer) return;
 
-    // draw tiles in row-major order (y then x)
+    // tiles
     for (let y = 0; y < mapSpec.height; y++) {
       for (let x = 0; x < mapSpec.width; x++) {
         const t = (mapSpec.tiles && mapSpec.tiles[y] && typeof mapSpec.tiles[y][x] !== 'undefined') ? mapSpec.tiles[y][x] : 0;
@@ -386,39 +396,45 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // build list of players and sort by depth (x+y)
-    const list = Object.values(otherPlayers).concat(localPlayer ? [localPlayer] : []);
-    list.sort((a,b) => (a.pos_x + a.pos_y) - (b.pos_x + b.pos_y));
-
-    // draw players
-    list.forEach(p => {
+    // draw players sorted by depth
+    const all = Object.values(otherPlayers).concat(localPlayer ? [localPlayer] : []);
+    all.sort((a,b) => (a.pos_x + a.pos_y) - (b.pos_x + b.pos_y));
+    all.forEach(p => {
       const isLocal = localPlayer && p.id === localPlayer.id;
-      drawPlayer(p, isLocal);
+      // Skip rendering duplicated local in otherPlayers (server should not send it but guard)
+      if (isLocal) drawPlayer(localPlayer, true);
+      else drawPlayer(p, false);
     });
 
-    // draw chat box on top (so players don't obscure messages)
+    // chat
     drawChatBox();
 
-    // overlay border, if available
-    if (imgBorder && imgBorder.complete) {
-      // attempt to draw border image; we do not process transparency here to avoid CORS issues,
-      // but earlier code attempted to remove white if same-origin. We'll just draw image.
-      ctx.drawImage(imgBorder, 0, 0, canvas.width, canvas.height);
-    }
+    // overlay border on top
+    if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
   }
 
-  // Loop
+  // ---------- MAIN LOOP ----------
   function loop() {
     if (!connected) drawConnecting();
-    else if (connected && !loggedIn) drawLoginGUI();
-    else drawWorld();
+    else if (connected && connectionPaused) drawConnecting();
+    else if (connected && !showLoginGUI) drawConnecting();
+    else if (connected && showLoginGUI && !loggedIn) drawLogin();
+    else if (connected && loggedIn) drawGame();
     requestAnimationFrame(loop);
   }
   loop();
 
-  // Start input handlers and attempt to connect on user click (so cold start is interactive)
-  startInputHandlers();
+  // Kick off input handlers after DOM ready
+  (function initInputHandlers() {
+    // initial click to try connect if not connected
+    canvas.addEventListener('mousedown', (e) => {
+      if (!connected) { connectToServer(); return; }
+      // handled above
+    });
 
-  // Expose connect/send for debugging
-  window.connectToServer = connect;
+    // handle keys globally (already set up above)
+  })();
+
+  // expose connect for debug
+  window.connectToServer = connectToServer;
 });
