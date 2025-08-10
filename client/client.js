@@ -16,8 +16,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const TILE_W = 64, TILE_H = 32;
 
   // Item fine-tuning (center on tile a bit better)
-  const ITEM_X_NUDGE = 3;   // +right
-  const ITEM_Y_NUDGE = 15;  // +up (we subtract this in draw)
+  const ITEM_X_NUDGE = 0;//3;   // +right
+  const ITEM_Y_NUDGE = 0;//15;  // +up (we subtract this in draw)
 
 
   // Screen anchor for local tile
