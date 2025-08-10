@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Player fixed screen pos
   const PLAYER_SCREEN_X = 430;
   const PLAYER_SCREEN_Y = 142;
-  const PLAYER_OFFSET_X = -16; // shift all players left by 16 pixels
+  const PLAYER_OFFSET_X = -32; // shift all players left by 16 pixels
   const PLAYER_OFFSET_Y = -16; // shift all players up by 16 pixels
 
   // Map defaults; will load map.json
