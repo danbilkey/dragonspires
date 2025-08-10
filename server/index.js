@@ -1,17 +1,16 @@
 // server/index.js
 require('dotenv').config();
+const http = require('http');
 const WebSocket = require('ws');
 const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
-const http = require('http');
 
-// DB pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
-// Map dimensions (matches your map.json 10x10)
+// Map size: use 64x64 as requested (server-side authoritative bounds)
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
 
@@ -23,89 +22,89 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocket.Server({ server });
 
-// Track logged-in players and their sockets
-// clients: Map<ws, player> where player is { id, username, pos_x, pos_y, map_id }
-// usernameToWs: Map<username, ws>
+// Track logged-in sessions
+// Map<ws, playerObj>
 const clients = new Map();
+// Map<username, ws>
 const usernameToWs = new Map();
 
+// DB helpers
 async function loadPlayer(username) {
-  const result = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
-  return result.rows[0];
+  const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
+  return r.rows[0];
 }
 
 async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
-  const result = await pool.query(
+  const r = await pool.query(
     `INSERT INTO players (username, password, map_id, pos_x, pos_y)
      VALUES ($1, $2, 1, 5, 5) RETURNING *`,
     [username, hashed]
   );
-  return result.rows[0];
+  return r.rows[0];
 }
 
 async function updatePosition(playerId, x, y) {
   await pool.query('UPDATE players SET pos_x=$1, pos_y=$2 WHERE id=$3', [x, y, playerId]);
 }
 
-// helper: broadcast only to logged-in clients
-function broadcast(data) {
-  const str = JSON.stringify(data);
-  for (const [ws, player] of clients.entries()) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(str);
+// Broadcast to all currently logged-in clients
+function broadcast(obj) {
+  const msg = JSON.stringify(obj);
+  for (const [ws] of clients.entries()) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
   }
 }
 
-// helper: send a chat message to a specific ws (or broadcast if ws === null)
+// Send chat to a ws (or broadcast if ws === null)
 function sendChat(wsTarget, text) {
-  const payload = JSON.stringify({ type: 'chat', text });
-  if (wsTarget) {
-    if (wsTarget.readyState === WebSocket.OPEN) wsTarget.send(payload);
-  } else {
-    // broadcast
+  const obj = JSON.stringify({ type: 'chat', text });
+  if (!wsTarget) {
     for (const [ws] of clients.entries()) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+      if (ws.readyState === WebSocket.OPEN) ws.send(obj);
+    }
+  } else {
+    if (wsTarget.readyState === WebSocket.OPEN) {
+      wsTarget.send(obj);
     }
   }
 }
 
-// When a new client connects
 wss.on('connection', (ws) => {
-  console.log('New connection');
+  console.log('New WS connection');
 
-  // We'll set playerData when they login/signup successfully
+  // Will hold player's db record after successful login/signup
   let playerData = null;
 
   ws.on('message', async (raw) => {
-    let data;
-    try { data = JSON.parse(raw); } catch { return; }
+    let msg;
+    try { msg = JSON.parse(raw); } catch (e) { return; }
 
     // LOGIN
-    if (data.type === 'login') {
+    if (msg.type === 'login') {
       try {
-        const found = await loadPlayer(data.username);
+        const found = await loadPlayer(msg.username);
         if (!found) {
           ws.send(JSON.stringify({ type: 'login_error', message: 'User not found' }));
           return;
         }
-        const match = await bcrypt.compare(data.password, found.password);
-        if (!match) {
+        const ok = await bcrypt.compare(msg.password, found.password);
+        if (!ok) {
           ws.send(JSON.stringify({ type: 'login_error', message: 'Invalid password' }));
           return;
         }
 
-        // If someone else is logged in with this username, disconnect them first
+        // If existing active session for the username, notify it and close it
         const existingWs = usernameToWs.get(found.username);
         if (existingWs && existingWs !== ws) {
-          // notify the old connection (chat) then close it
           try {
+            // send chat message to old session
             existingWs.send(JSON.stringify({ type: 'chat', text: 'Disconnected: logged in from another game instance.' }));
-          } catch (e) { /* ignore */ }
-          try { existingWs.close(); } catch (e) { /* ignore */ }
-          // fall through and allow new login
+          } catch (e) {}
+          try { existingWs.close(); } catch (e) {}
         }
 
-        // Mark this ws as logged in
+        // set as logged-in
         playerData = {
           id: found.id,
           username: found.username,
@@ -116,101 +115,95 @@ wss.on('connection', (ws) => {
         clients.set(ws, playerData);
         usernameToWs.set(playerData.username, ws);
 
-        // Prepare list of currently logged-in players (exclude the newly logged in player)
-        const otherPlayers = Array.from(clients.values()).filter(p => p.id !== playerData.id);
+        // prepare list of currently logged-in players (exclude this one)
+        const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
+        ws.send(JSON.stringify({ type: 'login_success', player: playerData, players: others }));
 
-        // send login_success with players list
-        ws.send(JSON.stringify({ type: 'login_success', player: playerData, players: otherPlayers }));
-
-        // broadcast to other logged-in clients that a player joined
+        // announce to others
         broadcast({ type: 'player_joined', player: playerData });
 
-      } catch (err) {
-        console.error("Login error", err);
+      } catch (e) {
+        console.error('Login error', e);
         ws.send(JSON.stringify({ type: 'login_error', message: 'Server error' }));
       }
     }
 
     // SIGNUP
-    else if (data.type === 'signup') {
+    else if (msg.type === 'signup') {
       try {
-        const existing = await loadPlayer(data.username);
+        const existing = await loadPlayer(msg.username);
         if (existing) {
           ws.send(JSON.stringify({ type: 'signup_error', message: 'Username taken' }));
           return;
         }
-        const newPlayer = await createPlayer(data.username, data.password);
+        const created = await createPlayer(msg.username, msg.password);
 
-        // if someone was logged in with this username (unlikely on create) disconnect them
-        const existingWs = usernameToWs.get(newPlayer.username);
+        // disconnect old session if any (unlikely on signup)
+        const existingWs = usernameToWs.get(created.username);
         if (existingWs && existingWs !== ws) {
-          try {
-            existingWs.send(JSON.stringify({ type: 'chat', text: 'Disconnected: logged in from another game instance.' }));
-          } catch (e) {}
-          try { existingWs.close(); } catch (e) {}
+          try { existingWs.send(JSON.stringify({ type: 'chat', text: 'Disconnected: logged in from another game instance.' })); } catch(e){}
+          try { existingWs.close(); } catch(e){}
         }
 
         playerData = {
-          id: newPlayer.id,
-          username: newPlayer.username,
-          map_id: newPlayer.map_id,
-          pos_x: newPlayer.pos_x,
-          pos_y: newPlayer.pos_y
+          id: created.id,
+          username: created.username,
+          map_id: created.map_id,
+          pos_x: created.pos_x,
+          pos_y: created.pos_y
         };
         clients.set(ws, playerData);
         usernameToWs.set(playerData.username, ws);
 
-        const otherPlayers = Array.from(clients.values()).filter(p => p.id !== playerData.id);
-        ws.send(JSON.stringify({ type: 'signup_success', player: playerData, players: otherPlayers }));
-
+        const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
+        ws.send(JSON.stringify({ type: 'signup_success', player: playerData, players: others }));
         broadcast({ type: 'player_joined', player: playerData });
-      } catch (err) {
-        console.error("Signup error", err);
+
+      } catch (e) {
+        console.error('Signup error', e);
         ws.send(JSON.stringify({ type: 'signup_error', message: 'Server error' }));
       }
     }
 
     // MOVE
-    else if (data.type === 'move') {
+    else if (msg.type === 'move') {
+      // require logged in
       if (!playerData) return;
-      // validate dx/dy are numbers
-      const dx = Number(data.dx) || 0;
-      const dy = Number(data.dy) || 0;
+      const dx = Number(msg.dx) || 0;
+      const dy = Number(msg.dy) || 0;
       const newX = playerData.pos_x + dx;
       const newY = playerData.pos_y + dy;
-      // bounds check against MAP_WIDTH/MAP_HEIGHT
       if (newX >= 0 && newX < MAP_WIDTH && newY >= 0 && newY < MAP_HEIGHT) {
         playerData.pos_x = newX;
         playerData.pos_y = newY;
-        // persist to DB (best-effort, don't block)
-        updatePosition(playerData.id, newX, newY).catch(err => console.error("Failed to update DB pos", err));
-        // broadcast to other logged-in clients
+        // persist best-effort
+        updatePosition(playerData.id, newX, newY).catch(err => console.error('DB update pos failed', err));
+        // broadcast authoritative update to logged-in clients
         broadcast({ type: 'player_moved', id: playerData.id, x: newX, y: newY });
       } else {
-        // ignore invalid moves
+        // ignore moves out of bounds
       }
     }
 
-    // You can add more message handling (chat sending by player, NPC interactions, etc.)
+    // (optional) future: handle chat messages sent by clients, etc.
   });
 
   ws.on('close', () => {
-    // cleanup if this ws was a logged-in player
+    // cleanup logged-in tracking
     if (playerData) {
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
-      // broadcast player_left to remaining logged-in clients
       broadcast({ type: 'player_left', id: playerData.id });
     }
   });
 
   ws.on('error', (err) => {
-    console.warn('WS error on connection:', err);
+    console.warn('WS error', err);
   });
 });
 
-// listen on 0.0.0.0 for Render
+// Listen on 0.0.0.0 for Render
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on ${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });
