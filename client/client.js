@@ -1,6 +1,7 @@
 // client.js
 // Isometric rendering, GUI login on canvas, chat box overlay, sprite offsets,
-// "Press any key to enter!" flow, PLAYER_OFFSET_X = -32, border white transparency.
+// "Press any key to enter!" flow, PLAYER_OFFSET_X = -32, border white transparency,
+// fixed password hitbox, welcome message, join/leave names, centered name labels.
 
 document.addEventListener('DOMContentLoaded', () => {
   // ---------- CONFIG ----------
@@ -20,15 +21,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16; // requested offsets
 
   // GUI placement (moved +50,+50 earlier)
+  // reduce field height to avoid overlap; use same rect for draw/hit
   const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
+  const FIELD_H = 16;       // was 18; tighter to avoid overlap
+  const FIELD_TOP = (y) => (y - 13); // drawing/hit top
   const GUI = {
-    username: { x: 260 + GUI_OFFSET_X, y: 34 + GUI_OFFSET_Y, w: 240, h: 18 },
-    password: { x: 260 + GUI_OFFSET_X, y: 58 + GUI_OFFSET_Y, w: 240, h: 18 },
+    username: { x: 260 + GUI_OFFSET_X, y: 34 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
+    password: { x: 260 + GUI_OFFSET_X, y: 58 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
     loginBtn: { x: 260 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 },
-    signupBtn: { x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
+    signupBtn:{ x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
   };
 
-  // Chat box region (UPDATED size/position)
+  // Chat box region (UPDATED size/position and layering over border)
   const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
 
   // ---------- STATE ----------
@@ -158,15 +162,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Array.isArray(msg.players)) {
           msg.players.forEach(p => { if (!localPlayer || p.id !== localPlayer.id) otherPlayers[p.id] = p; });
         }
+        // Welcome message for the local player
+        pushChat("Welcome to DragonSpires!");
         break;
 
       case 'player_joined':
+        // Only track/show other players
         if (!localPlayer || msg.player.id !== localPlayer.id) {
           otherPlayers[msg.player.id] = msg.player;
-        }
-        // Chat line for joins (use player id per request)
-        if (msg.player && typeof msg.player.id !== 'undefined') {
-          pushChat(`${msg.player.id} has entered DragonSpires!`);
+          // Join chat by name (fallback to id if missing)
+          const name = msg.player.username || msg.player.id;
+          pushChat(`${name} has entered DragonSpires!`);
         }
         break;
 
@@ -179,13 +185,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         break;
 
-      case 'player_left':
-        // Chat line for leaves (server sends { id })
-        if (typeof msg.id !== 'undefined') {
-          pushChat(`${msg.id} has left DragonSpires.`);
+      case 'player_left': {
+        // Only show leave for other players; try to use their name if we have it
+        const p = otherPlayers[msg.id];
+        const name = p?.username ?? msg.id;
+        if (!localPlayer || msg.id !== localPlayer.id) {
+          pushChat(`${name} has left DragonSpires.`);
         }
         delete otherPlayers[msg.id];
         break;
+      }
 
       case 'chat':
         if (typeof msg.text === 'string') pushChat(msg.text);
@@ -203,16 +212,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- INPUT ----------
   // proceed after connected: any key or any click
-  window.addEventListener('keydown', () => {
+  window.addEventListener('keydown', (e) => {
     if (connected && connectionPaused) {
       connectionPaused = false;
-      showLoginGUI = true;
+      showLoginGUI = true;   // title will no longer render after this
       return;
     }
 
     // If logged in, movement keys
     if (loggedIn && localPlayer) {
-      const k = event.key.toLowerCase();
+      const k = e.key.toLowerCase();
       let dx = 0, dy = 0;
       if (k === 'arrowup' || k === 'w') dy = -1;
       else if (k === 'arrowdown' || k === 's') dy = 1;
@@ -231,7 +240,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // GUI typing
     if (!loggedIn && showLoginGUI && activeField) {
-      const e = event;
       if (e.key === 'Backspace') {
         if (activeField === 'username') usernameStr = usernameStr.slice(0, -1);
         else passwordStr = passwordStr.slice(0, -1);
@@ -253,19 +261,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // If connected and paused, clicking proceeds to login GUI
     if (connected && connectionPaused) {
       connectionPaused = false;
-      showLoginGUI = true;
+      showLoginGUI = true; // title stops rendering here too
       return;
     }
 
-    // GUI interactions
+    // GUI interactions (use exact same rects as drawing; no overlap)
     if (connected && showLoginGUI && !loggedIn) {
       const u = GUI.username;
       const p = GUI.password;
       const lb = GUI.loginBtn;
       const sb = GUI.signupBtn;
-      if (mx >= u.x && mx <= u.x + u.w && my >= u.y - 14 && my <= u.y + u.h) {
+
+      const uTop = FIELD_TOP(u.y), uBottom = uTop + u.h;
+      const pTop = FIELD_TOP(p.y), pBottom = pTop + p.h;
+
+      if (mx >= u.x && mx <= u.x + u.w && my >= uTop && my <= uBottom) {
         activeField = 'username'; return;
-      } else if (mx >= p.x && mx <= p.x + p.w && my >= p.y - 14 && my <= p.y + p.h) {
+      } else if (mx >= p.x && mx <= p.x + p.w && my >= pTop && my <= pBottom) {
         activeField = 'password'; return;
       } else if (mx >= lb.x && mx <= lb.x + lb.w && my >= lb.y && my <= lb.y + lb.h) {
         send({ type: 'login', username: usernameStr, password: passwordStr }); return;
@@ -303,24 +315,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
     const drawX = screenX + PLAYER_OFFSET_X;
     const drawY = screenY + PLAYER_OFFSET_Y;
+
     if (playerSprite && playerSprite.complete) {
       // use natural image size
       const w = playerSprite.naturalWidth || playerSprite.width;
       const h = playerSprite.naturalHeight || playerSprite.height;
       ctx.drawImage(playerSprite, drawX, drawY, w, h);
     } else {
+      // fallback ellipse centered on tile
       ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
       ctx.beginPath();
       ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
       ctx.fill();
     }
-    // name tag
-    const cx = drawX + ((playerSprite && playerSprite.naturalWidth) ? (playerSprite.naturalWidth/2) : TILE_W/2);
-    const cy = drawY - 6;
+
+    // Name tag: center over tile center (not sprite width) so it doesn't drift with name length
+    const nameX = screenX + TILE_W / 2;
+    const nameY = screenY - 10; // a bit above tile
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, cx, cy);
-    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, cx, cy);
+    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
+    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
     ctx.lineWidth = 1;
   }
 
@@ -339,16 +354,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const lineH = 16;
     let y = y2 - pad;
     for (let i = messages.length - 1; i >= 0; i--) {
-      let text = messages[i];
-      // naive wrapping by shrinking tail
-      while (ctx.measureText(text).width > w - pad*2 && text.length > 1) {
-        // split into two lines if needed
-        const head = text.slice(0, text.length - 1);
-        const tail = text.slice(text.length - 1);
-        text = head;
-        // draw tail next frame up if room? keep simple: just shrink
+      const text = messages[i];
+      // naive clip if too wide
+      let line = text;
+      while (ctx.measureText(line).width > w - pad*2 && line.length > 1) {
+        line = line.slice(0, -1);
       }
-      ctx.fillText(text, x1 + pad, y);
+      ctx.fillText(line, x1 + pad, y);
       y -= lineH;
       if (y < y1 + pad) break;
     }
@@ -356,8 +368,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- DRAW SCENES ----------
   function drawConnecting() {
-    if (imgTitle && imgTitle.complete) ctx.drawImage(imgTitle, 0, 0, CANVAS_W, CANVAS_H);
-    else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
+    // Title only while not yet proceeded; once showLoginGUI=true we never draw title again
+    if (!showLoginGUI) {
+      if (imgTitle && imgTitle.complete) ctx.drawImage(imgTitle, 0, 0, CANVAS_W, CANVAS_H);
+      else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
+    } else {
+      ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+    }
+
     ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
     if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
     else ctx.fillText('Connecting to server...', 47, 347);
@@ -374,17 +392,19 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.fillText('Username:', GUI.username.x - 70, GUI.username.y + 4);
     ctx.fillText('Password:', GUI.password.x - 70, GUI.password.y + 4);
 
-    // username field (highlight when active)
+    // username field
+    const uTop = FIELD_TOP(GUI.username.y);
     ctx.fillStyle = (activeField === 'username') ? 'rgb(153,213,255)' : '#fff';
-    ctx.fillRect(GUI.username.x, GUI.username.y - 14, GUI.username.w, GUI.username.h);
-    ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.username.x, GUI.username.y - 14, GUI.username.w, GUI.username.h);
+    ctx.fillRect(GUI.username.x, uTop, GUI.username.w, GUI.username.h);
+    ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.username.x, uTop, GUI.username.w, GUI.username.h);
     ctx.fillStyle = '#000'; ctx.font = '12px sans-serif';
     ctx.fillText(usernameStr || '', GUI.username.x + 4, GUI.username.y + 2);
 
     // password field
+    const pTop = FIELD_TOP(GUI.password.y);
     ctx.fillStyle = (activeField === 'password') ? 'rgb(153,213,255)' : '#fff';
-    ctx.fillRect(GUI.password.x, GUI.password.y - 14, GUI.password.w, GUI.password.h);
-    ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.password.x, GUI.password.y - 14, GUI.password.w, GUI.password.h);
+    ctx.fillRect(GUI.password.x, pTop, GUI.password.w, GUI.password.h);
+    ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.password.x, pTop, GUI.password.w, GUI.password.h);
     ctx.fillStyle = '#000';
     ctx.fillText('*'.repeat(passwordStr.length), GUI.password.x + 4, GUI.password.y + 2);
 
@@ -398,7 +418,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.fillText('Login', GUI.loginBtn.x + GUI.loginBtn.w/2, GUI.loginBtn.y + GUI.loginBtn.h - 6);
     ctx.fillText('Create Account', GUI.signupBtn.x + GUI.signupBtn.w/2, GUI.signupBtn.y + GUI.signupBtn.h - 6);
 
-    // chat OVER the border (requested to be on top)
+    // chat overlays the border
     drawChatBox();
   }
 
@@ -429,7 +449,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
 
-    // chat OVER the border (requested to be on top)
+    // chat OVER the border (requested)
     drawChatBox();
   }
 
@@ -437,7 +457,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function loop() {
     if (!connected) drawConnecting();
     else if (connected && connectionPaused) drawConnecting();
-    else if (connected && !showLoginGUI) drawConnecting();
+    else if (connected && !showLoginGUI) drawConnecting(); // no title after you proceed
     else if (connected && showLoginGUI && !loggedIn) drawLogin();
     else if (connected && loggedIn) drawGame();
     requestAnimationFrame(loop);
