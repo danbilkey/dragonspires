@@ -10,11 +10,9 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// Map bounds
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
 
-// Chat guardrails
 const MAX_CHAT_LEN = 200;
 const sqlLikePattern = /(select|insert|update|delete|drop|alter|truncate|merge|exec|union|;|--|\/\*|\*\/|xp_)/i;
 function looksMalicious(text) {
@@ -27,7 +25,6 @@ const server = http.createServer((req, res) => {
   res.writeHead(200, {'Content-Type':'text/plain'});
   res.end('DragonSpires server is running\n');
 });
-
 const wss = new WebSocket.Server({ server });
 
 const clients = new Map();      // Map<ws, playerData>
@@ -169,7 +166,6 @@ wss.on('connection', (ws) => {
 
       // stamina gate
       if ((playerData.stamina ?? 0) <= 0) {
-        // Optional: notify just the mover that they are exhausted by sending a stats echo
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
         return;
       }
@@ -180,21 +176,17 @@ wss.on('connection', (ws) => {
       const ny = playerData.pos_y + dy;
 
       if (nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT) {
-        // Decrement stamina by 5 (min 0), then move
-        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 5);
+        // Decrement stamina by **1**
+        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
         playerData.pos_y = ny;
 
-        // Persist both pos and stamina
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
           updatePosition(playerData.id, nx, ny)
         ]).catch(()=>{});
 
-        // Broadcast movement to everyone
         broadcast({ type: 'player_moved', id: playerData.id, x: nx, y: ny });
-
-        // Send updated stamina to the mover
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       }
     }
