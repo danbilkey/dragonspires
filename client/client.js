@@ -15,7 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Logical diamond for positioning
   const TILE_W = 64, TILE_H = 32;
 
-  const ITEM_Y_NUDGE = 4; // lift items slightly so they don’t sit too low
+  // Item fine-tuning (center on tile a bit better)
+  const ITEM_X_NUDGE = 3;   // +right
+  const ITEM_Y_NUDGE = 15;  // +up (we subtract this in draw)
+
 
   // Screen anchor for local tile
   const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
@@ -464,23 +467,49 @@ fetch('map.json')
     }
   }
 
-function drawItemAtTile(screenX, screenY, itemIndex) {
-  if (typeof window.itemsReady !== 'function' || !window.itemsReady()) return;
-  if (typeof window.getItemSprite !== 'function') return;
-
+function drawItemAtTile(sx, sy, itemIndex) {
+  // Requires /assets/item.gif + /assets/item.json loader you already added (window.getItemSprite)
+  if (!window.getItemSprite) return;
   const spr = window.getItemSprite(itemIndex);
   if (!spr || !spr.complete) return;
 
-  // Tile bottom-center anchor
-  const tileBottomCenterX = screenX + TILE_W / 2;
-  const tileBottomCenterY = screenY + TILE_H;
+  // Base the placement on the tile’s bottom-center
+  const tileBottomCenterX = sx + TILE_W / 2;
+  const tileBottomCenterY = sy + TILE_H / 2;
 
-  // Each item sprite is bottom-right–justified inside its own canvas.
-  // So place the sprite's bottom-right at the tile bottom-center.
-  const dx = tileBottomCenterX - spr.width;
-  const dy = tileBottomCenterY - spr.height - ITEM_Y_NUDGE;
+  // Items are bottom-right justified inside their own sprite rects.
+  // We want that bottom-right to sit on the tile’s bottom-center,
+  // with a small nudge so they look centered on the diamond.
+  const dx = tileBottomCenterX - spr.width + ITEM_X_NUDGE; // x:+3
+  const dy = tileBottomCenterY - spr.height - ITEM_Y_NUDGE; // y:-11 (lift)
 
-  ctx.drawImage(spr, dx, dy);
+  try {
+    // In case magenta wasn’t stripped by the loader for some reason (belt & suspenders)
+    const off = document.createElement('canvas');
+    off.width = spr.naturalWidth || spr.width;
+    off.height = spr.naturalHeight || spr.height;
+    const octx = off.getContext('2d');
+    octx.drawImage(spr, 0, 0);
+    const data = octx.getImageData(0, 0, off.width, off.height);
+    const d = data.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
+    }
+    octx.putImageData(data, 0, 0);
+    // Draw processed (cached by browser by data URL)
+    const mag = new Image();
+    mag.src = off.toDataURL();
+    // If it’s already ready, draw; otherwise, draw the original as fallback now and the magenta-safe one next frame
+    if (mag.complete) {
+      ctx.drawImage(mag, dx, dy);
+    } else {
+      ctx.drawImage(spr, dx, dy);
+      mag.onload = () => { /* next frame it’ll be used */ };
+    }
+  } catch {
+    // Normal path (your loader already keyed magenta) — draw directly
+    ctx.drawImage(spr, dx, dy);
+  }
 }
 
 
@@ -640,23 +669,43 @@ function drawItemAtTile(screenX, screenY, itemIndex) {
       }
     }
 
-  // Second pass: draw items after the entire floor is rendered
-  if (tilesReady && mapReady && mapSpec.items && mapSpec.items.length) {
-    for (let y = 0; y < mapSpec.height; y++) {
-      for (let x = 0; x < mapSpec.width; x++) {
-        const it = (mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') ? mapSpec.items[y][x] : 0;
-        if (it > 0) {
-          const { screenX, screenY } = isoScreen(x, y);
-          drawItemAtTile(screenX, screenY, it);
-        }
+  // Build a quick lookup of players by tile
+const playersByTile = {};
+(function buildPlayersIndex() {
+  if (localPlayer) {
+    const k = `${localPlayer.pos_x},${localPlayer.pos_y}`;
+    (playersByTile[k] ||= []).push({ ...localPlayer, __isLocal: true });
+  }
+  for (const id in otherPlayers) {
+    const p = otherPlayers[id];
+    const k = `${p.pos_x},${p.pos_y}`;
+    (playersByTile[k] ||= []).push(p);
+  }
+})();
+
+// Second pass: items + players in tile order (depth-safe with tall items)
+if (tilesReady && mapReady) {
+  for (let y = 0; y < mapSpec.height; y++) {
+    for (let x = 0; x < mapSpec.width; x++) {
+      const { screenX, screenY } = isoScreen(x, y);
+
+      // 1) Item on this tile?
+      const it = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined')
+        ? mapSpec.items[y][x]
+        : 0;
+      if (it > 0) drawItemAtTile(screenX, screenY, it);
+
+      // 2) Players standing on this tile
+      const k = `${x},${y}`;
+      const arr = playersByTile[k];
+      if (arr && arr.length) {
+        // Keep your usual name/sprite stacking; if multiple players share a tile, draw in arrival order
+        for (const p of arr) drawPlayer(p, !!p.__isLocal);
       }
     }
   }
+}
 
-    // Players
-    const all = Object.values(otherPlayers).concat(localPlayer ? [localPlayer] : []);
-    all.sort((a,b) => (a.pos_x + a.pos_y) - (b.pos_x + b.pos_y));
-    all.forEach(p => drawPlayer(p, localPlayer && p.id === localPlayer.id));
 
     // Border
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
