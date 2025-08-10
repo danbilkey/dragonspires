@@ -166,15 +166,36 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'move') {
       if (!playerData) return;
+
+      // stamina gate
+      if ((playerData.stamina ?? 0) <= 0) {
+        // Optional: notify just the mover that they are exhausted by sending a stats echo
+        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+        return;
+      }
+
       const dx = Number(msg.dx) || 0;
       const dy = Number(msg.dy) || 0;
       const nx = playerData.pos_x + dx;
       const ny = playerData.pos_y + dy;
+
       if (nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT) {
+        // Decrement stamina by 5 (min 0), then move
+        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 5);
         playerData.pos_x = nx;
         playerData.pos_y = ny;
-        updatePosition(playerData.id, nx, ny).catch(e => console.error('pos update fail', e));
+
+        // Persist both pos and stamina
+        Promise.allSettled([
+          updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
+          updatePosition(playerData.id, nx, ny)
+        ]).catch(()=>{});
+
+        // Broadcast movement to everyone
         broadcast({ type: 'player_moved', id: playerData.id, x: nx, y: ny });
+
+        // Send updated stamina to the mover
+        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       }
     }
 
@@ -212,13 +233,12 @@ setInterval(async () => {
       send(ws, { type: 'stats_update', id: p.id, stamina: p.stamina });
     }
   }
-  // batch DB updates (one-by-one to keep simple)
   for (const u of updates) {
     try { await updateStatsInDb(u.id, { stamina: u.stamina }); } catch(e){ console.error('stam regen db', e); }
   }
 }, 3000);
 
-// Every 5s: life +5% max
+// Every 5s: life +5% max (min +1)
 setInterval(async () => {
   const updates = [];
   for (const [ws, p] of clients.entries()) {
