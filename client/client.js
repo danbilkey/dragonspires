@@ -1,466 +1,390 @@
-// client.js
-// Fixes: regen handling, chat input (Enter to type -> Enter to send), -pos client-side,
-// admin handled server-side, exact HUD bar rectangles, player/name above floor,
-// no optional chaining (for older browsers).
+// client.js – loads map from server by map_id (varchar), x-major [x][y] like Java
+document.addEventListener('DOMContentLoaded', function () {
 
-document.addEventListener('DOMContentLoaded', () => {
   // ---- CONFIG ----
-  const PROD_WS = "wss://dragonspires.onrender.com";
-  const DEV_WS  = "ws://localhost:3000";
-  const WS_URL  = location.hostname.indexOf('localhost') !== -1 ? DEV_WS : PROD_WS;
+  var PROD_WS = "wss://dragonspires.onrender.com";
+  var DEV_WS = "ws://localhost:3000";
+  var WS_URL = location.hostname.indexOf('localhost') !== -1 ? DEV_WS : PROD_WS;
 
-  const CANVAS_W = 640, CANVAS_H = 480;
-  const TILE_W = 64, TILE_H = 32;      // logic iso tile
-  const FLOOR_W = 61, FLOOR_H = 31;    // bitmap tile (from floor.png)
-  const STEP_X = 63, STEP_Y = 33;
-  const FLOOR_ROWS = 9, FLOOR_COLS = 11;
-  const FLOOR_START_X = 1, FLOOR_START_Y = 1;
+  var CANVAS_W = 640, CANVAS_H = 480;
+  var TILE_W = 64, TILE_H = 32; // on-screen size; floor source tiles are 61x31, we can draw at 64x32
+  var PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
 
-  // screen center
-  const PLAYER_SCREEN_X = 320, PLAYER_SCREEN_Y = 240;
+  // previously-requested sprite/name offsets retained
+  var PLAYER_IMG_OFF_X = -41, PLAYER_IMG_OFF_Y = 4;      // sprite tweak
+  var NAME_OFF_X = -2, NAME_OFF_Y = -14;                 // name tweak
 
-  // map/camera offsets
-  const PLAYER_LOC_OFFSET_X = -5;
-  const PLAYER_LOC_OFFSET_Y = 0;
-
-  // sprite/name offsets
-  const PLAYER_SPRITE_OFFSET_X = -41, PLAYER_SPRITE_OFFSET_Y = 4;
-  const PLAYER_NAME_OFFSET_X = -2,   PLAYER_NAME_OFFSET_Y = -14;
-
-  // login GUI
-  const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
-  const GUI = {
+  // GUI login (shifted and with proper highlight)
+  var GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
+  var GUI = {
     username: { x: 260 + GUI_OFFSET_X, y: 34 + GUI_OFFSET_Y, w: 240, h: 18 },
     password: { x: 260 + GUI_OFFSET_X, y: 58 + GUI_OFFSET_Y, w: 240, h: 18 },
     loginBtn: { x: 260 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 },
     signupBtn:{ x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
   };
 
-  // chat log (no background)
-  const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
-  // chat input (top-left anchored, wrap downward)
-  const CHAT_INPUT = { x1: 156, y1: 411 + 2, x2: 618, y2: 453, pad: 8 }; // +2 per your tweak
-  const CHAT_MAX = 200;
+  // Chat box + input
+  var CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 }; // smaller per your update
+  var INPUT = { x1: 156, y1: 411+2, x2: 618, y2: 453 };      // +2 y as requested
+  var CHAT_MAX_CHARS = 200;
 
-  // HUD exact rectangles
-  const HUD = {
-    yTop: 19, yBot: 135, h: (135 - 19),
-    staminaX1: 187, staminaX2: 200, // width = 13
-    lifeX1:    211, lifeX2:    224, // width = 13
-    magicText: { x: (184 - 7) + 20, y: 239 + 8 },
-    goldText:  { x: 177 + 20,       y: 267 + 6 }
+  // HUD positions (bars over border)
+  // Stamina bar: starts 187x19 ends 200x135 (x range 187-200)
+  // Life bar:    starts 211x19 ends 224x135 (x range 211-224)
+  var HUD = {
+    stam: { x1:187-12, x2:200-12, y1:19, y2:135 }, // -12 x adjustment per your last note
+    life: { x1:211-12, x2:224-12, y1:19, y2:135 }, // -12 x adjustment
+    magicText: { x:184+20-7, y:239+8 },            // +20 then -7,+8 adjustments
+    goldText:  { x:177+20,  y:267+6 }
   };
 
-  // ---- CANVAS ----
-  const canvas = document.getElementById('gameCanvas');
-  if (!canvas) { console.error('Missing <canvas id="gameCanvas">'); return; }
+  var canvas = document.getElementById('gameCanvas');
+  var ctx = canvas.getContext('2d');
   canvas.width = CANVAS_W; canvas.height = CANVAS_H;
-  const ctx = canvas.getContext('2d');
 
-  // ---- STATE ----
-  let ws = null;
-  let connected = false;
-  let connectionPaused = true; // show "Press any key to enter!" after connect
-  let showLoginGUI = false;
-  let loggedIn = false;
+  // ---- State ----
+  var ws = null;
+  var connected = false;
+  var connectionPaused = false; // show "Press any key to enter!"
+  var showLogin = false;
+  var loggedIn = false;
 
-  let usernameStr = "", passwordStr = "", activeField = null;
+  var usernameStr = "", passwordStr = "", activeField = null;
+  var messages = [];
+  var inputMode = false; // when true, keystrokes go to chat input
+  var inputBuffer = "";
 
-  // chat typing
-  let chatMode = false;
-  let chatBuffer = "";
+  // Player data
+  var me = null;             // full row from DB on login
+  var others = {};           // id -> {id,username,pos_x,pos_y}
+  var vitals = { stamina:0, max_stamina:0, life:0, max_life:0, magic:0, max_magic:0, gold:0 };
 
-  let localPlayer = null;
-  let otherPlayers = {};
-  let messages = [];
+  // Map from server (x-major arrays)
+  var mapSpec = null; // { width, height, tilemap[x][y], itemmap[x][y] }
 
-  let mapSpec = { width: 52, height: 100, tilemap: [] };
+  // ---- Assets ----
+  var imgTitle = new Image();        imgTitle.src = "/assets/title.GIF";
+  var imgBorderSrc = new Image();    imgBorderSrc.src = "/assets/game_border_2025.gif";
+  var imgFloorAtlas = new Image();   imgFloorAtlas.src = "/assets/floor.png";
+  var imgPlayerSrc = new Image();    imgPlayerSrc.src = "/assets/player.gif";
 
-  // ---- ASSETS ----
-  const imgTitle = new Image(); imgTitle.src = "/assets/title.GIF";
-  const imgBorderSrc = new Image(); imgBorderSrc.src = "/assets/game_border_2025.gif";
-  let imgBorder = null; // processed magenta->alpha
+  // Process magenta transparency for border & player
+  var borderImage = null;
+  imgBorderSrc.onload = function(){
+    borderImage = makeTransparent(imgBorderSrc, [255,0,255]);
+  };
 
-  const imgPlayerSrc = new Image(); imgPlayerSrc.src = "/assets/player.gif";
-  let playerSprite = null;
+  var playerSprite = null;
+  imgPlayerSrc.onload = function(){
+    playerSprite = makeTransparent(imgPlayerSrc, [255,0,255]);
+  };
 
-  const imgFloor = new Image(); imgFloor.src = "/assets/floor.png";
-  let floorTiles = [];
+  // Extract floor tiles (61x31 each, 1px gutter, 11 cols x 9 rows)
+  var floorTiles = []; // 0-based index
+  imgFloorAtlas.onload = function(){
+    extractFloorTiles();
+  };
 
-  // ---- Helpers ----
-  function magentaToAlpha(img, sx, sy, sw, sh) {
-    const w = sw || img.width, h = sh || img.height;
-    const off = document.createElement('canvas');
-    off.width = w; off.height = h;
-    const octx = off.getContext('2d');
-    octx.drawImage(img, sx||0, sy||0, w, h, 0, 0, w, h);
-    let data;
-    try { data = octx.getImageData(0,0,w,h); }
-    catch (e) { return img; }
-    const d = data.data;
-    for (let i = 0; i < d.length; i += 4) {
-      const r = d[i], g = d[i+1], b = d[i+2];
-      if (r >= 250 && g <= 5 && b >= 250) d[i+3] = 0;
+  function makeTransparent(sourceImg, rgb) {
+    try {
+      var w = sourceImg.naturalWidth || sourceImg.width;
+      var h = sourceImg.naturalHeight || sourceImg.height;
+      var off = document.createElement('canvas');
+      off.width = w; off.height = h;
+      var octx = off.getContext('2d');
+      octx.drawImage(sourceImg, 0, 0);
+      var data = octx.getImageData(0,0,w,h);
+      var r = rgb[0], g = rgb[1], b = rgb[2];
+      for (var i = 0; i < data.data.length; i += 4) {
+        if (data.data[i] === r && data.data[i+1] === g && data.data[i+2] === b) {
+          data.data[i+3] = 0;
+        }
+      }
+      octx.putImageData(data, 0, 0);
+      var out = new Image();
+      out.src = off.toDataURL();
+      return out;
+    } catch(e) {
+      console.warn('Transparency processing failed; using original', e);
+      return sourceImg;
     }
-    octx.putImageData(data, 0, 0);
-    const out = new Image();
-    out.src = off.toDataURL();
-    return out;
   }
 
-  imgBorderSrc.onload = () => { imgBorder = magentaToAlpha(imgBorderSrc); };
-  imgPlayerSrc.onload = () => {
-    playerSprite = magentaToAlpha(imgPlayerSrc, 264, 1, 44, 55);
-  };
+  function extractFloorTiles() {
+    try {
+      var cols = 11, rows = 9;
+      var srcW = 61, srcH = 31;
+      var gutter = 1;
 
-  imgFloor.onload = () => {
-    const off = document.createElement('canvas');
-    off.width = FLOOR_W; off.height = FLOOR_H;
-    const octx = off.getContext('2d');
-    floorTiles = [];
-    for (let r = 0; r < FLOOR_ROWS; r++) {
-      for (let c = 0; c < FLOOR_COLS; c++) {
-        const sx = FLOOR_START_X + c * STEP_X;
-        const sy = FLOOR_START_Y + r * STEP_Y;
-        octx.clearRect(0,0,FLOOR_W,FLOOR_H);
-        octx.drawImage(imgFloor, sx, sy, FLOOR_W, FLOOR_H, 0, 0, FLOOR_W, FLOOR_H);
-        // also strip pure magenta if present
-        const data = octx.getImageData(0,0,FLOOR_W,FLOOR_H);
-        const d = data.data;
-        for (let i = 0; i < d.length; i += 4) {
-          if (d[i] >= 250 && d[i+1] <= 5 && d[i+2] >= 250) d[i+3] = 0;
+      for (var row = 0; row < rows; row++) {
+        for (var col = 0; col < cols; col++) {
+          var sx = 1 + col * (srcW + gutter);
+          var sy = 1 + row * (srcH + gutter);
+
+          var off = document.createElement('canvas');
+          off.width = srcW; off.height = srcH;
+          var octx = off.getContext('2d');
+          octx.drawImage(imgFloorAtlas, sx, sy, srcW, srcH, 0, 0, srcW, srcH);
+
+          // magenta transparent
+          var data = octx.getImageData(0,0,srcW,srcH);
+          for (var i = 0; i < data.data.length; i += 4) {
+            if (data.data[i] === 255 && data.data[i+1] === 0 && data.data[i+2] === 255) {
+              data.data[i+3] = 0;
+            }
+          }
+          octx.putImageData(data,0,0);
+
+          var tileImg = new Image();
+          tileImg.src = off.toDataURL();
+          floorTiles.push(tileImg); // index 0 is first
         }
-        octx.putImageData(data, 0, 0);
-        const tileImg = new Image(); tileImg.src = off.toDataURL();
-        floorTiles.push(tileImg);
       }
+    } catch(e) {
+      console.error('extractFloorTiles failed', e);
     }
-  };
-
-  function loadMapById(mapId) {
-    const name = 'map' + (mapId || 1) + '.json';
-    return fetch(name).then(r => r.json()).then(m => {
-      if (m && m.width && m.height && m.tilemap) mapSpec = m;
-    }).catch(() => {});
   }
 
   // ---- WS ----
-  function connectToServer() {
+  function connect() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     ws = new WebSocket(WS_URL);
-    ws.onopen = () => { connected = true; connectionPaused = true; showLoginGUI = false; };
-    ws.onmessage = (ev) => {
-      var d = null; try { d = JSON.parse(ev.data); } catch {}
-      if (!d) return;
-      handleServerMessage(d);
+
+    ws.onopen = function(){
+      connected = true;
+      connectionPaused = true; // show "Press any key to enter!"
+      showLogin = false;
     };
-    ws.onclose = () => {
-      connected = false; connectionPaused = false; showLoginGUI = false; loggedIn = false;
-      localPlayer = null; otherPlayers = {}; messages = [];
+    ws.onmessage = function(ev){
+      var msg = null; try { msg = JSON.parse(ev.data); } catch(e) { return; }
+      handle(msg);
+    };
+    ws.onclose = function(){
+      connected = false;
+      connectionPaused = false;
+      showLogin = false;
+      loggedIn = false;
+      me = null; others = {}; messages = [];
+      inputMode = false; inputBuffer = "";
     };
   }
-  function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+  connect();
 
-  function handleServerMessage(msg) {
+  function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+  function pushMsg(t) {
+    messages.push(t);
+    if (messages.length > 200) messages.shift();
+  }
+
+  function handle(msg) {
     if (msg.type === 'login_success' || msg.type === 'signup_success') {
       loggedIn = true;
-      localPlayer = msg.player;
-      messages.push("Welcome to DragonSpires!");
-      loadMapById(localPlayer && localPlayer.map_id);
-      return;
-    }
-    if (msg.type === 'player_joined') {
-      if (!localPlayer || (msg.player && msg.player.id === localPlayer.id)) return;
-      otherPlayers[msg.player.id] = msg.player;
-      messages.push((msg.player.username || ('#' + msg.player.id)) + ' has entered DragonSpires!');
-      return;
-    }
-    if (msg.type === 'player_left') {
-      if (!localPlayer || msg.id === localPlayer.id) return;
-      var n = (otherPlayers[msg.id] && otherPlayers[msg.id].username) ? otherPlayers[msg.id].username : ('#' + msg.id);
-      messages.push(n + ' has left DragonSpires.');
-      delete otherPlayers[msg.id];
-      return;
-    }
-    if (msg.type === 'player_moved') {
-      if (localPlayer && msg.id === localPlayer.id) {
-        localPlayer.pos_x = msg.x; localPlayer.pos_y = msg.y;
+      me = msg.player;
+      others = {};
+      (msg.players || []).forEach(function(p){ others[p.id] = p; });
+
+      // vitals cache
+      vitals.stamina = me.stamina || 0;  vitals.max_stamina = me.max_stamina || 0;
+      vitals.life    = me.life || 0;     vitals.max_life    = me.max_life || 0;
+      vitals.magic   = me.magic || 0;    vitals.max_magic   = me.max_magic || 0;
+      vitals.gold    = me.gold  || 0;
+
+      // map from server (x-major)
+      if (msg.map && msg.map.width && msg.map.height && msg.map.tilemap) {
+        mapSpec = msg.map;
       } else {
-        if (!otherPlayers[msg.id]) otherPlayers[msg.id] = { id: msg.id, username: msg.username || ('#' + msg.id), pos_x: msg.x, pos_y: msg.y };
-        else { otherPlayers[msg.id].pos_x = msg.x; otherPlayers[msg.id].pos_y = msg.y; }
+        mapSpec = { width: 52, height: 100, tilemap: Array.from({length:52},()=>Array(100).fill(0)) };
       }
+      pushMsg("Welcome to DragonSpires!");
       return;
     }
-    if (msg.type === 'stats_update') {
-      if (localPlayer && msg.stats) {
-        for (var k in msg.stats) localPlayer[k] = msg.stats[k];
-      }
-      return;
-    }
-    if (msg.type === 'chat') {
-      if (typeof msg.text === 'string') {
-        messages.push(msg.text);
-        if (messages.length > 300) messages.shift();
-      }
-      return;
-    }
+
     if (msg.type === 'login_error' || msg.type === 'signup_error') {
-      messages.push(msg.message || 'Auth error');
+      pushMsg(msg.message || 'Auth error');
+      return;
+    }
+
+    if (msg.type === 'player_joined') {
+      if (!me || (msg.player && msg.player.id === me.id)) return;
+      if (msg.player) {
+        others[msg.player.id] = msg.player;
+        pushMsg((msg.player.username || ('#'+msg.player.id)) + " has entered DragonSpires!");
+      }
+      return;
+    }
+
+    if (msg.type === 'player_left') {
+      if (others[msg.id]) {
+        pushMsg((others[msg.id].username || ('#'+msg.id)) + " has left DragonSpires.");
+        delete others[msg.id];
+      }
+      return;
+    }
+
+    if (msg.type === 'player_moved') {
+      if (me && msg.id === me.id) {
+        me.pos_x = msg.x; me.pos_y = msg.y;
+      } else {
+        if (!others[msg.id]) others[msg.id] = { id: msg.id, username: ('#'+msg.id), pos_x: msg.x, pos_y: msg.y };
+        others[msg.id].pos_x = msg.x; others[msg.id].pos_y = msg.y;
+      }
+      return;
+    }
+
+    if (msg.type === 'chat') {
+      if (typeof msg.text === 'string') pushMsg(msg.text);
+      return;
+    }
+
+    if (msg.type === 'vitals') {
+      if (typeof msg.stamina === 'number') vitals.stamina = msg.stamina;
+      if (typeof msg.life === 'number')    vitals.life    = msg.life;
+      if (typeof msg.magic === 'number')   vitals.magic   = msg.magic;
+      return;
     }
   }
 
   // ---- Input ----
-  window.addEventListener('keydown', function(e) {
-    // go from title to login
+  window.addEventListener('keydown', function(e){
     if (connected && connectionPaused) {
-      connectionPaused = false; showLoginGUI = true; return;
+      connectionPaused = false;
+      showLogin = true;
+      return;
     }
 
-    // chat typing mode (pauses game input)
-    if (loggedIn && chatMode) {
-      if (e.key === 'Enter') {
-        var txt = chatBuffer.trim();
-        if (txt.length > 0) {
-          // client-side -pos
-          if (txt.toLowerCase() === '-pos') {
-            var nm = (localPlayer && localPlayer.username) ? localPlayer.username : 'Player';
-            var x = (localPlayer && typeof localPlayer.pos_x === 'number') ? localPlayer.pos_x : 0;
-            var y = (localPlayer && typeof localPlayer.pos_y === 'number') ? localPlayer.pos_y : 0;
-            messages.push('~ ' + nm + ' is currently on Map 1 at location x:' + x + ', y:' + y + '.');
+    // toggle chat
+    if (e.key === 'Enter') {
+      if (!loggedIn) return; // ignore on login screen
+      if (!inputMode) {
+        inputMode = true;
+        inputBuffer = "";
+      } else {
+        // submit
+        var text = inputBuffer.trim();
+        if (text.length) {
+          // client-only command: -pos
+          if (/^-pos$/i.test(text)) {
+            if (me) pushMsg("~ " + me.username + " is currently on Map " + (me.map_id || 'lev01') + " at location x:" + me.pos_x + ", y:" + me.pos_y + ".");
           } else {
-            send({ type: 'chat', text: txt });
+            send({ type: 'chat', text: text.slice(0, CHAT_MAX_CHARS) });
           }
         }
-        chatBuffer = '';
-        chatMode = false;
-        e.preventDefault();
-        return;
+        inputMode = false;
+        inputBuffer = "";
       }
+      return;
+    }
+
+    if (inputMode) {
       if (e.key === 'Backspace') {
-        chatBuffer = chatBuffer.slice(0, -1);
+        inputBuffer = inputBuffer.slice(0, -1);
         e.preventDefault();
-        return;
+      } else if (e.key.length === 1) {
+        if (inputBuffer.length < CHAT_MAX_CHARS) inputBuffer += e.key;
       }
-      if (e.key.length === 1 && chatBuffer.length < CHAT_MAX) {
-        chatBuffer += e.key;
-        e.preventDefault();
-        return;
-      }
-      // ignore other keys while chatting
-      e.preventDefault();
       return;
     }
 
-    // toggle chat on Enter
-    if (loggedIn && e.key === 'Enter') {
-      chatMode = true; chatBuffer = '';
-      e.preventDefault();
-      return;
-    }
-
-    // login typing
-    if (!loggedIn && showLoginGUI && activeField) {
+    // Login typing
+    if (!loggedIn && showLogin) {
       if (e.key === 'Backspace') {
         if (activeField === 'username') usernameStr = usernameStr.slice(0, -1);
-        else passwordStr = passwordStr.slice(0, -1);
-        e.preventDefault(); return;
+        else if (activeField === 'password') passwordStr = passwordStr.slice(0, -1);
+        e.preventDefault();
       } else if (e.key === 'Enter') {
         send({ type: 'login', username: usernameStr, password: passwordStr });
-        e.preventDefault(); return;
+        e.preventDefault();
       } else if (e.key.length === 1) {
         if (activeField === 'username') usernameStr += e.key;
-        else passwordStr += e.key;
-        return;
+        else if (activeField === 'password') passwordStr += e.key;
       }
+      return;
     }
 
-    // movement (blocked if no stamina)
-    if (loggedIn && localPlayer) {
-      var dx = 0, dy = 0;
+    // Movement (if logged in) – cost is enforced server-side; client can still optimistic-check bounds
+    if (loggedIn && me && mapSpec) {
       var k = e.key.toLowerCase();
+      var dx = 0, dy = 0;
       if (k === 'arrowup' || k === 'w') dy = -1;
       else if (k === 'arrowdown' || k === 's') dy = 1;
       else if (k === 'arrowleft' || k === 'a') dx = -1;
       else if (k === 'arrowright' || k === 'd') dx = 1;
-
-      if ((dx !== 0 || dy !== 0) && (localPlayer.stamina || 0) > 0) {
-        send({ type: 'move', dx: dx, dy: dy });
-        localPlayer.stamina = Math.max(0, (localPlayer.stamina || 0) - 1); // optimistic
+      if (dx !== 0 || dy !== 0) {
+        var nx = me.pos_x + dx, ny = me.pos_y + dy;
+        if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
+          // optional optimistic: me.pos_x = nx; me.pos_y = ny;
+          send({ type: 'move', dx: dx, dy: dy });
+        }
       }
     }
   });
 
-  canvas.addEventListener('mousedown', function(e) {
+  canvas.addEventListener('mousedown', function(e){
     var r = canvas.getBoundingClientRect();
     var mx = e.clientX - r.left, my = e.clientY - r.top;
 
-    if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
-
-    if (connected && showLoginGUI && !loggedIn) {
-      function inField(f) { return mx >= f.x && mx <= f.x + f.w && my >= (f.y - 14) && my <= (f.y - 14 + f.h); }
-      function inBtn(b) { return mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h; }
-
-      if (inField(GUI.username)) { activeField = 'username'; return; }
-      if (inField(GUI.password)) { activeField = 'password'; return; }
-
-      if (inBtn(GUI.loginBtn))  { send({ type: 'login', username: usernameStr, password: passwordStr }); return; }
-      if (inBtn(GUI.signupBtn)) { send({ type: 'signup', username: usernameStr, password: passwordStr }); return; }
-
+    if (connected && connectionPaused) {
+      connectionPaused = false;
+      showLogin = true;
+      return;
+    }
+    if (!loggedIn && showLogin) {
+      var u = GUI.username, p = GUI.password, lb = GUI.loginBtn, sb = GUI.signupBtn;
+      // Adjust clickable verticals to the drawn rectangles (y-14 to y-14+h)
+      if (mx >= u.x && mx <= u.x + u.w && my >= u.y - 14 && my <= u.y - 14 + u.h) { activeField = 'username'; return; }
+      if (mx >= p.x && mx <= p.x + p.w && my >= p.y - 14 && my <= p.y - 14 + p.h) { activeField = 'password'; return; }
+      if (mx >= lb.x && mx <= lb.x + lb.w && my >= lb.y && my <= lb.y + lb.h) { send({type:'login', username:usernameStr, password:passwordStr}); return; }
+      if (mx >= sb.x && mx <= sb.x + sb.w && my >= sb.y && my <= sb.y + sb.h) { send({type:'signup', username:usernameStr, password:passwordStr}); return; }
       activeField = null;
     }
   });
 
-  // ---- Iso helpers ----
+  // ---- Iso helpers (x-major) ----
   function isoBase(x, y) { return { x: (x - y) * (TILE_W/2), y: (x + y) * (TILE_H/2) }; }
-  function isoScreen(x, y) {
-    var base = isoBase(x, y);
-    var camX = 0, camY = 0;
-    if (localPlayer) {
-      var cam = isoBase(localPlayer.pos_x + PLAYER_LOC_OFFSET_X, localPlayer.pos_y + PLAYER_LOC_OFFSET_Y);
-      camX = cam.x; camY = cam.y;
-    }
-    return { screenX: PLAYER_SCREEN_X + (base.x - camX), screenY: PLAYER_SCREEN_Y + (base.y - camY) };
+  function worldToScreen(wx, wy, cx, cy) {
+    var b = isoBase(wx, wy);
+    var c = isoBase(cx, cy);
+    var sx = (PLAYER_SCREEN_X - TILE_W/2) + (b.x - c.x);
+    var sy = (PLAYER_SCREEN_Y - TILE_H/2) + (b.y - c.y);
+    return { x: sx, y: sy };
   }
 
-  var tileArtOffsetX = Math.floor((TILE_W - FLOOR_W) / 2);
-  var tileArtOffsetY = Math.floor((TILE_H - FLOOR_H) / 2);
-
-  function drawTileAt(x, y, tileId) {
-    if (!floorTiles.length) return;
-    var tile = floorTiles[tileId] || floorTiles[0];
-    var pos = isoScreen(x, y);
-    ctx.drawImage(tile, Math.round(pos.screenX + tileArtOffsetX), Math.round(pos.screenY + tileArtOffsetY));
-  }
-
-  function drawPlayer(p) {
-    var pos = isoScreen(p.pos_x, p.pos_y);
-
-    if (playerSprite && playerSprite.complete) {
-      ctx.drawImage(
-        playerSprite,
-        Math.round(pos.screenX + PLAYER_SPRITE_OFFSET_X),
-        Math.round(pos.screenY + PLAYER_SPRITE_OFFSET_Y)
-      );
-    } else {
-      // fallback placeholder if sprite not ready
-      ctx.fillStyle = '#1E90FF';
-      ctx.beginPath();
-      ctx.ellipse(pos.screenX, pos.screenY - 6, 12, 14, 0, 0, Math.PI*2);
-      ctx.fill();
-    }
-
-    // name (outlined)
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    var nameX = Math.round(pos.screenX + PLAYER_NAME_OFFSET_X);
-    var nameY = Math.round(pos.screenY + PLAYER_NAME_OFFSET_Y);
-    var label = p.username ? p.username : ('#' + p.id);
-    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(label, nameX, nameY);
-    ctx.fillStyle = 'white'; ctx.fillText(label, nameX, nameY);
-    ctx.lineWidth = 1;
-  }
-
-  function drawChatLog() {
-    ctx.font = '12px monospace';
-    ctx.fillStyle = '#000';
-    ctx.textAlign = 'left';
-    var w = (CHAT.x2 - CHAT.x1) - CHAT.pad*2;
-    var lineH = 16;
-    var y = CHAT.y2 - CHAT.pad;
-    for (var i = messages.length - 1; i >= 0; i--) {
-      var s = messages[i];
-      // simple clip (single line); if you need multi-line wrapping, can extend
-      while (ctx.measureText(s).width > w && s.length > 1) s = s.slice(0, -1);
-      ctx.fillText(s, CHAT.x1 + CHAT.pad, y);
-      y -= lineH;
-      if (y < CHAT.y1 + CHAT.pad) break;
-    }
-  }
-
-  function drawChatInput() {
-    if (!loggedIn || !chatMode) return;
-    ctx.font = '12px monospace';
-    ctx.fillStyle = '#000';
-    ctx.textAlign = 'left';
-    var w = (CHAT_INPUT.x2 - CHAT_INPUT.x1) - CHAT_INPUT.pad*2;
-    var lineH = 16;
-    var y = CHAT_INPUT.y1 + CHAT_INPUT.pad;
-    // wrap downward
-    var s = chatBuffer;
-    while (s.length > 0) {
-      var chunk = s;
-      while (ctx.measureText(chunk).width > w && chunk.length > 1) chunk = chunk.slice(0, -1);
-      ctx.fillText(chunk, CHAT_INPUT.x1 + CHAT_INPUT.pad, y);
-      y += lineH;
-      s = s.slice(chunk.length);
-      if (y > CHAT_INPUT.y2 - CHAT_INPUT.pad) break;
-    }
-  }
-
-  function drawHUD() {
-    if (!localPlayer) return;
-    function clamp(n,a,b){ return Math.max(a, Math.min(b, n)); }
-    var sp = clamp((localPlayer.stamina||0)/(localPlayer.max_stamina||1), 0, 1);
-    var lp = clamp((localPlayer.life||0)/(localPlayer.max_life||1), 0, 1);
-    var sH = sp * HUD.h, lH = lp * HUD.h;
-
-    // stamina (green) in 187..200 x, 19..135 y (fill bottom-up)
-    ctx.fillStyle = '#00ff00';
-    ctx.fillRect(HUD.staminaX1, HUD.yBot - sH, (HUD.staminaX2 - HUD.staminaX1), sH);
-
-    // life (red) in 211..224 x, 19..135 y
-    ctx.fillStyle = '#ff0000';
-    ctx.fillRect(HUD.lifeX1, HUD.yBot - lH, (HUD.lifeX2 - HUD.lifeX1), lH);
-
-    // magic (outlined yellow)
-    ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-    var magicStr = String(localPlayer.magic || 0) + '/' + String(localPlayer.max_magic || 0);
-    ctx.lineWidth = 3; ctx.strokeStyle = 'black';
-    ctx.strokeText(magicStr, HUD.magicText.x, HUD.magicText.y);
-    ctx.fillStyle = 'yellow';
-    ctx.fillText(magicStr, HUD.magicText.x, HUD.magicText.y);
-
-    // gold (outlined white)
-    var goldStr = String(localPlayer.gold || 0);
-    ctx.strokeText(goldStr, HUD.goldText.x, HUD.goldText.y);
-    ctx.fillStyle = 'white';
-    ctx.fillText(goldStr, HUD.goldText.x, HUD.goldText.y);
-    ctx.lineWidth = 1;
-  }
-
-  // ---- Screens ----
-  function drawTitle() {
-    if (imgTitle.complete) ctx.drawImage(imgTitle, 0, 0, CANVAS_W, CANVAS_H);
-    else { ctx.fillStyle = '#000'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
+  // ---- Draw ----
+  function drawConnecting() {
+    if (imgTitle && imgTitle.complete) ctx.drawImage(imgTitle, 0, 0, CANVAS_W, CANVAS_H);
+    else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
     ctx.fillStyle = 'yellow';
     ctx.font = '16px sans-serif';
-    ctx.textAlign = 'left';
     ctx.fillText('Press any key to enter!', 47, 347);
   }
 
   function drawLogin() {
-    var border = imgBorder || imgBorderSrc;
-    if (border && border.complete) ctx.drawImage(border, 0, 0, CANVAS_W, CANVAS_H);
+    // only border (no title)
+    if (borderImage && borderImage.complete) ctx.drawImage(borderImage, 0, 0, CANVAS_W, CANVAS_H);
+    else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
 
-    // labels (white, y -2)
+    // Labels (white), aligned a tad higher (-2)
     ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('Username:', GUI.username.x - 70, GUI.username.y + 2 - 2);
-    ctx.fillText('Password:', GUI.password.x - 70, GUI.password.y + 2 - 2);
+    ctx.fillText('Username:', GUI.username.x - 70, GUI.username.y + 4 - 2);
+    ctx.fillText('Password:', GUI.password.x - 70, GUI.password.y + 4 - 2);
 
-    // username field
-    ctx.fillStyle = (activeField === 'username') ? 'rgb(153,213,255)' : '#fff';
+    // Username field
+    if (activeField === 'username') { ctx.fillStyle = 'rgb(153,213,255)'; }
+    else { ctx.fillStyle = '#fff'; }
     ctx.fillRect(GUI.username.x, GUI.username.y - 14, GUI.username.w, GUI.username.h);
     ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.username.x, GUI.username.y - 14, GUI.username.w, GUI.username.h);
     ctx.fillStyle = '#000'; ctx.font = '12px sans-serif';
     ctx.fillText(usernameStr, GUI.username.x + 4, GUI.username.y + 2);
 
-    // password field
-    ctx.fillStyle = (activeField === 'password') ? 'rgb(153,213,255)' : '#fff';
+    // Password field
+    if (activeField === 'password') { ctx.fillStyle = 'rgb(153,213,255)'; }
+    else { ctx.fillStyle = '#fff'; }
     ctx.fillRect(GUI.password.x, GUI.password.y - 14, GUI.password.w, GUI.password.h);
     ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.password.x, GUI.password.y - 14, GUI.password.w, GUI.password.h);
     ctx.fillStyle = '#000';
-    ctx.fillText(Array(passwordStr.length + 1).join('*'), GUI.password.x + 4, GUI.password.y + 2);
+    ctx.fillText(new Array(passwordStr.length+1).join('*'), GUI.password.x + 4, GUI.password.y + 2);
 
-    // buttons
+    // Buttons
     ctx.fillStyle = '#ddd'; ctx.strokeStyle = '#000';
     ctx.fillRect(GUI.loginBtn.x, GUI.loginBtn.y, GUI.loginBtn.w, GUI.loginBtn.h);
     ctx.strokeRect(GUI.loginBtn.x, GUI.loginBtn.y, GUI.loginBtn.w, GUI.loginBtn.h);
@@ -470,48 +394,183 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.fillText('Login', GUI.loginBtn.x + GUI.loginBtn.w/2, GUI.loginBtn.y + GUI.loginBtn.h - 6);
     ctx.fillText('Create Account', GUI.signupBtn.x + GUI.signupBtn.w/2, GUI.signupBtn.y + GUI.signupBtn.h - 6);
 
-    // chat log on top
-    drawChatLog();
+    // Chat log (no background, black text)
+    drawChat(false);
   }
 
-  function drawGame() {
-    // floor (tilemap[x][y])
-    if (mapSpec && mapSpec.tilemap) {
-      for (var y = 0; y < mapSpec.height; y++) {
-        for (var x = 0; x < mapSpec.width; x++) {
-          var col = mapSpec.tilemap[x];
-          var id = (col && typeof col[y] !== 'undefined') ? col[y] : 0;
-          if (id < 0) id = 0;
-          drawTileAt(x, y, id);
+  function drawFloor() {
+    if (!mapSpec) return;
+    var W = mapSpec.width, H = mapSpec.height;
+
+    // diagonals
+    for (var d = 0; d <= W + H - 2; d++) {
+      var xStart = Math.max(0, d - (H - 1));
+      var xEnd   = Math.min(W - 1, d);
+      for (var x = xStart; x <= xEnd; x++) {
+        var y = d - x;
+        var tid = mapSpec.tilemap[x] && mapSpec.tilemap[x][y] != null ? mapSpec.tilemap[x][y] | 0 : 0;
+        var img = floorTiles[tid] || null;
+        var pos = worldToScreen(x, y, me ? me.pos_x : (W>>1), me ? me.pos_y : (H>>1));
+        var sx = pos.x, sy = pos.y;
+        if (img && img.complete) {
+          ctx.drawImage(img, sx, sy, TILE_W, TILE_H);
+        } else {
+          // fallback diamond
+          ctx.beginPath();
+          ctx.moveTo(sx + TILE_W/2, sy);
+          ctx.lineTo(sx + TILE_W, sy + TILE_H/2);
+          ctx.lineTo(sx + TILE_W/2, sy + TILE_H);
+          ctx.lineTo(sx, sy + TILE_H/2);
+          ctx.closePath();
+          ctx.fillStyle = '#8DBF63'; ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.stroke();
         }
       }
     }
+  }
 
-    // players above floor
+  function drawPlayers() {
+    if (!me) return;
     var list = [];
-    for (var oid in otherPlayers) list.push(otherPlayers[oid]);
-    if (localPlayer) list.push(localPlayer);
+    for (var k in others) if (others.hasOwnProperty(k)) list.push(others[k]);
+    list.push(me);
     list.sort(function(a,b){ return (a.pos_x + a.pos_y) - (b.pos_x + b.pos_y); });
-    for (var i = 0; i < list.length; i++) drawPlayer(list[i]);
 
-    // border
-    var border = imgBorder || imgBorderSrc;
-    if (border && border.complete) ctx.drawImage(border, 0, 0, CANVAS_W, CANVAS_H);
+    for (var i=0;i<list.length;i++) {
+      var p = list[i];
+      var base = worldToScreen(p.pos_x, p.pos_y, me.pos_x, me.pos_y);
+      var drawX = base.x + PLAYER_IMG_OFF_X;
+      var drawY = base.y + PLAYER_IMG_OFF_Y;
 
-    // HUD + chat (on top)
-    drawHUD();
-    drawChatLog();
-    drawChatInput();
+      if (playerSprite && playerSprite.complete) {
+        var w = playerSprite.naturalWidth || playerSprite.width;
+        var h = playerSprite.naturalHeight || playerSprite.height;
+        ctx.drawImage(playerSprite, drawX, drawY, w, h);
+      } else {
+        ctx.fillStyle = (p.id === me.id) ? '#1E90FF' : '#FF6347';
+        ctx.beginPath();
+        ctx.ellipse(base.x + TILE_W/2, base.y + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // name (stroke + fill), centered over sprite top
+      var nameX = drawX + (playerSprite && playerSprite.naturalWidth ? playerSprite.naturalWidth/2 : TILE_W/2);
+      var nameY = drawY + NAME_OFF_Y;
+      var text = p.username || ('#'+p.id);
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(text, nameX + NAME_OFF_X, nameY);
+      ctx.fillStyle = 'white'; ctx.fillText(text, nameX + NAME_OFF_X, nameY);
+      ctx.lineWidth = 1;
+    }
+  }
+
+  function drawHUD() {
+    if (!loggedIn || !me) return;
+
+    // Draw over the border (this function is called after border)
+    // Stamina (green)
+    var s = HUD.stam, l = HUD.life;
+    var sh = s.y2 - s.y1;
+    var lh = l.y2 - l.y1;
+
+    var sPct = vitals.max_stamina ? Math.max(0, Math.min(1, vitals.stamina / vitals.max_stamina)) : 0;
+    var lPct = vitals.max_life    ? Math.max(0, Math.min(1, vitals.life    / vitals.max_life))    : 0;
+
+    var sFill = Math.round(sh * sPct);
+    var lFill = Math.round(lh * lPct);
+
+    // clear columns
+    ctx.clearRect(s.x1, s.y1, s.x2 - s.x1, s.y2 - s.y1);
+    ctx.clearRect(l.x1, l.y1, l.x2 - l.x1, l.y2 - l.y1);
+
+    ctx.fillStyle = 'lime';
+    ctx.fillRect(s.x1, s.y2 - sFill, s.x2 - s.x1, sFill);
+
+    ctx.fillStyle = 'red';
+    ctx.fillRect(l.x1, l.y2 - lFill, l.x2 - l.x1, lFill);
+
+    // Magic text (with black outline like names)
+    var mx = HUD.magicText.x, my = HUD.magicText.y;
+    var magicTxt = (vitals.magic|0) + "/" + (vitals.max_magic|0);
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(magicTxt, mx, my);
+    ctx.fillStyle = 'yellow'; ctx.fillText(magicTxt, mx, my);
+    ctx.lineWidth = 1;
+
+    // Gold text (white with black outline)
+    var gx = HUD.goldText.x, gy = HUD.goldText.y;
+    var goldTxt = String(vitals.gold|0);
+    ctx.textAlign = 'left';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(goldTxt, gx, gy);
+    ctx.fillStyle = 'white'; ctx.fillText(goldTxt, gx, gy);
+    ctx.lineWidth = 1;
+  }
+
+  function drawChat(showBg) {
+    var x1 = CHAT.x1, y1 = CHAT.y1, x2 = CHAT.x2, y2 = CHAT.y2, pad = CHAT.pad;
+    var w = x2 - x1, h = y2 - y1;
+
+    if (showBg) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(x1, y1, w, h);
+      ctx.strokeStyle = '#666'; ctx.strokeRect(x1, y1, w, h);
+    }
+
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#000';
+    ctx.textAlign = 'left';
+    var lineH = 16;
+    var y = y2 - pad;
+    for (var i = messages.length - 1; i >= 0; i--) {
+      var text = messages[i];
+      var mw = ctx.measureText(text).width;
+      if (mw <= w - pad*2) {
+        ctx.fillText(text, x1 + pad, y);
+        y -= lineH;
+      } else {
+        // simple wrap
+        var chunk = text;
+        while (chunk.length > 0 && y >= y1 + pad) {
+          var fit = chunk;
+          while (ctx.measureText(fit).width > (w - pad*2) && fit.length > 1) fit = fit.slice(0, -1);
+          ctx.fillText(fit, x1 + pad, y);
+          y -= lineH;
+          chunk = chunk.slice(fit.length);
+        }
+      }
+      if (y < y1 + pad) break;
+    }
+
+    // input line (top of input box)
+    if (inputMode) {
+      var ix1 = INPUT.x1, iy1 = INPUT.y1, ix2 = INPUT.x2, iy2 = INPUT.y2;
+      ctx.font = '12px monospace';
+      ctx.fillStyle = '#000';
+      ctx.textAlign = 'left';
+      ctx.fillText(inputBuffer, ix1 + pad, iy1);
+    }
+  }
+
+  function drawGame() {
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+
+    drawFloor();  // 1
+    drawPlayers();// 2
+
+    if (borderImage && borderImage.complete) ctx.drawImage(borderImage, 0, 0, CANVAS_W, CANVAS_H); // 3
+
+    drawHUD();    // 4 (over border)
+    drawChat(false); // 5 (no bg)
   }
 
   function loop() {
-    ctx.clearRect(0,0,CANVAS_W,CANVAS_H);
-    if (!connected || connectionPaused) drawTitle();
-    else if (showLoginGUI && !loggedIn) drawLogin();
+    if (!connected) drawConnecting();
+    else if (connectionPaused) drawConnecting();
+    else if (!loggedIn && showLogin) drawLogin();
     else if (loggedIn) drawGame();
     requestAnimationFrame(loop);
   }
-
-  connectToServer();
   loop();
 });
