@@ -1,8 +1,7 @@
 // client.js
-// Isometric rendering with global offset (-32, +16), GUI login (white labels),
-// name labels raised & centered, player stats (stamina/life bars, magic, gold),
-// chat input mode (Enter to type/submit), border magenta key transparency,
-// transparent chat (black text).
+// Isometric rendering with centered local tile/name (+32, -8) and sprite extra (+64, -24),
+// GUI login (white labels aligned), chat input y+2, stats after border & after login,
+// border magenta-key transparency, transparent chat (black text), precise hitboxes.
 
 document.addEventListener('DOMContentLoaded', () => {
   // ---------- CONFIG ----------
@@ -19,10 +18,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const TILE_W = 64, TILE_H = 32;
 
-  // Player anchor and world offset
+  // Base camera anchor (where the local player's tile is intended to sit)
   const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
+
+  // Historical offsets (keep as-is)
+  const WORLD_SHIFT_X = -32, WORLD_SHIFT_Y = 16;
+
+  // NEW centering adjustments you specified (relative to current):
+  // - For the player's actual location + name (apply to ALL tiles so the map centers accordingly)
+  const CENTER_LOC_ADJ_X = 32, CENTER_LOC_ADJ_Y = -8;
+  // - For the player sprite specifically (extra nudge so sprite matches the tile center visually)
+  const SPRITE_CENTER_ADJ_X = 64, SPRITE_CENTER_ADJ_Y = -24;
+
+  // Sprite sheet placement offset (kept)
   const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16;
-  const WORLD_SHIFT_X = -32, WORLD_SHIFT_Y = 16; // NEW global shift for everything
 
   // GUI placement (+50,+50)
   const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
@@ -35,19 +44,18 @@ document.addEventListener('DOMContentLoaded', () => {
     signupBtn: { x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
   };
 
-  // Chat display box (history)
+  // Chat display (history)
   const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
-
-  // Chat input box (type here)
-  const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200 };
+  // Chat input region
+  const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200, extraY: 2 };
 
   // ---------- STATE ----------
   let ws = null;
   let connected = false;
-  let connectionPaused = false; // show "Press any key to enter!"
-  let showLoginGUI = false;     // after user key/click; title never drawn again
+  let connectionPaused = false; // "Press any key to enter!"
+  let showLoginGUI = false;     // after press, title never renders again
   let loggedIn = false;
-  let chatMode = false;         // true when user is typing; enter toggles submit
+  let chatMode = false;
 
   let mapSpec = { width: 10, height: 10, tiles: [] };
 
@@ -55,12 +63,11 @@ document.addEventListener('DOMContentLoaded', () => {
   let passwordStr = "";
   let activeField = null; // 'username'|'password'|null
 
-  // Player objects
   let localPlayer = null; // includes stats
-  let otherPlayers = {};  // id -> player
+  let otherPlayers = {};
 
-  let messages = [];      // chat history bottom-up
-  let typingBuffer = "";  // chat input line while chatMode
+  let messages = [];
+  let typingBuffer = "";
 
   // ---------- ASSETS ----------
   const imgTitle = new Image();
@@ -86,7 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       octx.putImageData(data, 0, 0);
       borderProcessed = off;
-    } catch (e) {
+    } catch {
       console.warn("Border transparency failed (CORS?) — using opaque border.");
       borderProcessed = null;
     }
@@ -163,9 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'login_success':
       case 'signup_success': {
         loggedIn = true;
-        localPlayer = {
-          ...msg.player
-        };
+        localPlayer = { ...msg.player };
         otherPlayers = {};
         if (Array.isArray(msg.players)) {
           msg.players.forEach(p => { if (!localPlayer || p.id !== localPlayer.id) otherPlayers[p.id] = p; });
@@ -176,8 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'player_joined':
         if (!localPlayer || msg.player.id !== localPlayer.id) {
           otherPlayers[msg.player.id] = msg.player;
-          const name = msg.player.username || msg.player.id;
-          pushChat(`${name} has entered DragonSpires!`);
+          pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
         }
         break;
       case 'player_moved':
@@ -310,15 +314,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- RENDER HELPERS ----------
   function isoBase(x, y) { return { x: (x - y) * (TILE_W/2), y: (x + y) * (TILE_H/2) }; }
+
+  // Camera transform -> top-left of the diamond for (x,y)
   function isoScreen(x, y) {
     const base = isoBase(x, y);
     const camBase = localPlayer ? isoBase(localPlayer.pos_x, localPlayer.pos_y)
                                 : isoBase(Math.floor(mapSpec.width/2), Math.floor(mapSpec.height/2));
     let screenX = PLAYER_SCREEN_X - TILE_W/2 + (base.x - camBase.x);
     let screenY = PLAYER_SCREEN_Y - TILE_H/2 + (base.y - camBase.y);
-    // Apply global world shift (-32, +16)
+
+    // Apply world shift
     screenX += WORLD_SHIFT_X;
     screenY += WORLD_SHIFT_Y;
+
+    // Apply your new center adjustment for "actual location" & names
+    screenX += CENTER_LOC_ADJ_X;
+    screenY += CENTER_LOC_ADJ_Y;
+
     return { screenX, screenY };
   }
 
@@ -337,8 +349,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
-    const drawX = screenX + PLAYER_OFFSET_X;
-    const drawY = screenY + PLAYER_OFFSET_Y;
+
+    // Name label: centered over the tile center, raised a bit
+    const nameX = screenX + TILE_W / 2;
+    const nameY = screenY - 20;
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
+    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
+    ctx.lineWidth = 1;
+
+    // Sprite: apply base sprite offset + extra sprite center nudges
+    const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
+    const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
 
     if (playerSprite && playerSprite.complete) {
       const w = playerSprite.naturalWidth || playerSprite.width;
@@ -350,49 +373,37 @@ document.addEventListener('DOMContentLoaded', () => {
       ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
       ctx.fill();
     }
-
-    // Name label: centered, raised higher than before
-    const nameX = screenX + TILE_W / 2;
-    const nameY = screenY - 20; // was -10; raise to avoid overlap
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
-    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
-    ctx.lineWidth = 1;
   }
 
-  // Stats UI
+  // Stats (only after login; must render AFTER border)
   function drawBarsAndStats() {
-    if (!localPlayer) return;
+    if (!loggedIn || !localPlayer) return;
 
-    // BAR geometry
+    // Geometry
     const topY = 19, bottomY = 135;
     const span = bottomY - topY; // 116
 
-    // --- Stamina (bright green) x:187..200
+    // Stamina (bright green) x:187..200
     const sPct = Math.max(0, Math.min(1, (localPlayer.stamina ?? 0) / Math.max(1, (localPlayer.max_stamina ?? 1))));
     const sFillY = topY + (1 - sPct) * span;
     ctx.fillStyle = '#00ff00';
     ctx.fillRect(187, sFillY, 13, bottomY - sFillY);
 
-    // --- Life (bright red) x:211..224
+    // Life (bright red) x:211..224
     const lPct = Math.max(0, Math.min(1, (localPlayer.life ?? 0) / Math.max(1, (localPlayer.max_life ?? 1))));
     const lFillY = topY + (1 - lPct) * span;
     ctx.fillStyle = '#ff0000';
     ctx.fillRect(211, lFillY, 13, bottomY - lFillY);
 
-    // --- Magic text (yellow) at (184,239): "magic/max_magic"
+    // Magic text (yellow) at (184,239) "magic/max_magic"
     ctx.font = '14px monospace';
     ctx.textAlign = 'left';
     ctx.fillStyle = 'yellow';
-    const mCur = localPlayer.magic ?? 0;
-    const mMax = localPlayer.max_magic ?? 0;
-    ctx.fillText(`${mCur}/${mMax}`, 184, 239);
+    ctx.fillText(`${localPlayer.magic ?? 0}/${localPlayer.max_magic ?? 0}`, 184, 239);
 
-    // --- Gold text (white with black stroke) at (177,267)
+    // Gold text (white w/ black stroke) at (177,267)
     const gold = localPlayer.gold ?? 0;
     ctx.font = '14px sans-serif';
-    ctx.textAlign = 'left';
     ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(String(gold), 177, 267);
     ctx.fillStyle = 'white'; ctx.fillText(String(gold), 177, 267);
     ctx.lineWidth = 1;
@@ -417,16 +428,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function drawChatInput() {
     if (!chatMode) return;
-    const { x1, y1, x2, y2, pad } = CHAT_INPUT;
+    const { x1, y1, x2, y2, pad, extraY } = CHAT_INPUT;
     const w = x2 - x1;
-    // No background per your request; just render text at top of the range and wrap downward
     ctx.font = '12px monospace';
     ctx.fillStyle = '#000';
     ctx.textAlign = 'left';
 
     const words = typingBuffer.split(/(\s+)/); // keep spaces
     let line = '';
-    let y = y1 + pad;
+    let y = y1 + pad + extraY; // render slightly lower (y+2)
     for (let i = 0; i < words.length; i++) {
       const test = line + words[i];
       if (ctx.measureText(test).width > w - pad*2) {
@@ -461,10 +471,10 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
     else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
 
-    // labels WHITE (per request)
+    // labels WHITE and nudged up by 2px
     ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.textAlign = 'left';
-    ctx.fillText('Username:', GUI.username.x - 70, GUI.username.y + 4);
-    ctx.fillText('Password:', GUI.password.x - 70, GUI.password.y + 4);
+    ctx.fillText('Username:', GUI.username.x - 70, GUI.username.y + 2); // was +4
+    ctx.fillText('Password:', GUI.password.x - 70, GUI.password.y + 2); // was +4
 
     // username field
     const uTop = FIELD_TOP(GUI.username.y);
@@ -492,7 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.fillText('Login', GUI.loginBtn.x + GUI.loginBtn.w/2, GUI.loginBtn.y + GUI.loginBtn.h - 6);
     ctx.fillText('Create Account', GUI.signupBtn.x + GUI.signupBtn.w/2, GUI.signupBtn.y + GUI.signupBtn.h - 6);
 
-    // history on top
+    // chat history overlay
     drawChatHistory();
   }
 
@@ -515,12 +525,12 @@ document.addEventListener('DOMContentLoaded', () => {
     all.sort((a,b) => (a.pos_x + a.pos_y) - (b.pos_x + b.pos_y));
     all.forEach(p => drawPlayer(p, localPlayer && p.id === localPlayer.id));
 
-    // stats UI before border so border can frame — but bars are meant to be visible; border has transparent magenta anyway
-    drawBarsAndStats();
-
-    // border
+    // border first
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
+
+    // THEN stats on top (per request)
+    drawBarsAndStats();
 
     // chat layers
     drawChatHistory();
