@@ -72,6 +72,34 @@ document.addEventListener('DOMContentLoaded', () => {
   let localPlayer = null;
   let otherPlayers = {};
 
+// Player animation & direction (client-side only; server doesn't need changes for visuals)
+const DIRS = { UP: 'up', DOWN: 'down', LEFT: 'left', RIGHT: 'right' };
+const WALK_SEQ = {
+  up:    [16,17,18,17],   // up_walk_1, up, up_walk_2, up
+  down:  [1,2,3,2],       // down_walk_1, down, down_walk_2, down
+  left:  [11,12,13,12],   // left_walk_1, left, left_walk_2, left
+  right: [6,7,8,7]        // right_walk_1, right, right_walk_2, right
+};
+const IDLE_IDX = { up: 17, down: 2, left: 12, right: 7 };
+const ATTACK_IDX = {
+  up:    [19,20], // up_attack_1, up_attack_2
+  down:  [4,5],   // down_attack_1, down_attack_2
+  left:  [14,15], // left_attack_1, left_attack_2
+  right: [9,10]   // right_attack_1, right_attack_2
+};
+const STAND_IDX = 21;
+const SIT_IDX = 22;
+
+function ensureAnimState(p) {
+  if (!p) return;
+  if (!p.dir) p.dir = DIRS.DOWN;
+  if (typeof p.walkStep !== 'number') p.walkStep = 0;
+  if (typeof p.animIndex !== 'number') p.animIndex = STAND_IDX;
+  if (typeof p.attackStep !== 'number') p.attackStep = 0;
+  if (typeof p.lastAttackMs !== 'number') p.lastAttackMs = 0;
+}
+
+
   // Chat
   let messages = [];
   let typingBuffer = "";
@@ -103,30 +131,60 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // Player sprite: crop + **magenta** -> transparent
-  const imgPlayerSrc = new Image();
-  imgPlayerSrc.src = "/assets/player.gif";
-  let playerSprite = null;
-  imgPlayerSrc.onload = () => {
+  // ---------- KNIGHT SPRITES (from /assets/player.json), magenta keyed, variable sizes ----------
+const imgPlayerSrc = new Image();
+imgPlayerSrc.src = "/assets/player.gif";
+
+// Frames are 1-based to match your index mapping 1..22
+let knightFrames = []; // knightFrames[i] = { img, w, h }
+let knightReady = false;
+
+// We'll preserve previous visual alignment by treating 44x55 as the baseline (your old crop)
+const BASE_W = 44, BASE_H = 55;
+
+(function loadKnight() {
+  const jsonPromise = fetch("/assets/player.json").then(r => r.json()).catch(() => null);
+
+  function waitImage(img) {
+    return new Promise((resolve) => {
+      if (img.complete) return resolve();
+      img.onload = resolve; img.onerror = resolve;
+    });
+  }
+
+  function magentaToAlpha(ctx, w, h) {
     try {
-      const sx = 264, sy = 1, sw = 44, sh = 55;
-      const off = document.createElement('canvas');
-      off.width = sw; off.height = sh;
-      const octx = off.getContext('2d');
-      octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
-      const data = octx.getImageData(0,0,sw,sh);
-      for (let i = 0; i < data.data.length; i += 4) {
-        const r = data.data[i], g = data.data[i+1], b = data.data[i+2];
-        if (r === 255 && g === 0 && b === 255) data.data[i+3] = 0; // magenta
+      const data = ctx.getImageData(0, 0, w, h);
+      const d = data.data;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
       }
-      octx.putImageData(data, 0, 0);
-      const img = new Image();
-      img.src = off.toDataURL();
-      playerSprite = img;
-    } catch {
-      playerSprite = imgPlayerSrc;
-    }
-  };
+      ctx.putImageData(data, 0, 0);
+    } catch { /* ignore if tainted */ }
+  }
+
+  Promise.all([waitImage(imgPlayerSrc), jsonPromise]).then(([_, meta]) => {
+    if (!meta || !Array.isArray(meta.knight_coords)) return;
+
+    const off = document.createElement("canvas");
+    const octx = off.getContext("2d");
+
+    meta.knight_coords.forEach((quad, idx) => {
+      const [sx, sy, sw, sh] = quad;
+      off.width = sw; off.height = sh;
+      octx.clearRect(0, 0, sw, sh);
+      octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
+      magentaToAlpha(octx, sw, sh);
+
+      const frameImg = new Image();
+      frameImg.src = off.toDataURL();
+      knightFrames[idx + 1] = { img: frameImg, w: sw, h: sh };
+    });
+
+    knightReady = true;
+  });
+})();
+
 
   // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
   const imgFloor = new Image();
@@ -327,14 +385,26 @@ fetch('map.json')
       case 'signup_success': {
         loggedIn = true;
         localPlayer = { ...msg.player };
+        ensureAnimState(localPlayer);
+
         otherPlayers = {};
-        if (Array.isArray(msg.players)) msg.players.forEach(p => { if (!localPlayer || p.id !== localPlayer.id) otherPlayers[p.id] = p; });
+        if (Array.isArray(msg.players)) {
+                  msg.players.forEach(p => {
+                    if (!localPlayer || p.id !== localPlayer.id) {
+                      otherPlayers[p.id] = p;
+                      ensureAnimState(otherPlayers[p.id]);
+                    }
+                  });
+                }
+
         pushChat("Welcome to DragonSpires!");
         break;
       }
       case 'player_joined':
         if (!localPlayer || msg.player.id !== localPlayer.id) {
           otherPlayers[msg.player.id] = msg.player;
+          ensureAnimState(otherPlayers[msg.player.id]);
+
           pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
         }
         break;
@@ -419,24 +489,48 @@ fetch('map.json')
       return;
     }
 
+    // Attack toggle on TAB: alternate _attack_1 <-> _attack_2 for current direction
+    if (e.key === 'Tab' && loggedIn && localPlayer) {
+      ensureAnimState(localPlayer);
+      const pair = ATTACK_IDX[localPlayer.dir] || [STAND_IDX, STAND_IDX];
+      localPlayer.attackStep = (localPlayer.attackStep + 1) % pair.length;
+      localPlayer.animIndex = pair[localPlayer.attackStep];
+      localPlayer.lastAttackMs = Date.now();
+      e.preventDefault();
+      return;
+    }
+
+
     // Movement (stamina gate; **1** per move)
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       const k = e.key.toLowerCase();
-      let dx = 0, dy = 0;
-      if (k === 'arrowup' || k === 'w') dy = -1;
-      else if (k === 'arrowdown' || k === 's') dy = 1;
-      else if (k === 'arrowleft' || k === 'a') dx = -1;
-      else if (k === 'arrowright' || k === 'd') dx = 1;
+      let dx = 0, dy = 0, newDir = null;
+      if (k === 'arrowup' || k === 'w') { dy = -1; newDir = DIRS.UP; }
+      else if (k === 'arrowdown' || k === 's') { dy = 1; newDir = DIRS.DOWN; }
+      else if (k === 'arrowleft' || k === 'a') { dx = -1; newDir = DIRS.LEFT; }
+      else if (k === 'arrowright' || k === 'd') { dx = 1; newDir = DIRS.RIGHT; }
+    
       if (dx || dy) {
+        ensureAnimState(localPlayer);
+        if (newDir) localPlayer.dir = newDir;
+    
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
-          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
+          // spend stamina locally for responsiveness
+          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1);
           localPlayer.pos_x = nx; localPlayer.pos_y = ny;
-          send({ type: 'move', dx, dy });
+    
+          // advance walk animation: dir sequence [0..3]
+          const seq = WALK_SEQ[localPlayer.dir] || [STAND_IDX];
+          localPlayer.walkStep = (localPlayer.walkStep + 1) % seq.length;
+          localPlayer.animIndex = seq[localPlayer.walkStep];
+    
+          send({ type: 'move', dx, dy }); // unchanged protocol
         }
       }
     }
+
   });
 
   canvas.addEventListener('mousedown', (e) => {
@@ -513,29 +607,46 @@ function drawItemAtTile(sx, sy, itemIndex) {
 
 
   function drawPlayer(p, isLocal) {
-    const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
-    // Name centered, adjusted x:-2, y:-14 from previous baseline
-    const nameX = screenX + TILE_W / 2 - 2;
-    const nameY = screenY - 34; // (-20 - 14)
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
-    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
-    ctx.lineWidth = 1;
+  ensureAnimState(p);
+  const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
 
-    const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
-    const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
-    if (playerSprite && playerSprite.complete) {
-      const w = playerSprite.naturalWidth || playerSprite.width;
-      const h = playerSprite.naturalHeight || playerSprite.height;
-      ctx.drawImage(playerSprite, drawX, drawY, w, h);
-    } else {
-      ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
-      ctx.beginPath();
-      ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
-      ctx.fill();
-    }
+  // Name centered, adjusted x:-2, y:-14 (unchanged)
+  const nameX = screenX + TILE_W / 2 - 2;
+  const nameY = screenY - 34;
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
+  ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
+  ctx.lineWidth = 1;
+
+  // pick frame (fallback to STAND if not ready)
+  let frameIdx = p.animIndex || STAND_IDX;
+  if (!knightReady || !knightFrames[frameIdx]) frameIdx = STAND_IDX;
+  const fr = knightFrames[frameIdx];
+
+  // Base top-left from your prior tuning
+  const baseX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
+  const baseY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
+
+  if (fr && fr.img && fr.img.complete) {
+    const w = fr.w, h = fr.h;
+
+    // Dynamic correction for variable frame sizes:
+    // - Keep feet at same ground line: subtract (h - BASE_H) vertically
+    // - Keep body horizontally centered as before: subtract half of (w - BASE_W)
+    const adjX = Math.round(-(w - BASE_W) / 2);
+    const adjY = -(h - BASE_H);
+
+    ctx.drawImage(fr.img, baseX + adjX, baseY + adjY, w, h);
+  } else {
+    // fallback ellipse
+    ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
+    ctx.beginPath();
+    ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
+    ctx.fill();
   }
+}
+
 
   function drawBarsAndStats() {
     if (!loggedIn || !localPlayer) return;
@@ -652,6 +763,13 @@ function drawItemAtTile(sx, sy, itemIndex) {
   }
 
   function drawGame() {
+    // inside drawGame(), right after "if (!localPlayer) return;" is fine
+    ensureAnimState(localPlayer);
+    if (localPlayer.lastAttackMs && (Date.now() - localPlayer.lastAttackMs) > 1000) {
+      localPlayer.animIndex = IDLE_IDX[localPlayer.dir] || STAND_IDX;
+      localPlayer.lastAttackMs = 0; // stop checking until next attack
+    }
+
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
