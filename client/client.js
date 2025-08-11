@@ -208,6 +208,103 @@ const BASE_W = 44, BASE_H = 55;
   });
 })();
 
+// ---------- KNIGHT SPRITES (variable-size frames from /assets/player.json) ----------
+let knightFrames = [];        // 1-based: knightFrames[i] = {img,w,h}
+let knightReady = false;
+
+// Keep your previous visual baseline (old crop ~44x55)
+const BASE_W = 44, BASE_H = 55;
+
+// Index map you provided
+const STAND_IDX = 21, SIT_IDX = 22;
+const WALK_SEQ = {
+  down:  [1, 2, 3, 2],
+  right: [6, 7, 8, 7],
+  left:  [11,12,13,12],
+  up:    [16,17,18,17],
+};
+const IDLE_IDX = { down: 2, right: 7, left: 12, up: 17 };
+const ATTACK_IDX = {
+  down:  [4,5],
+  right: [9,10],
+  left:  [14,15],
+  up:    [19,20],
+};
+
+function waitImageNoOverride(img) {
+  return new Promise((resolve) => {
+    if (img.complete) return resolve();
+    img.addEventListener('load', resolve, { once: true });
+    img.addEventListener('error', resolve, { once: true });
+  });
+}
+function magentaToAlpha(ctx, w, h) {
+  try {
+    const data = ctx.getImageData(0,0,w,h); const d = data.data;
+    for (let i=0;i<d.length;i+=4) if (d[i]===255 && d[i+1]===0 && d[i+2]===255) d[i+3]=0;
+    ctx.putImageData(data,0,0);
+  } catch { /* ignore if tainted */ }
+}
+(function loadKnightFrames() {
+  const jsonP = fetch("/assets/player.json").then(r => r.json()).catch(() => null);
+
+  Promise.all([waitImageNoOverride(imgPlayerSrc), jsonP]).then(async ([_, meta]) => {
+    if (!meta) { console.error("player.json missing/parse failed"); return; }
+
+    // Accept several shapes: knight_coords / player_coords / coords / frames / raw array
+    const coords =
+      (Array.isArray(meta.knight_coords) && meta.knight_coords) ||
+      (Array.isArray(meta.player_coords) && meta.player_coords) ||
+      (Array.isArray(meta.coords) && meta.coords) ||
+      (Array.isArray(meta.frames) && meta.frames) ||
+      (Array.isArray(meta) ? meta : null);
+
+    if (!coords) { console.error("player.json: no coords array found"); return; }
+
+    const off = document.createElement('canvas');
+    const octx = off.getContext('2d');
+
+    const loads = [];
+    coords.forEach((quad, i) => {
+      if (!Array.isArray(quad) || quad.length < 4) return;
+      const [sx, sy, sw, sh] = quad.map(n => Number(n)||0);
+      if (sw<=0 || sh<=0) return;
+
+      off.width = sw; off.height = sh;
+      octx.clearRect(0,0,sw,sh);
+      octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
+      magentaToAlpha(octx, sw, sh);
+
+      const img = new Image();
+      img.src = off.toDataURL();
+      knightFrames[i+1] = { img, w: sw, h: sh };
+      loads.push(waitImageNoOverride(img));
+    });
+
+    await Promise.all(loads);
+    knightReady = knightFrames.some(Boolean);
+  });
+})();
+
+function ensureAnimState(p) {
+  if (!p) return;
+  if (!p.dir) p.dir = 'down';
+  if (!p.animIndex) p.animIndex = IDLE_IDX[p.dir] || STAND_IDX;
+  if (p.walkTick == null) p.walkTick = 0;
+  if (p.attackToggle == null) p.attackToggle = false;
+}
+function stepWalkAnim(p) {
+  ensureAnimState(p);
+  const seq = WALK_SEQ[p.dir] || WALK_SEQ.down;
+  p.walkTick = (p.walkTick + 1) % seq.length;
+  p.animIndex = seq[p.walkTick];
+}
+function setDir(p, dir) {
+  ensureAnimState(p);
+  p.dir = dir;
+  // if not actively walking/attacking, show the idle of that direction
+  if (!p._attacking) p.animIndex = IDLE_IDX[dir] || STAND_IDX;
+}
 
 
   // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
@@ -421,11 +518,15 @@ fetch('map.json')
                   });
                 }
 
+        ensureAnimState(localPlayer);
+        
         pushChat("Welcome to DragonSpires!");
         break;
       }
       case 'player_joined':
         if (!localPlayer || msg.player.id !== localPlayer.id) {
+          ensureAnimState(msg.player);
+
           otherPlayers[msg.player.id] = msg.player;
           ensureAnimState(otherPlayers[msg.player.id]);
 
@@ -433,10 +534,22 @@ fetch('map.json')
         }
         break;
       case 'player_moved':
+        const op = otherPlayers[msg.id];
+        if (op) {
+          const dx = msg.x - (op.pos_x ?? msg.x);
+          const dy = msg.y - (op.pos_y ?? msg.y);
+          if (Math.abs(dx) + Math.abs(dy) > 0) {
+            if (Math.abs(dx) >= Math.abs(dy)) setDir(op, dx > 0 ? 'right' : 'left');
+            else setDir(op, dy > 0 ? 'down' : 'up');
+            stepWalkAnim(op);
+          }
+          op.pos_x = msg.x; op.pos_y = msg.y;
+        }
+
         if (localPlayer && msg.id === localPlayer.id) { localPlayer.pos_x = msg.x; localPlayer.pos_y = msg.y; }
         else {
           if (!otherPlayers[msg.id]) otherPlayers[msg.id] = { id: msg.id, username: `#${msg.id}`, pos_x: msg.x, pos_y: msg.y };
-          else { otherPlayers[msg.id].pos_x = msg.x; otherPlayers[msg.id].pos_y = msg.y; }
+          else { otherPlayers[msg.id].pos_x = msg.x; otherPlayers[msg.id].pos_y = msg.y; ensureAnimState(otherPlayers[msg.id]); }
         }
         break;
       case 'player_left': {
@@ -474,6 +587,24 @@ fetch('map.json')
   // ---------- INPUT ----------
   window.addEventListener('keydown', (e) => {
     if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
+// Attack: TAB toggles between _attack_1/_attack_2 for current direction,
+// and snaps back to directional idle after 1s if no further TAB.
+if (loggedIn && e.key === 'Tab') {
+  e.preventDefault();
+  if (!localPlayer) return;
+  ensureAnimState(localPlayer);
+  const pair = ATTACK_IDX[localPlayer.dir] || ATTACK_IDX.down;
+  localPlayer.attackToggle = !localPlayer.attackToggle;
+  localPlayer.animIndex = pair[localPlayer.attackToggle ? 1 : 0];
+  localPlayer._attacking = true;
+  if (localPlayer._attackTimer) clearTimeout(localPlayer._attackTimer);
+  localPlayer._attackTimer = setTimeout(() => {
+    localPlayer._attacking = false;
+    localPlayer.animIndex = IDLE_IDX[localPlayer.dir] || STAND_IDX;
+  }, 1000);
+  return;
+}
+
 
     // Toggle / submit chat
     if (e.key === 'Enter' && loggedIn) {
@@ -528,6 +659,20 @@ fetch('map.json')
     // Movement (stamina gate; **1** per move)
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
+// Movement (existing code) ...
+if (dx || dy) {
+  // Set facing from input
+  if (dy < 0) setDir(localPlayer, 'up');
+  else if (dy > 0) setDir(localPlayer, 'down');
+  else if (dx < 0) setDir(localPlayer, 'left');
+  else if (dx > 0) setDir(localPlayer, 'right');
+
+  // Advance walking frame locally
+  stepWalkAnim(localPlayer);
+
+  // ...keep your existing stamina, bounds, pos, send({type:'move',...}) untouched
+}
+
       const k = e.key.toLowerCase();
       let dx = 0, dy = 0, newDir = null;
       if (k === 'arrowup' || k === 'w') { dy = -1; newDir = DIRS.UP; }
@@ -631,10 +776,9 @@ function drawItemAtTile(sx, sy, itemIndex) {
 
 
   function drawPlayer(p, isLocal) {
-  ensureAnimState(p);
   const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
 
-  // Name centered, adjusted x:-2, y:-14 (unchanged)
+  // Name (unchanged)
   const nameX = screenX + TILE_W / 2 - 2;
   const nameY = screenY - 34;
   ctx.font = '12px sans-serif';
@@ -643,37 +787,42 @@ function drawItemAtTile(sx, sy, itemIndex) {
   ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
   ctx.lineWidth = 1;
 
-  // pick frame (fallback to STAND if not ready)
-  let frameIdx = p.animIndex || STAND_IDX;
-  // fallback if not ready or out of bounds
-  if (!knightReady || !knightFrames[frameIdx]) {
-    frameIdx = knightFrames[STAND_IDX] ? STAND_IDX : 1;
+  // Prefer knight frames if ready; fallback to old single sprite; else ellipse
+  let drew = false;
+
+  if (knightReady) {
+    let idx = (p.animIndex|0) || STAND_IDX;
+    if (!knightFrames[idx]) idx = STAND_IDX;
+    const fr = knightFrames[idx];
+    if (fr && fr.img && fr.img.complete) {
+      // Keep feet anchored using baseline (44x55) and your tuned anchor
+      const baseX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
+      const baseY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
+      // Horizontal center and vertical feet alignment
+      const dx = Math.floor((BASE_W - fr.w) / 2);
+      const dy = (BASE_H - fr.h);
+      ctx.drawImage(fr.img, baseX + dx, baseY + dy);
+      drew = true;
+    }
   }
-  const fr = knightFrames[frameIdx];
 
+  if (!drew && playerSprite && playerSprite.complete) {
+    const w = playerSprite.naturalWidth || playerSprite.width;
+    const h = playerSprite.naturalHeight || playerSprite.height;
+    const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
+    const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
+    ctx.drawImage(playerSprite, drawX, drawY, w, h);
+    drew = true;
+  }
 
-  // Base top-left from your prior tuning
-  const baseX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
-  const baseY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
-
-  if (fr && fr.img && fr.img.complete) {
-    const w = fr.w, h = fr.h;
-
-    // Dynamic correction for variable frame sizes:
-    // - Keep feet at same ground line: subtract (h - BASE_H) vertically
-    // - Keep body horizontally centered as before: subtract half of (w - BASE_W)
-    const adjX = Math.round(-(w - BASE_W) / 2);
-    const adjY = -(h - BASE_H);
-
-    ctx.drawImage(fr.img, baseX + adjX, baseY + adjY, w, h);
-  } else {
-    // fallback ellipse
+  if (!drew) {
     ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
     ctx.beginPath();
     ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
     ctx.fill();
   }
 }
+
 
 
   function drawBarsAndStats() {
