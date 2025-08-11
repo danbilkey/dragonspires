@@ -163,27 +163,51 @@ const BASE_W = 44, BASE_H = 55;
     } catch { /* ignore if tainted */ }
   }
 
-  Promise.all([waitImage(imgPlayerSrc), jsonPromise]).then(([_, meta]) => {
-    if (!meta || !Array.isArray(meta.knight_coords)) return;
+  Promise.all([waitImage(imgPlayerSrc), jsonPromise]).then(async ([_, meta]) => {
+    if (!meta) { console.error("player.json not found/parsed"); return; }
+
+    // Accept several possible shapes: {knight_coords:[...]}, {player_coords:[...]}, {coords:[...]}, or raw array
+    let coords =
+      (Array.isArray(meta.knight_coords) && meta.knight_coords) ||
+      (Array.isArray(meta.player_coords) && meta.player_coords) ||
+      (Array.isArray(meta.coords) && meta.coords) ||
+      (Array.isArray(meta.frames) && meta.frames) ||
+      (Array.isArray(meta) ? meta : null);
+
+    if (!coords) {
+      console.error("player.json: no coords array found (expected knight_coords / player_coords / coords / frames / root array)");
+      return;
+    }
 
     const off = document.createElement("canvas");
     const octx = off.getContext("2d");
 
-    meta.knight_coords.forEach((quad, idx) => {
-      const [sx, sy, sw, sh] = quad;
+    const loads = [];
+
+    coords.forEach((quad, idx) => {
+      if (!Array.isArray(quad) || quad.length < 4) return;
+      const [sx, sy, sw, sh] = quad.map(n => Number(n) || 0);
+      if (sw <= 0 || sh <= 0) return;
+
       off.width = sw; off.height = sh;
       octx.clearRect(0, 0, sw, sh);
       octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
       magentaToAlpha(octx, sw, sh);
 
       const frameImg = new Image();
+      const p = waitImage(frameImg);
       frameImg.src = off.toDataURL();
       knightFrames[idx + 1] = { img: frameImg, w: sw, h: sh };
+      loads.push(p);
     });
 
+    // Wait for every frame image to finish loading before enabling sprites
+    await Promise.all(loads);
+    if (!knightFrames[1]) { console.error("No knight frames loaded"); return; }
     knightReady = true;
   });
 })();
+
 
 
   // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
@@ -621,8 +645,12 @@ function drawItemAtTile(sx, sy, itemIndex) {
 
   // pick frame (fallback to STAND if not ready)
   let frameIdx = p.animIndex || STAND_IDX;
-  if (!knightReady || !knightFrames[frameIdx]) frameIdx = STAND_IDX;
+  // fallback if not ready or out of bounds
+  if (!knightReady || !knightFrames[frameIdx]) {
+    frameIdx = knightFrames[STAND_IDX] ? STAND_IDX : 1;
+  }
   const fr = knightFrames[frameIdx];
+
 
   // Base top-left from your prior tuning
   const baseX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
