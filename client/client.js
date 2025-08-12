@@ -138,24 +138,25 @@ const AnimIndex = {
 };
 function idleIndexForDir(dir) {
   switch (dir) {
-    case 'down': return AnimIndex.down;   // 2
+    case 'down': return AnimIndex.down;   // 1-based label: 2
     case 'left': return AnimIndex.left;   // 12
     case 'up':   return AnimIndex.up;     // 17
     case 'right':
     default:     return AnimIndex.right;  // 7 (default)
   }
 }
-// Wait helper
 function waitImage(img) { return new Promise(r => { if (img.complete) r(); else { img.onload = r; img.onerror = r; } }); }
 
 Promise.all([
   waitImage(imgPlayerSrc),
   fetch('/assets/player.json').then(r => r.json()).catch(() => null)
 ]).then(([_, meta]) => {
-  if (!meta || !Array.isArray(meta.knight)) return;
-  const list = meta.knight; // array of [x, y, w, h] in the given order (1..22)
+  // Accept either { knight:[...] } or a top-level array [...]
+  const list = Array.isArray(meta?.knight) ? meta.knight
+             : Array.isArray(meta) ? meta
+             : null;
+  if (!list || list.length < 22) return;
 
-  // Use first frame as the baseline to align bottoms and center frames
   const baseW = list[0][2], baseH = list[0][3];
 
   const off = document.createElement('canvas');
@@ -181,13 +182,12 @@ Promise.all([
 
     return {
       img, w: sw, h: sh,
-      // horizontally center each varying width around the same anchor;
-      // align bottoms using the first frame as baseline:
-      offsetX: Math.round((baseW - sw) / 2),
-      offsetY: Math.round(baseH - sh)
+      offsetX: Math.round((baseW - sw) / 2), // horizontal center
+      offsetY: Math.round(baseH - sh)        // bottom align
     };
   });
 });
+
 
   
   // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
@@ -483,23 +483,32 @@ fetch('map.json')
     }
 
     // Movement (stamina gate; **1** per move)
-    if (loggedIn && localPlayer) {
-      if ((localPlayer.stamina ?? 0) <= 0) return;
-      const k = e.key.toLowerCase();
-      let dx = 0, dy = 0;
-       if (k === 'arrowup' || k === 'w')       { dy = -1; newDir = 'up'; }
-        else if (k === 'arrowdown' || k === 's'){ dy = 1;  newDir = 'down'; }
-        else if (k === 'arrowleft' || k === 'a'){ dx = -1; newDir = 'left'; }
-        else if (k === 'arrowright' || k === 'd'){ dx = 1; newDir = 'right'; }
-      if (dx || dy) {
-        const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
-        if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
-          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
-          localPlayer.pos_x = nx; localPlayer.pos_y = ny;
-          send({ type: 'move', dx, dy });
-        }
-      }
+if (loggedIn && localPlayer) {
+  if ((localPlayer.stamina ?? 0) <= 0) return;
+  const k = e.key.toLowerCase();
+
+  let dx = 0, dy = 0, newDir = localPlayer.dir || 'right';
+  if (k === 'arrowup' || k === 'w')       { dy = -1; newDir = 'up'; }
+  else if (k === 'arrowdown' || k === 's'){ dy = 1;  newDir = 'down'; }
+  else if (k === 'arrowleft' || k === 'a'){ dx = -1; newDir = 'left'; }
+  else if (k === 'arrowright' || k === 'd'){ dx = 1; newDir = 'right'; }
+
+  // NEW: update facing immediately so sprite reflects intended direction
+  if (newDir !== (localPlayer.dir || 'right')) {
+    localPlayer.dir = newDir;
+  }
+
+  if (dx || dy) {
+    const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
+    if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
+      localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
+      localPlayer.pos_x = nx; localPlayer.pos_y = ny;
+      // dir already set above
+      send({ type: 'move', dx, dy });
     }
+  }
+}
+
   });
 
   canvas.addEventListener('mousedown', (e) => {
