@@ -21,6 +21,10 @@ function looksMalicious(text) {
   return sqlLikePattern.test(text);
 }
 
+// idle frame index for each facing (per knight sheet mapping)
+const IDLE_INDEX = { down: 1, right: 6, left: 11, up: 16, stand: 20, sit: 21 };
+function idleIndexFor(dir) { return IDLE_INDEX[dir] ?? IDLE_INDEX.down; }
+
 const server = http.createServer((req, res) => {
   res.writeHead(200, {'Content-Type':'text/plain'});
   res.end('DragonSpires server is running\n');
@@ -103,7 +107,10 @@ wss.on('connection', (ws) => {
           gold: found.gold ?? 0,
           weapon: found.weapon ?? '',
           armor: found.armor ?? '',
-          hands: found.hands ?? ''
+          hands: found.hands ?? '',
+          // NEW: runtime animation state
+          dir: 'down',
+          animIndex: idleIndexFor('down')
         };
 
         clients.set(ws, playerData);
@@ -146,7 +153,10 @@ wss.on('connection', (ws) => {
           gold: created.gold ?? 0,
           weapon: created.weapon ?? '',
           armor: created.armor ?? '',
-          hands: created.hands ?? ''
+          hands: created.hands ?? '',
+          // NEW: runtime animation state
+          dir: 'down',
+          animIndex: idleIndexFor('down')
         };
 
         clients.set(ws, playerData);
@@ -181,14 +191,43 @@ wss.on('connection', (ws) => {
         playerData.pos_x = nx;
         playerData.pos_y = ny;
 
+        // NEW: carry along direction/animIndex from client if provided
+        if (typeof msg.dir === 'string') playerData.dir = msg.dir;
+        if (Number.isInteger(msg.animIndex)) playerData.animIndex = msg.animIndex;
+
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
           updatePosition(playerData.id, nx, ny)
         ]).catch(()=>{});
 
-        broadcast({ type: 'player_moved', id: playerData.id, x: nx, y: ny });
+        broadcast({ type: 'player_moved', id: playerData.id, x: nx, y: ny, dir: playerData.dir, animIndex: playerData.animIndex });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       }
+    }
+
+    // NEW: attack animation (toggle between _attack_1 and _attack_2)
+    else if (msg.type === 'attack') {
+      if (!playerData) return;
+      if (typeof msg.dir === 'string') playerData.dir = msg.dir;
+      if (Number.isInteger(msg.animIndex)) playerData.animIndex = msg.animIndex;
+
+      broadcast({ type: 'player_update', id: playerData.id, dir: playerData.dir, animIndex: playerData.animIndex });
+
+      // server-side safety reset after 1s in case client never resets
+      clearTimeout(playerData._attackTimer);
+      playerData._attackTimer = setTimeout(() => {
+        playerData.animIndex = idleIndexFor(playerData.dir);
+        broadcast({ type: 'player_update', id: playerData.id, dir: playerData.dir, animIndex: playerData.animIndex });
+      }, 1000);
+    }
+
+    // NEW: explicit animation update (idle reset, sit/stand, etc.)
+    else if (msg.type === 'animation') {
+      if (!playerData) return;
+      if (typeof msg.dir === 'string') playerData.dir = msg.dir;
+      if (Number.isInteger(msg.animIndex)) playerData.animIndex = msg.animIndex;
+      clearTimeout(playerData._attackTimer);
+      broadcast({ type: 'player_update', id: playerData.id, dir: playerData.dir, animIndex: playerData.animIndex });
     }
 
     else if (msg.type === 'chat') {
@@ -201,6 +240,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     if (playerData) {
+      clearTimeout(playerData._attackTimer);
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
       broadcast({ type: 'player_left', id: playerData.id });
