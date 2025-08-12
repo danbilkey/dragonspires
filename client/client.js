@@ -13,25 +13,20 @@ document.addEventListener('DOMContentLoaded', () => {
   canvas.width = CANVAS_W; canvas.height = CANVAS_H;
 
   // ---------- LOGICAL/RENDER CONSTANTS ----------
-  // Logical diamond for positioning
   const TILE_W = 64, TILE_H = 32;
 
-  // Item fine-tuning (center on tile a bit better)
-  const ITEM_X_NUDGE = 0;//:3;      // +right
-  const ITEM_Y_NUDGE = 0;//:15;// +up (we subtract this in draw)
+  const ITEM_X_NUDGE = 0;
+  const ITEM_Y_NUDGE = 0;
 
-  // Screen anchor for local title
   const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
 
-  // World/camera offsets (as previously tuned)
   const WORLD_SHIFT_X = -32, WORLD_SHIFT_Y = 16;
   const CENTER_LOC_ADJ_X = 32, CENTER_LOC_ADJ_Y = -8;
   const CENTER_LOC_FINE_X = -5, CENTER_LOC_FINE_Y = 0;
 
-  // Sprite offsets (as tuned earlier)
   const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16;
-  const SPRITE_CENTER_ADJ_X = 23;  // = 64 - 41
-  const SPRITE_CENTER_ADJ_Y = -24; // = -24 + 4
+  const SPRITE_CENTER_ADJ_X = 23;   // = 64 - 41
+  const SPRITE_CENTER_ADJ_Y = -24;  // = -24 + 4
 
   // ---------- STATE ----------
   let ws = null;
@@ -40,11 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let showLoginGUI = false;
   let loggedIn = false;
 
-  let mapSpec = {
-    width: 64, height: 64,
-    tileIndex: [], // 2D array of floor tile sprite indices.
-    items: []      // [{x, y, spriteIndex, name?}, ...]
-  };
+  let mapSpec = { width: 64, height: 64, tileIndex: [], items: [] };
 
   let localPlayer = null;
   let otherPlayers = {};
@@ -53,21 +44,18 @@ document.addEventListener('DOMContentLoaded', () => {
   let chatMode = false;
 
   // ---------- CHAT ----------
-  const CHAT_INPUT = {
-    top: 425, left: 10, w: 620, h: 20, maxLen: 120
-  };
+  const CHAT_INPUT = { top: 425, left: 10, w: 620, h: 20, maxLen: 120 };
   const messages = [];
+  function pushChat(line) { messages.push(String(line)); if (messages.length > 200) messages.shift(); }
   function drawChat() {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.fillRect(0, 360, CANVAS_W, 120);
-
     ctx.font = '12px monospace';
     ctx.fillStyle = 'white';
     let y = 370;
     for (let i = Math.max(0, messages.length - 7); i < messages.length; i++) {
       ctx.fillText(messages[i], 10, y); y += 16;
     }
-
     if (chatMode) {
       ctx.fillStyle = 'rgba(255,255,255,0.08)';
       ctx.fillRect(CHAT_INPUT.left, CHAT_INPUT.top, CHAT_INPUT.w, CHAT_INPUT.h);
@@ -88,22 +76,28 @@ document.addEventListener('DOMContentLoaded', () => {
   const FIELD_TOP = (y) => y;
   let activeField = null;
 
+  // ---------- SAFE IMAGE HELPERS ----------
+  const canDraw = (img) => img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0;
+  const safeDraw = (img, x, y) => { if (canDraw(img)) ctx.drawImage(img, x, y); };
+
   // ---------- ASSETS ----------
   // Title
   const imgTitle = new Image();
-  imgTitle.src = "/assets/title.png";
+  imgTitle.src = "assets/title.png";               // << relative path
   let titleReady = false;
   imgTitle.onload = () => { titleReady = true; };
+  imgTitle.onerror = () => { titleReady = false; };
 
   // Border
   const imgBorder = new Image();
-  imgBorder.src = "/assets/border.png";
-  let borderReady = false;
+  imgBorder.src = "assets/border.png";            // << relative path
+  let imgBorderTransparent = null;
+  let imgBorderBroken = false;
   imgBorder.onload = () => {
     try {
       const off = document.createElement('canvas');
       off.width = imgBorder.width; off.height = imgBorder.height;
-      const octx = off.getContext('2d');
+      const octx = off.getContext('2d', { willReadFrequently: true });
       octx.drawImage(imgBorder, 0, 0);
       const imgData = octx.getImageData(0,0,off.width,off.height);
       for (let i=0;i<imgData.data.length;i+=4) {
@@ -117,23 +111,23 @@ document.addEventListener('DOMContentLoaded', () => {
       imgBorderTransparent = null;
     }
   };
-  let imgBorderTransparent = null;
+  imgBorder.onerror = () => { imgBorderBroken = true; };
 
-  // Player sprite: crop + **magenta** -> transparent (old single frame fallback)
+  // Player sprite: crop + magenta -> transparent (old single frame fallback)
   const imgPlayerSrc = new Image();
-  imgPlayerSrc.src = "/assets/player.gif";
+  imgPlayerSrc.src = "assets/player.gif";         // << relative path
   let playerSprite = null;
   imgPlayerSrc.onload = () => {
     try {
       const sx = 264, sy = 1, sw = 44, sh = 55;
       const off = document.createElement('canvas');
       off.width = sw; off.height = sh;
-      const octx = off.getContext('2d');
+      const octx = off.getContext('2d', { willReadFrequently: true });
       octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
       const data = octx.getImageData(0,0,sw,sh);
       for (let i = 0; i < data.data.length; i += 4) {
         const r = data.data[i], g = data.data[i+1], b = data.data[i+2];
-        if (r === 255 && g === 0 && b === 255) data.data[i+3] = 0; // magenta
+        if (r === 255 && g === 0 && b === 255) data.data[i+3] = 0;
       }
       octx.putImageData(data, 0, 0);
       const img = new Image();
@@ -143,6 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
       playerSprite = imgPlayerSrc;
     }
   };
+  imgPlayerSrc.onerror = () => { playerSprite = null; };
 
   // ---------- PLAYER FRAMES (knight) ----------
   let knightFrames = []; // 22 frames (indices 0..21)
@@ -159,21 +154,21 @@ document.addEventListener('DOMContentLoaded', () => {
     left:  [AnimIndices.left_walk_1, AnimIndices.left,AnimIndices.left_walk_2, AnimIndices.left],
     right: [AnimIndices.right_walk_1, AnimIndices.right,AnimIndices.right_walk_2, AnimIndices.right]
   };
-  function idleIndexFor(dir){
-    return ({down:AnimIndices.down, right:AnimIndices.right, left:AnimIndices.left, up:AnimIndices.up})[dir] ?? AnimIndices.stand;
-  }
+  const idleIndexFor = (dir) =>
+    ({down:AnimIndices.down, right:AnimIndices.right, left:AnimIndices.left, up:AnimIndices.up})[dir] ?? AnimIndices.stand;
+
   function waitImage(img){return new Promise(r => { if (img.complete) return r(); img.onload = img.onerror = r; });}
 
   Promise.all([
     waitImage(imgPlayerSrc),
-    fetch('/assets/player.json').then(r => r.json()).catch(() => null)
+    fetch('assets/player.json').then(r => r.json()).catch(() => null)   // << relative path
   ]).then(([_, playerMeta]) => {
     if (!playerMeta || !Array.isArray(playerMeta.knight)) return;
     const list = playerMeta.knight;           // [[sx,sy,sw,sh], ...] length 22
 
     const baseW = list[0][2], baseH = list[0][3];
     const off = document.createElement('canvas');
-    const octx = off.getContext('2d');
+    const octx = off.getContext('2d', { willReadFrequently: true });
 
     knightFrames = list.map(([sx, sy, sw, sh]) => {
       off.width = sw; off.height = sh;
@@ -195,16 +190,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
       return {
         img, w: sw, h: sh,
-        // center horizontally, align bottoms to a common baseline
-        offsetX: Math.round((baseW - sw)/2),
-        offsetY: Math.round(baseH - sh)
+        offsetX: Math.round((baseW - sw)/2), // center horizontally
+        offsetY: Math.round(baseH - sh)      // align bottoms
       };
     });
   });
 
-  // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
+  // Floor tiles
   const imgFloor = new Image();
-  imgFloor.src = "/assets/floor.png";
+  imgFloor.src = "assets/floor.png";            // << relative path
   const FLOOR_COLS = 11, FLOOR_ROWS = 9;
   const FLOOR_SW = 61, FLOOR_SH = 31;
   let floorSprites = [];
@@ -212,7 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const off = document.createElement('canvas');
       off.width = imgFloor.width; off.height = imgFloor.height;
-      const octx = off.getContext('2d');
+      const octx = off.getContext('2d', { willReadFrequently: true });
       octx.drawImage(imgFloor, 0, 0);
       const imgData = octx.getImageData(0,0,off.width,off.height);
       for (let i=0;i<imgData.data.length;i+=4) {
@@ -233,20 +227,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     } catch {
-      // fall back: whole atlas as-is
       floorSprites = [imgFloor];
     }
   };
+  imgFloor.onerror = () => { floorSprites = []; };
 
   // Item sprites
   const imgItems = new Image();
-  imgItems.src = "/assets/item.gif";
+  imgItems.src = "assets/item.gif";             // << relative path
   let itemSprites = [];
   imgItems.onload = () => {
     try {
       const off = document.createElement('canvas');
       off.width = imgItems.width; off.height = imgItems.height;
-      const octx = off.getContext('2d');
+      const octx = off.getContext('2d', { willReadFrequently: true });
       octx.drawImage(imgItems, 0, 0);
       const imgData = octx.getImageData(0,0,off.width,off.height);
       for (let i=0;i<imgData.data.length;i+=4) {
@@ -254,8 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       octx.putImageData(imgData, 0, 0);
 
-      // Parse /assets/item.json with { x,y,w,h } list
-      fetch('/assets/item.json').then(r => r.json()).then(list => {
+      fetch('assets/item.json').then(r => r.json()).then(list => {   // << relative path
         if (!Array.isArray(list)) return;
         itemSprites = list.map(({x,y,w,h}) => {
           const c = document.createElement('canvas');
@@ -270,6 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
       itemSprites = [imgItems];
     }
   };
+  imgItems.onerror = () => { itemSprites = []; };
 
   // ---------- MAP ----------
   function isoScreen(x, y) {
@@ -287,7 +281,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const idx = mapSpec.tileIndex[y][x] || 0;
         const img = floorSprites[idx % floorSprites.length];
         const { screenX, screenY } = isoScreen(x, y);
-        ctx.drawImage(img, screenX, screenY);
+        safeDraw(img, screenX, screenY);
       }
     }
   }
@@ -297,8 +291,9 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const it of mapSpec.items) {
       const { screenX, screenY } = isoScreen(it.x, it.y);
       const img = itemSprites[it.spriteIndex % itemSprites.length];
-      // align bottom to tile center a touch higher (subtract ITEM_Y_NUDGE)
-      ctx.drawImage(img, screenX + TILE_W/2 - Math.floor((img.width || 0)/2) + ITEM_X_NUDGE, screenY + TILE_H/2 - (img.height || 0) - ITEM_Y_NUDGE);
+      if (!canDraw(img)) continue;
+      ctx.drawImage(img, screenX + TILE_W/2 - Math.floor((img.width || 0)/2) + ITEM_X_NUDGE,
+                        screenY + TILE_H/2 - (img.height || 0) - ITEM_Y_NUDGE);
     }
   }
 
@@ -306,32 +301,18 @@ document.addEventListener('DOMContentLoaded', () => {
   function connectToServer() {
     try { ws?.close(); } catch {}
     ws = new WebSocket(WS_URL);
-    ws.onopen = () => {
-      connected = true;
-      connectionPaused = false;
-      showLoginGUI = true;
-    };
-    ws.onmessage = (ev) => {
-      const data = safeParse(ev.data);
-      if (!data) return;
-      handleServerMessage(data);
-    };
+    ws.onopen = () => { connected = true; connectionPaused = false; showLoginGUI = true; };
+    ws.onmessage = (ev) => { const data = safeParse(ev.data); if (data) handleServerMessage(data); };
     ws.onerror = (e) => console.error('WS error', e);
     ws.onclose = () => {
-      connected = false;
-      connectionPaused = false;
-      showLoginGUI = false;
-      loggedIn = false;
-      chatMode = false;
-      localPlayer = null;
-      otherPlayers = {};
+      connected = false; connectionPaused = false; showLoginGUI = false; loggedIn = false; chatMode = false;
+      localPlayer = null; otherPlayers = {};
     };
   }
   connectToServer();
 
   function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
   function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
-  function pushChat(line) { messages.push(String(line)); if (messages.length > 200) messages.shift(); }
 
   function handleServerMessage(msg) {
     switch (msg.type) {
@@ -339,12 +320,9 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'signup_success': {
         loggedIn = true;
         localPlayer = { ...msg.player };
-        // defaults for animation state
         localPlayer.dir = localPlayer.dir || 'down';
         if (!Number.isInteger(localPlayer.animIndex)) localPlayer.animIndex = idleIndexFor(localPlayer.dir);
-        localPlayer.walkStep = 0;
-        localPlayer.attackStep = 0;
-        localPlayer.lastAttack = 0;
+        localPlayer.walkStep = 0; localPlayer.attackStep = 0; localPlayer.lastAttack = 0;
 
         otherPlayers = {};
         if (Array.isArray(msg.players)) msg.players.forEach(p => {
@@ -390,9 +368,6 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
       }
       case 'player_left': {
-        const p = otherPlayers[msg.id];
-        const name = p?.username ?? msg.id;
-        if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
         delete otherPlayers[msg.id];
         break;
       }
@@ -413,10 +388,6 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (otherPlayers[msg.id]) apply(otherPlayers[msg.id]);
         break;
       }
-      case 'login_error':
-      case 'signup_error':
-        pushChat(msg.message || 'Auth error');
-        break;
       default: break;
     }
   }
@@ -425,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('keydown', (e) => {
     if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
 
-    // Toggle / submit chat
+    // Enter => chat toggle/submit
     if (e.key === 'Enter' && loggedIn) {
       if (!chatMode) { chatMode = true; typingBuffer = ""; }
       else {
@@ -440,14 +411,12 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault(); return;
     }
 
-    // Capture chat text
     if (chatMode) {
       if (e.key === 'Backspace') { typingBuffer = typingBuffer.slice(0, -1); e.preventDefault(); }
       else if (e.key.length === 1 && typingBuffer.length < CHAT_INPUT.maxLen) typingBuffer += e.key;
       return;
     }
 
-    // Login GUI typing
     if (!loggedIn && showLoginGUI && activeField) {
       if (e.key === 'Backspace') {
         if (activeField === 'username') usernameStr = usernameStr.slice(0, -1);
@@ -463,12 +432,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Movement (stamina gate; **1** per move)
+    // Movement / Attack
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       const k = e.key.toLowerCase();
 
-      // --- Attack (Tab toggles attack_1/attack_2 for facing dir)
+      // Attack toggle (Tab)
       if (k === 'tab') {
         e.preventDefault();
         localPlayer.attackStep = ((localPlayer.attackStep ?? 0) + 1) % 2;
@@ -496,17 +465,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (dx || dy) {
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
-          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
+          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1);
           localPlayer.pos_x = nx; localPlayer.pos_y = ny;
 
-          // walking cycle: reset on dir change, else advance
           if (localPlayer.dir !== newDir) localPlayer.walkStep = 0;
           else localPlayer.walkStep = ((localPlayer.walkStep ?? 0) + 1) % walkCycles[newDir].length;
 
           localPlayer.dir = newDir;
           localPlayer.animIndex = walkCycles[newDir][localPlayer.walkStep];
 
-          // send dir/animIndex along with the move
           send({ type: 'move', dx, dy, dir: localPlayer.dir, animIndex: localPlayer.animIndex });
         }
       }
@@ -567,43 +534,41 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawTitleAndBorder() {
-    if (imgBorderTransparent) ctx.drawImage(imgBorderTransparent, 0, 0);
-    else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0);
+    if (canDraw(imgBorderTransparent)) safeDraw(imgBorderTransparent, 0, 0);
+    else if (!imgBorderBroken && canDraw(imgBorder)) safeDraw(imgBorder, 0, 0);
     else {
       // fallback: simple border
       ctx.strokeStyle = 'white';
       ctx.strokeRect(0, 0, CANVAS_W, CANVAS_H);
     }
-    if (titleReady) ctx.drawImage(imgTitle, CANVAS_W/2 - Math.floor(imgTitle.width/2), 10);
+    if (titleReady && canDraw(imgTitle)) {
+      ctx.drawImage(imgTitle, CANVAS_W/2 - Math.floor(imgTitle.naturalWidth/2), 10);
+    }
   }
 
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
-    // Name centered, adjusted x:-2, y:-14 from previous baseline
     const nameX = screenX + TILE_W / 2 - 2;
-    const nameY = screenY - 34; // (-20 - 14)
+    const nameY = screenY - 34;
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
     ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
     ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
     ctx.lineWidth = 1;
 
-    // Select current animation frame
     const idx = Number.isInteger(p.animIndex) ? p.animIndex : idleIndexFor(p.dir || 'down');
     const frame = (knightFrames && knightFrames[idx]) ? knightFrames[idx] : null;
 
     const baseX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
     const baseY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
 
-    if (frame && frame.img && frame.img.complete) {
+    if (frame && canDraw(frame.img)) {
       ctx.drawImage(frame.img, baseX + frame.offsetX, baseY + frame.offsetY, frame.w, frame.h);
-    } else if (playerSprite && playerSprite.complete) {
-      // fallback old single sprite
+    } else if (canDraw(playerSprite)) {
       const w = playerSprite.naturalWidth || playerSprite.width;
       const h = playerSprite.naturalHeight || playerSprite.height;
       ctx.drawImage(playerSprite, baseX, baseY, w, h);
     } else {
-      // last resort: ellipse
       ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
       ctx.beginPath();
       ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
@@ -615,21 +580,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!loggedIn || !localPlayer) return;
     const sX = 10, sY = 8, barW = 170, barH = 10, gap = 16;
 
-    // Stamina
     ctx.fillStyle = '#333'; ctx.fillRect(sX, sY, barW, barH);
     ctx.fillStyle = '#6cf';
     const stPct = Math.max(0, Math.min(1, (localPlayer.stamina ?? 0) / (localPlayer.max_stamina ?? 1)));
     ctx.fillRect(sX, sY, Math.floor(barW * stPct), barH);
     ctx.strokeStyle = '#ddd'; ctx.strokeRect(sX, sY, barW, barH);
 
-    // Life
     ctx.fillStyle = '#333'; ctx.fillRect(sX, sY + gap, barW, barH);
     ctx.fillStyle = '#f66';
     const lfPct = Math.max(0, Math.min(1, (localPlayer.life ?? 0) / (localPlayer.max_life ?? 1)));
     ctx.fillRect(sX, sY + gap, Math.floor(barW * lfPct), barH);
     ctx.strokeStyle = '#ddd'; ctx.strokeRect(sX, sY + gap, barW, barH);
 
-    // Magic
     ctx.fillStyle = '#333'; ctx.fillRect(sX, sY + gap*2, barW, barH);
     ctx.fillStyle = '#7f7';
     const mgPct = Math.max(0, Math.min(1, (localPlayer.magic ?? 0) / (localPlayer.max_magic ?? 1)));
@@ -665,11 +627,9 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Main Game Scene
     drawFloor();
     drawItems();
 
-    // Draw all players: sort by Y for depth
     const all = [];
     if (localPlayer) all.push({p: localPlayer, local: true});
     for (const id in otherPlayers) all.push({p: otherPlayers[id], local: false});
@@ -680,10 +640,6 @@ document.addEventListener('DOMContentLoaded', () => {
     drawChat();
   }
 
-  // ---------- GAME LOOP ----------
-  function loop() {
-    draw();
-    requestAnimationFrame(loop);
-  }
+  function loop() { draw(); requestAnimationFrame(loop); }
   loop();
 });
