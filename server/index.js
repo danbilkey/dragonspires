@@ -1,4 +1,4 @@
-else if (msg.type === 'chat') {// server/index.js
+// server/index.js
 require('dotenv').config();
 const http = require('http');
 const WebSocket = require('ws');
@@ -239,8 +239,6 @@ function startAttackAnimation(playerData, ws) {
   // Get attack animation frame based on alternating index
   const attackSeq = ATTACK_SEQUENCES[playerData.direction] || ATTACK_SEQUENCES.down;
   playerData.animationFrame = attackSeq[currentIndex];
-  
-  console.log(`Player ${playerData.id} attacking with ${playerData.direction}_attack_${currentIndex + 1} (frame ${playerData.animationFrame})`);
   
   // Update database
   updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, true, playerData.animationFrame, playerData.movementSequenceIndex)
@@ -547,8 +545,6 @@ wss.on('connection', (ws) => {
         playerData.direction = msg.direction;
       }
       
-      console.log(`Player ${playerData.id} starting attack facing ${playerData.direction}`);
-      
       // Start attack animation (this will handle alternating)
       startAttackAnimation(playerData, ws);
     }
@@ -699,6 +695,8 @@ wss.on('connection', (ws) => {
         hands: playerData.hands
       });
     }
+
+    else if (msg.type === 'chat') {
       if (!playerData || typeof msg.text !== 'string') return;
       const t = msg.text.trim();
       if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
@@ -767,8 +765,6 @@ wss.on('connection', (ws) => {
         attackTimeouts.delete(playerData.id);
       }
       
-      // Clear attack index tracking
-      playerAttackIndex.delete(playerData.id);
       
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
