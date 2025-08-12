@@ -37,6 +37,14 @@ const DIRECTION_IDLE = {
   up: 16     // up
 };
 
+// Attack animation pairs
+const ATTACK_SEQUENCES = {
+  down: [3, 4],   // down_attack_1, down_attack_2
+  right: [8, 9],  // right_attack_1, right_attack_2
+  left: [13, 14], // left_attack_1, left_attack_2
+  up: [18, 19]    // up_attack_1, up_attack_2
+};
+
 // Movement animation sequence: walk_1 -> idle -> walk_2 -> idle
 const MOVEMENT_SEQUENCE = ['walk_1', 'idle', 'walk_2', 'idle'];
 
@@ -48,6 +56,7 @@ const wss = new WebSocket.Server({ server });
 
 const clients = new Map();      // Map<ws, playerData>
 const usernameToWs = new Map(); // Map<username, ws>
+const attackTimeouts = new Map(); // Map<playerId, timeoutId> for attack timeouts
 
 // In-memory item storage
 let mapItems = {}; // { "x,y": itemId }
@@ -154,6 +163,76 @@ function getAdjacentPosition(x, y, direction) {
     case 'right': return { x: x + 1, y };
     default: return { x, y };
   }
+}
+
+// Start attack animation for a player
+function startAttackAnimation(playerData, ws) {
+  // Clear any existing attack timeout
+  const existingTimeout = attackTimeouts.get(playerData.id);
+  if (existingTimeout) {
+    clearTimeout(existingTimeout);
+  }
+
+  // Set attacking state
+  playerData.isAttacking = true;
+  
+  // Get attack animation frame (start with first attack frame)
+  const attackSeq = ATTACK_SEQUENCES[playerData.direction] || ATTACK_SEQUENCES.down;
+  playerData.animationFrame = attackSeq[0]; // Start with first attack frame
+  
+  // Update database
+  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, true, playerData.animationFrame, playerData.movementSequenceIndex)
+    .catch(err => console.error('Attack start DB error:', err));
+
+  // Broadcast attack start
+  broadcast({
+    type: 'animation_update',
+    id: playerData.id,
+    direction: playerData.direction,
+    isMoving: playerData.isMoving,
+    isAttacking: true,
+    animationFrame: playerData.animationFrame,
+    movementSequenceIndex: playerData.movementSequenceIndex
+  });
+
+  // Set timeout to stop attack after 1 second
+  const timeoutId = setTimeout(() => {
+    stopAttackAnimation(playerData, ws);
+    attackTimeouts.delete(playerData.id);
+  }, 1000);
+  
+  attackTimeouts.set(playerData.id, timeoutId);
+}
+
+// Stop attack animation for a player
+function stopAttackAnimation(playerData, ws) {
+  if (!playerData.isAttacking) return;
+  
+  // Clear timeout if it exists
+  const existingTimeout = attackTimeouts.get(playerData.id);
+  if (existingTimeout) {
+    clearTimeout(existingTimeout);
+    attackTimeouts.delete(playerData.id);
+  }
+
+  // Set back to idle animation for current direction
+  playerData.isAttacking = false;
+  playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
+  
+  // Update database
+  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, false, playerData.animationFrame, playerData.movementSequenceIndex)
+    .catch(err => console.error('Attack stop DB error:', err));
+
+  // Broadcast attack stop
+  broadcast({
+    type: 'animation_update',
+    id: playerData.id,
+    direction: playerData.direction,
+    isMoving: playerData.isMoving,
+    isAttacking: false,
+    animationFrame: playerData.animationFrame,
+    movementSequenceIndex: playerData.movementSequenceIndex
+  });
 }
 
 // Initialize database with animation columns if they don't exist
@@ -309,6 +388,11 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // Cancel any attack animation when moving
+      if (playerData.isAttacking) {
+        stopAttackAnimation(playerData, ws);
+      }
+
       const dx = Number(msg.dx) || 0;
       const dy = Number(msg.dy) || 0;
       const nx = playerData.pos_x + dx;
@@ -351,6 +435,25 @@ wss.on('connection', (ws) => {
         });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       }
+    }
+
+    else if (msg.type === 'attack') {
+      if (!playerData) return;
+      
+      // Update direction if provided
+      if (msg.direction) {
+        playerData.direction = msg.direction;
+      }
+      
+      // Start attack animation
+      startAttackAnimation(playerData, ws);
+    }
+
+    else if (msg.type === 'stop_attack') {
+      if (!playerData) return;
+      
+      // Stop attack animation
+      stopAttackAnimation(playerData, ws);
     }
 
     else if (msg.type === 'animation_update') {
@@ -451,6 +554,13 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     if (playerData) {
+      // Clear any pending attack timeout
+      const attackTimeout = attackTimeouts.get(playerData.id);
+      if (attackTimeout) {
+        clearTimeout(attackTimeout);
+        attackTimeouts.delete(playerData.id);
+      }
+      
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
       broadcast({ type: 'player_left', id: playerData.id });
@@ -512,32 +622,6 @@ setInterval(async () => {
     try { await updateStatsInDb(u.id, { magic: u.magic }); } catch(e){ console.error('magic regen db', e); }
   }
 }, 30000);
-
-// Auto-stop attacking animation after 1 second of inactivity
-setInterval(async () => {
-  const now = Date.now();
-  for (const [ws, p] of clients.entries()) {
-    if (p.isAttacking && p.lastAttackTime && (now - p.lastAttackTime) > 1000) {
-      p.isAttacking = false;
-      p.animationFrame = DIRECTION_IDLE[p.direction] || DIRECTION_IDLE.down;
-      
-      // Update database
-      updateAnimationState(p.id, p.direction, p.isMoving, false, p.animationFrame, p.movementSequenceIndex)
-        .catch(err => console.error('Auto-stop attack DB error:', err));
-      
-      // Broadcast the change
-      broadcast({
-        type: 'animation_update',
-        id: p.id,
-        direction: p.direction,
-        isMoving: p.isMoving,
-        isAttacking: false,
-        animationFrame: p.animationFrame,
-        movementSequenceIndex: p.movementSequenceIndex
-      });
-    }
-  }
-}, 1000);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
