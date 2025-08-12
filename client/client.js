@@ -128,6 +128,65 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
+// ---------- PLAYER FRAMES (knight) ----------
+let knightFrames = []; // 0..21 (22 frames)
+const AnimIndices = {
+  down_walk_1:0, down:1, down_walk_2:2, down_attack_1:3, down_attack_2:4,
+  right_walk_1:5, right:6, right_walk_2:7, right_attack_1:8, right_attack_2:9,
+  left_walk_1:10, left:11, left_walk_2:12, left_attack_1:13, left_attack_2:14,
+  up_walk_1:15, up:16, up_walk_2:17, up_attack_1:18, up_attack_2:19,
+  stand:20, sit:21
+};
+const walkCycles = {
+  up:    [AnimIndices.up_walk_1, AnimIndices.up,    AnimIndices.up_walk_2,   AnimIndices.up],
+  down:  [AnimIndices.down_walk_1, AnimIndices.down,AnimIndices.down_walk_2, AnimIndices.down],
+  left:  [AnimIndices.left_walk_1, AnimIndices.left,AnimIndices.left_walk_2, AnimIndices.left],
+  right: [AnimIndices.right_walk_1, AnimIndices.right,AnimIndices.right_walk_2, AnimIndices.right]
+};
+function idleIndexFor(dir){
+  return ({down:AnimIndices.down, right:AnimIndices.right, left:AnimIndices.left, up:AnimIndices.up})[dir] ?? AnimIndices.stand;
+}
+function waitImage(img){return new Promise(r => { if (img.complete) return r(); img.onload = img.onerror = r; });}
+
+Promise.all([
+  waitImage(imgPlayerSrc),
+  fetch('/assets/player.json').then(r => r.json()).catch(() => null)
+]).then(([_, playerMeta]) => {
+  if (!playerMeta || !Array.isArray(playerMeta.knight)) return;
+  const list = playerMeta.knight;           // [[sx,sy,sw,sh], ...] length 22
+  const baseW = list[0][2], baseH = list[0][3];
+
+  const off = document.createElement('canvas');
+  const octx = off.getContext('2d');
+
+  knightFrames = list.map(([sx, sy, sw, sh]) => {
+    off.width = sw; off.height = sh;
+    octx.clearRect(0, 0, sw, sh);
+    octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    // true magenta -> transparent
+    try {
+      const data = octx.getImageData(0, 0, sw, sh);
+      const d = data.data;
+      for (let i=0; i<d.length; i+=4) {
+        if (d[i]===255 && d[i+1]===0 && d[i+2]===255) d[i+3]=0;
+      }
+      octx.putImageData(data, 0, 0);
+    } catch {}
+
+    const img = new Image();
+    img.src = off.toDataURL();
+
+    return {
+      img, w: sw, h: sh,
+      // center horizontally, align bottoms to a common baseline
+      offsetX: Math.round((baseW - sw)/2),
+      offsetY: Math.round(baseH - sh)
+    };
+  });
+});
+
+
   // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
   const imgFloor = new Image();
   imgFloor.src = "/assets/floor.png";
@@ -327,30 +386,102 @@ fetch('map.json')
       case 'signup_success': {
         loggedIn = true;
         localPlayer = { ...msg.player };
+        // NEW defaults if server didn't send
+        localPlayer.dir = localPlayer.dir || 'down';
+        if (!Number.isInteger(localPlayer.animIndex)) localPlayer.animIndex = idleIndexFor(localPlayer.dir);
+        localPlayer.walkStep = 0; localPlayer.attackStep = 0; localPlayer.lastAttack = 0;
+      
         otherPlayers = {};
-        if (Array.isArray(msg.players)) msg.players.forEach(p => { if (!localPlayer || p.id !== localPlayer.id) otherPlayers[p.id] = p; });
+        if (Array.isArray(msg.players)) msg.players.forEach(p => {
+          if (!localPlayer || p.id !== localPlayer.id) {
+            const cp = { ...p };
+            cp.dir = cp.dir || 'down';
+            if (!Number.isInteger(cp.animIndex)) cp.animIndex = idleIndexFor(cp.dir);
+            otherPlayers[cp.id] = cp;
+          }
+        });
         pushChat("Welcome to DragonSpires!");
         break;
       }
+
       case 'player_joined':
         if (!localPlayer || msg.player.id !== localPlayer.id) {
-          otherPlayers[msg.player.id] = msg.player;
-          pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
+          const cp = { ...msg.player };
+          cp.dir = cp.dir || 'down';
+          if (!Number.isInteger(cp.animIndex)) cp.animIndex = idleIndexFor(cp.dir);
+          otherPlayers[cp.id] = cp;
+          pushChat(`${cp.username || cp.id} has entered DragonSpires!`);
         }
         break;
+
       case 'player_moved':
-        if (localPlayer && msg.id === localPlayer.id) { localPlayer.pos_x = msg.x; localPlayer.pos_y = msg.y; }
-        else {
+        if (localPlayer && msg.id === localPlayer.id) {
+          localPlayer.pos_x = msg.x; localPlayer.pos_y = msg.y;
+          if (typeof msg.dir === 'string') localPlayer.dir = msg.dir;
+          if (Number.isInteger(msg.animIndex)) localPlayer.animIndex = msg.animIndex;
+        } else {
           if (!otherPlayers[msg.id]) otherPlayers[msg.id] = { id: msg.id, username: `#${msg.id}`, pos_x: msg.x, pos_y: msg.y };
           else { otherPlayers[msg.id].pos_x = msg.x; otherPlayers[msg.id].pos_y = msg.y; }
+          if (typeof msg.dir === 'string') otherPlayers[msg.id].dir = msg.dir;
+          if (Number.isInteger(msg.animIndex)) otherPlayers[msg.id].animIndex = msg.animIndex;
         }
         break;
+
       case 'player_left': {
         const p = otherPlayers[msg.id];
         const name = p?.username ?? msg.id;
         if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
         delete otherPlayers[msg.id];
-        break;
+        break;// Movement (stamina gate; **1** per move)
+if (loggedIn && localPlayer) {
+  if ((localPlayer.stamina ?? 0) <= 0) return;
+  const k = e.key.toLowerCase();
+
+  // --- Attack (Tab toggles attack_1/attack_2 for facing dir)
+  if (k === 'tab') {
+    e.preventDefault();
+    localPlayer.attackStep = ((localPlayer.attackStep ?? 0) + 1) % 2;
+    const idx = localPlayer.attackStep === 0 ? 1 : 2; // 1 or 2
+    localPlayer.animIndex = AnimIndices[`${localPlayer.dir}_attack_${idx}`];
+    localPlayer.lastAttack = Date.now();
+    send({ type: 'attack', dir: localPlayer.dir, animIndex: localPlayer.animIndex });
+
+    clearTimeout(localPlayer._atkTimer);
+    localPlayer._atkTimer = setTimeout(() => {
+      if (Date.now() - (localPlayer.lastAttack || 0) >= 1000) {
+        localPlayer.animIndex = idleIndexFor(localPlayer.dir);
+        send({ type: 'animation', dir: localPlayer.dir, animIndex: localPlayer.animIndex });
+      }
+    }, 1000);
+    return;
+  }
+
+  let dx = 0, dy = 0, newDir = localPlayer.dir || 'down';
+  if (k === 'arrowup' || k === 'w')       { dy = -1; newDir = 'up'; }
+  else if (k === 'arrowdown' || k === 's'){ dy = 1;  newDir = 'down'; }
+  else if (k === 'arrowleft' || k === 'a'){ dx = -1; newDir = 'left'; }
+  else if (k === 'arrowright' || k === 'd'){ dx = 1; newDir = 'right'; }
+
+  if (dx || dy) {
+    const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
+    if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
+      // local stamina + position update
+      localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1);
+      localPlayer.pos_x = nx; localPlayer.pos_y = ny;
+
+      // walking cycle: reset on dir change, else advance
+      if (localPlayer.dir !== newDir) localPlayer.walkStep = 0;
+      else localPlayer.walkStep = ((localPlayer.walkStep ?? 0) + 1) % walkCycles[newDir].length;
+
+      localPlayer.dir = newDir;
+      localPlayer.animIndex = walkCycles[newDir][localPlayer.walkStep];
+
+      // send dir/animIndex along with the move
+      send({ type: 'move', dx, dy, dir: localPlayer.dir, animIndex: localPlayer.animIndex });
+    }
+  }
+}
+
       }
       case 'chat':
         if (typeof msg.text === 'string') pushChat(msg.text);
@@ -369,6 +500,15 @@ fetch('map.json')
         else if (otherPlayers[msg.id]) apply(otherPlayers[msg.id]);
         break;
       }
+      case 'player_update': {
+        const p = (localPlayer && msg.id === localPlayer.id) ? localPlayer : otherPlayers[msg.id];
+        if (p) {
+          if (typeof msg.dir === 'string') p.dir = msg.dir;
+          if (Number.isInteger(msg.animIndex)) p.animIndex = msg.animIndex;
+        }
+        break;
+      }
+
       case 'login_error':
       case 'signup_error':
         pushChat(msg.message || 'Auth error');
@@ -420,24 +560,55 @@ fetch('map.json')
     }
 
     // Movement (stamina gate; **1** per move)
-    if (loggedIn && localPlayer) {
-      if ((localPlayer.stamina ?? 0) <= 0) return;
-      const k = e.key.toLowerCase();
-      let dx = 0, dy = 0;
-      if (k === 'arrowup' || k === 'w') dy = -1;
-      else if (k === 'arrowdown' || k === 's') dy = 1;
-      else if (k === 'arrowleft' || k === 'a') dx = -1;
-      else if (k === 'arrowright' || k === 'd') dx = 1;
-      if (dx || dy) {
-        const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
-        if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
-          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
-          localPlayer.pos_x = nx; localPlayer.pos_y = ny;
-          send({ type: 'move', dx, dy });
+      if (loggedIn && localPlayer) {
+        if ((localPlayer.stamina ?? 0) <= 0) return;
+        const k = e.key.toLowerCase();
+      
+        // --- Attack (Tab toggles attack_1/attack_2 for facing dir)
+        if (k === 'tab') {
+          e.preventDefault();
+          localPlayer.attackStep = ((localPlayer.attackStep ?? 0) + 1) % 2;
+          const idx = localPlayer.attackStep === 0 ? 1 : 2; // 1 or 2
+          localPlayer.animIndex = AnimIndices[`${localPlayer.dir}_attack_${idx}`];
+          localPlayer.lastAttack = Date.now();
+          send({ type: 'attack', dir: localPlayer.dir, animIndex: localPlayer.animIndex });
+      
+          clearTimeout(localPlayer._atkTimer);
+          localPlayer._atkTimer = setTimeout(() => {
+            if (Date.now() - (localPlayer.lastAttack || 0) >= 1000) {
+              localPlayer.animIndex = idleIndexFor(localPlayer.dir);
+              send({ type: 'animation', dir: localPlayer.dir, animIndex: localPlayer.animIndex });
+            }
+          }, 1000);
+          return;
+        }
+      
+        let dx = 0, dy = 0, newDir = localPlayer.dir || 'down';
+        if (k === 'arrowup' || k === 'w')       { dy = -1; newDir = 'up'; }
+        else if (k === 'arrowdown' || k === 's'){ dy = 1;  newDir = 'down'; }
+        else if (k === 'arrowleft' || k === 'a'){ dx = -1; newDir = 'left'; }
+        else if (k === 'arrowright' || k === 'd'){ dx = 1; newDir = 'right'; }
+      
+        if (dx || dy) {
+          const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
+          if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
+            // local stamina + position update
+            localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1);
+            localPlayer.pos_x = nx; localPlayer.pos_y = ny;
+      
+            // walking cycle: reset on dir change, else advance
+            if (localPlayer.dir !== newDir) localPlayer.walkStep = 0;
+            else localPlayer.walkStep = ((localPlayer.walkStep ?? 0) + 1) % walkCycles[newDir].length;
+      
+            localPlayer.dir = newDir;
+            localPlayer.animIndex = walkCycles[newDir][localPlayer.walkStep];
+      
+            // send dir/animIndex along with the move
+            send({ type: 'move', dx, dy, dir: localPlayer.dir, animIndex: localPlayer.animIndex });
+          }
         }
       }
-    }
-  });
+
 
   canvas.addEventListener('mousedown', (e) => {
     const r = canvas.getBoundingClientRect();
@@ -513,29 +684,39 @@ function drawItemAtTile(sx, sy, itemIndex) {
 
 
   function drawPlayer(p, isLocal) {
-    const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
-    // Name centered, adjusted x:-2, y:-14 from previous baseline
-    const nameX = screenX + TILE_W / 2 - 2;
-    const nameY = screenY - 34; // (-20 - 14)
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
-    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
-    ctx.lineWidth = 1;
-
-    const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
-    const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
-    if (playerSprite && playerSprite.complete) {
-      const w = playerSprite.naturalWidth || playerSprite.width;
-      const h = playerSprite.naturalHeight || playerSprite.height;
-      ctx.drawImage(playerSprite, drawX, drawY, w, h);
-    } else {
-      ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
-      ctx.beginPath();
-      ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
-      ctx.fill();
+      const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
+    
+      // Name
+      const nameX = screenX + TILE_W / 2 - 2;
+      const nameY = screenY - 34;
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
+      ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
+      ctx.lineWidth = 1;
+    
+      // Pick current animation frame (knight)
+      const idx = Number.isInteger(p.animIndex) ? p.animIndex : idleIndexFor(p.dir || 'down');
+      const frame = (knightFrames && knightFrames[idx]) ? knightFrames[idx] : null;
+    
+      const baseX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
+      const baseY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
+    
+      if (frame && frame.img && frame.img.complete) {
+        ctx.drawImage(frame.img, baseX + frame.offsetX, baseY + frame.offsetY, frame.w, frame.h);
+      } else if (playerSprite && playerSprite.complete) {
+        // fallback: old single sprite
+        const w = playerSprite.naturalWidth || playerSprite.width;
+        const h = playerSprite.naturalHeight || playerSprite.height;
+        ctx.drawImage(playerSprite, baseX, baseY, w, h);
+      } else {
+        // last resort: ellipse
+        ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
+        ctx.beginPath();
+        ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
     }
-  }
 
   function drawBarsAndStats() {
     if (!loggedIn || !localPlayer) return;
