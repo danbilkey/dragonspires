@@ -95,10 +95,14 @@ document.addEventListener('DOMContentLoaded', () => {
   let tilesReady = false;
   let mapReady = false;
   let playerSpritesReady = false;
+  let itemDetailsReady = false;
 
   // Map
   let mapSpec = { width: 10, height: 10, tiles: [] };
   let mapItems = {}; // { "x,y": itemId }
+
+  // Item details
+  let itemDetails = []; // Array of item detail objects
 
   // Auth GUI
   let usernameStr = "";
@@ -654,6 +658,23 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // Look command with 'l' key
+    if (loggedIn && localPlayer && e.key === 'l') {
+      e.preventDefault();
+      
+      // Get item at player's current position
+      const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
+      const itemDetails = getItemDetails(itemId);
+      
+      if (itemDetails && itemDetails.description) {
+        pushChat(`~ ${itemDetails.description}`);
+      } else {
+        pushChat("~ You see nothing.");
+      }
+      
+      return;
+    }
+
     // Rotation with '0' key - rotate in place without movement
     if (loggedIn && localPlayer && e.key === '0') {
       e.preventDefault();
@@ -730,6 +751,18 @@ document.addEventListener('DOMContentLoaded', () => {
       if (dx || dy) {
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
+          
+          // Check for collision with items
+          const targetItemId = getItemAtPosition(nx, ny);
+          const targetItemDetails = getItemDetails(targetItemId);
+          
+          if (targetItemDetails && targetItemDetails.collision) {
+            // Item has collision - don't move but still update animation state
+            playerDirection = newDirection;
+            movementAnimationState = (movementAnimationState + 1) % 3;
+            return; // Don't proceed with movement
+          }
+          
           // CANCEL ATTACK ANIMATION IMMEDIATELY ON MOVEMENT
           if (localAttackTimeout) {
             clearTimeout(localAttackTimeout);
@@ -985,6 +1018,18 @@ function drawItemAtTile(sx, sy, itemIndex) {
     if (y <= y2 - pad && line.length) ctx.fillText(line, x1 + pad, y);
   }
 
+  function drawItemOnBorder(itemId) {
+    if (!window.getItemMeta || !window.itemsReady()) return;
+    const meta = window.getItemMeta(itemId);
+    if (!meta || !meta.img || !meta.img.complete) return;
+
+    // Draw item on top of border at position 57x431
+    const drawX = 57;
+    const drawY = 431;
+    
+    ctx.drawImage(meta.img, drawX, drawY);
+  }
+
   // ---------- SCENES ----------
   function drawConnecting() {
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
@@ -1116,6 +1161,16 @@ function drawItemAtTile(sx, sy, itemIndex) {
     // Chat
     drawChatHistory();
     drawChatInput();
+
+    // Draw pickupable item at player's position on top of border
+    if (localPlayer && itemDetailsReady) {
+      const playerItemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
+      const playerItemDetails = getItemDetails(playerItemId);
+      
+      if (playerItemDetails && isItemPickupable(playerItemDetails)) {
+        drawItemOnBorder(playerItemId);
+      }
+    }
   }
 
   // ---------- LOOP ----------
@@ -1135,7 +1190,54 @@ function drawItemAtTile(sx, sy, itemIndex) {
     if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; }
   });
 
+  // Helper functions for item details
+  function getItemDetails(itemId) {
+    if (!itemDetailsReady || !itemDetails || itemId < 1 || itemId >= itemDetails.length) {
+      return null;
+    }
+    return itemDetails[itemId - 1]; // Convert to 0-based index
+  }
+
+  function getItemAtPosition(x, y) {
+    // Check both map items (from JSON) and placed items (from admin)
+    const mapItem = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
+      ? mapSpec.items[y][x] : 0;
+    const placedItem = mapItems[`${x},${y}`] || 0;
+    
+    // Placed items take priority over map items
+    return placedItem > 0 ? placedItem : mapItem;
+  }
+
+  function isItemPickupable(itemDetails) {
+    if (!itemDetails) return false;
+    const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "container", "garbage"];
+    return pickupableTypes.includes(itemDetails.type);
+  }
+
   // utils
   function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
   window.connectToServer = connectToServer;
+
+  // Load item details
+  fetch('/client/assets/itemdetails.json')
+    .then(r => r.json())
+    .then(data => {
+      if (data && Array.isArray(data.items)) {
+        itemDetails = data.items.map((item, index) => ({
+          id: index + 1, // 1-based indexing to match item IDs
+          name: item[0],
+          collision: item[1] === "true",
+          type: item[2],
+          statMin: parseInt(item[3]) || 0,
+          statMax: parseInt(item[4]) || 0,
+          description: item[5]
+        }));
+        itemDetailsReady = true;
+        console.log(`Loaded ${itemDetails.length} item details`);
+      }
+    })
+    .catch(err => {
+      console.error('Failed to load item details:', err);
+      itemDetailsReady = true; // Set to true anyway to not block the game
+    });
 });
