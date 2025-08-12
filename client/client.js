@@ -264,7 +264,6 @@ document.addEventListener('DOMContentLoaded', () => {
       await Promise.all(loadPromises);
       tilesReady = true;
 
-      // load map AFTER tiles are ready
       fetch('map.json')
         .then(r => r.json())
         .then(m => {
@@ -276,8 +275,6 @@ document.addEventListener('DOMContentLoaded', () => {
               tiles: tiles || [],
               items: Array.isArray(m.items) ? m.items : []
             };
-            console.log('Map loaded:', mapSpec);
-            console.log('Map items sample:', mapSpec.items.slice(0, 3)); // Show first 3 rows of items
           }
         })
         .catch(() => {})
@@ -476,7 +473,10 @@ document.addEventListener('DOMContentLoaded', () => {
           isMoving: false,
           isAttacking: false,
           animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
-          movementSequenceIndex: msg.player.movementSequenceIndex || 0
+          movementSequenceIndex: msg.player.movementSequenceIndex || 0,
+          weapon: msg.player.weapon || 0,
+          armor: msg.player.armor || 0,
+          hands: msg.player.hands || 0
         };
         
         // Initialize local state variables
@@ -571,6 +571,19 @@ document.addEventListener('DOMContentLoaded', () => {
           otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
           otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
           otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
+        }
+        break;
+      case 'player_equipment_update':
+        if (localPlayer && msg.id === localPlayer.id) {
+          // Update local player equipment
+          if ('weapon' in msg) localPlayer.weapon = msg.weapon;
+          if ('armor' in msg) localPlayer.armor = msg.armor;
+          if ('hands' in msg) localPlayer.hands = msg.hands;
+        } else if (otherPlayers[msg.id]) {
+          // Update other player equipment
+          if ('weapon' in msg) otherPlayers[msg.id].weapon = msg.weapon;
+          if ('armor' in msg) otherPlayers[msg.id].armor = msg.armor;
+          if ('hands' in msg) otherPlayers[msg.id].hands = msg.hands;
         }
         break;
       case 'item_placed':
@@ -681,8 +694,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const itemId = getItemAtPosition(lookX, lookY);
         const itemDetails = getItemDetails(itemId);
         
-        console.log(`Look command: facing ${playerDirection}, looking at (${lookX},${lookY}), itemId=${itemId}, itemDetails=`, itemDetails);
-        
         if (itemDetails && itemDetails.description && itemDetails.description.trim()) {
           pushChat(`~ ${itemDetails.description}`);
         } else {
@@ -690,6 +701,53 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } else {
         pushChat("~ You see nothing.");
+      }
+      
+      return;
+    }
+
+    // Pick up item with 'g' key
+    if (loggedIn && localPlayer && e.key === 'g') {
+      e.preventDefault();
+      
+      const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
+      const itemDetails = getItemDetails(itemId);
+      
+      if (itemDetails && isItemPickupable(itemDetails)) {
+        send({
+          type: 'pickup_item',
+          x: localPlayer.pos_x,
+          y: localPlayer.pos_y,
+          itemId: itemId
+        });
+      }
+      
+      return;
+    }
+
+    // Equip weapon with 't' key
+    if (loggedIn && localPlayer && e.key === 't') {
+      e.preventDefault();
+      
+      const handsItemDetails = getItemDetails(localPlayer.hands);
+      if (handsItemDetails && handsItemDetails.type === 'weapon') {
+        send({
+          type: 'equip_weapon'
+        });
+      }
+      
+      return;
+    }
+
+    // Equip armor with 'y' key
+    if (loggedIn && localPlayer && e.key === 'y') {
+      e.preventDefault();
+      
+      const handsItemDetails = getItemDetails(localPlayer.hands);
+      if (handsItemDetails && handsItemDetails.type === 'armor') {
+        send({
+          type: 'equip_armor'
+        });
       }
       
       return;
@@ -761,9 +819,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       
-      // Prevent rapid movement (minimum 150ms between moves)
+      // Prevent rapid movement (minimum 100ms between moves)
       const currentTime = Date.now();
-      if (currentTime - lastMoveTime < 150) return;
+      if (currentTime - lastMoveTime < 100) return;
       
       const k = e.key.toLowerCase();
       let dx = 0, dy = 0, newDirection = null;
@@ -781,10 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
           const targetItemId = getItemAtPosition(nx, ny);
           const targetItemDetails = getItemDetails(targetItemId);
           
-          console.log(`Movement check to (${nx},${ny}): itemId=${targetItemId}, itemDetails=`, targetItemDetails);
-          
           if (targetItemDetails && targetItemDetails.collision) {
-            console.log(`Collision detected with item: ${targetItemDetails.name}`);
             // Item has collision - don't move but still update animation state and direction
             playerDirection = newDirection;
             movementAnimationState = (movementAnimationState + 1) % 3;
@@ -1050,16 +1105,13 @@ function drawItemAtTile(sx, sy, itemIndex) {
     if (y <= y2 - pad && line.length) ctx.fillText(line, x1 + pad, y);
   }
 
-  function drawItemOnBorder(itemId) {
+  function drawItemOnBorder(itemId, x, y) {
     if (!window.getItemMeta || !window.itemsReady()) return;
     const meta = window.getItemMeta(itemId);
     if (!meta || !meta.img || !meta.img.complete) return;
 
-    // Draw item on top of border at position 57x431
-    const drawX = 57;
-    const drawY = 431;
-    
-    ctx.drawImage(meta.img, drawX, drawY);
+    // Draw item on top of border at specified position
+    ctx.drawImage(meta.img, x, y);
   }
 
   // ---------- SCENES ----------
@@ -1199,11 +1251,21 @@ function drawItemAtTile(sx, sy, itemIndex) {
       const playerItemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const playerItemDetails = getItemDetails(playerItemId);
       
-      console.log(`Border item check: pos(${localPlayer.pos_x},${localPlayer.pos_y}), itemId=${playerItemId}, itemDetails=`, playerItemDetails);
-      
       if (playerItemDetails && isItemPickupable(playerItemDetails)) {
-        console.log(`Drawing pickupable item on border: ${playerItemDetails.name}`);
-        drawItemOnBorder(playerItemId);
+        drawItemOnBorder(playerItemId, 57, 431); // Ground item position
+      }
+
+      // Draw equipped items on border
+      if (localPlayer.armor && localPlayer.armor > 0) {
+        drawItemOnBorder(localPlayer.armor, 56, 341); // Armor position
+      }
+      
+      if (localPlayer.weapon && localPlayer.weapon > 0) {
+        drawItemOnBorder(localPlayer.weapon, 38, 296); // Weapon position
+      }
+      
+      if (localPlayer.hands && localPlayer.hands > 0) {
+        drawItemOnBorder(localPlayer.hands, 73, 296); // Hands position
       }
     }
   }
@@ -1241,16 +1303,12 @@ function drawItemAtTile(sx, sy, itemIndex) {
     
     // Placed items take priority over map items
     const finalItem = placedItem > 0 ? placedItem : mapItem;
-    
-    // Debug logging
-    console.log(`getItemAtPosition(${x},${y}): mapItem=${mapItem}, placedItem=${placedItem}, final=${finalItem}`);
-    
     return finalItem;
   }
 
   function isItemPickupable(itemDetails) {
     if (!itemDetails) return false;
-    const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "container", "garbage"];
+    const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
     return pickupableTypes.includes(itemDetails.type);
   }
 
@@ -1273,12 +1331,9 @@ function drawItemAtTile(sx, sy, itemIndex) {
           description: item[5]
         }));
         itemDetailsReady = true;
-        console.log(`Loaded ${itemDetails.length} item details`);
-        console.log('Sample item details:', itemDetails.slice(0, 5)); // Debug: show first 5 items
       }
     })
     .catch(err => {
-      console.error('Failed to load item details:', err);
       // Try alternative path
       fetch('/client/assets/itemdetails.json')
         .then(r => r.json())
@@ -1294,11 +1349,9 @@ function drawItemAtTile(sx, sy, itemIndex) {
               description: item[5]
             }));
             itemDetailsReady = true;
-            console.log(`Loaded ${itemDetails.length} item details (alternative path)`);
           }
         })
         .catch(err2 => {
-          console.error('Failed to load item details from both paths:', err2);
           itemDetailsReady = true; // Set to true anyway to not block the game
         });
     });
