@@ -230,7 +230,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           const tcan = document.createElement('canvas');
           tcan.width = tileW; tcan.height = tileH;
-          const tctx = tcan.getContext('2d');
+          const tctx = tcan.getContext('2d', { willReadFrequently: true });
           tctx.drawImage(off, sx, sy, tileW, tileH, 0, 0, tileW, tileH);
 
           // magenta -> transparent (if present in art)
@@ -312,7 +312,13 @@ document.addEventListener('DOMContentLoaded', () => {
       // Make true magenta transparent + compute leftPad (first opaque column)
       let leftPad = 0;
       try {
-        const data = octx.getImageData(0, 0, sw, sh);
+        // Set willReadFrequently for better performance
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = sw; tempCanvas.height = sh;
+        const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
+        tempCtx.drawImage(off, 0, 0);
+        
+        const data = tempCtx.getImageData(0, 0, sw, sh);
         const d = data.data;
 
         // magenta -> transparent
@@ -331,7 +337,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (leftPad === sw) leftPad = 0; // all transparent (safety)
 
-        octx.putImageData(data, 0, 0);
+        tempCtx.putImageData(data, 0, 0);
+        octx.clearRect(0, 0, sw, sh);
+        octx.drawImage(tempCanvas, 0, 0);
       } catch {
         leftPad = 0; // fallback if canvas is tainted (shouldn't be here)
       }
@@ -396,9 +404,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---------- WS ----------
   function connectToServer() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    
+    console.log('Attempting to connect to:', WS_URL);
     ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
+      console.log('WebSocket connected successfully');
       connected = true;
       connectionPaused = true;
       showLoginGUI = false;
@@ -408,8 +419,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!data) return;
       handleServerMessage(data);
     };
-    ws.onerror = (e) => console.error('WS error', e);
-    ws.onclose = () => {
+    ws.onerror = (e) => {
+      console.error('WebSocket error:', e);
+      console.log('Failed to connect to:', WS_URL);
+    };
+    ws.onclose = (e) => {
+      console.log('WebSocket closed:', e.code, e.reason);
       connected = false;
       connectionPaused = false;
       showLoginGUI = false;
@@ -422,6 +437,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (localAttackTimeout) {
         clearTimeout(localAttackTimeout);
         localAttackTimeout = null;
+      }
+      
+      // Auto-reconnect after 3 seconds if not manually closed
+      if (e.code !== 1000) { // 1000 = normal closure
+        console.log('Attempting to reconnect in 3 seconds...');
+        setTimeout(connectToServer, 3000);
       }
     };
   }
@@ -1073,16 +1094,5 @@ function drawItemAtTile(sx, sy, itemIndex) {
 
   // utils
   function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
-  function connectToServer() {
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-    ws = new WebSocket(WS_URL);
-    ws.onopen = () => { connected = true; connectionPaused = true; showLoginGUI = false; };
-    ws.onmessage = (ev) => { const d = safeParse(ev.data); if (d) handleServerMessage(d); };
-    ws.onerror = (e) => console.error('WS error', e);
-    ws.onclose = () => {
-      connected = false; connectionPaused = false; showLoginGUI = false; loggedIn = false; chatMode = false;
-      localPlayer = null; otherPlayers = {}; mapItems = {};
-    };
-  }
   window.connectToServer = connectToServer;
 });
