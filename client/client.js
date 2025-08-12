@@ -201,7 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 62x32, with 1px shared border
+  // Floor tiles from /assets/floor.png: 9 columns x 11 rows, each 62x32, with 1px overlapping border
   const imgFloor = new Image();
   imgFloor.src = "/assets/floor.png";
   let floorTiles = []; // 1-based indexing
@@ -209,11 +209,9 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const sheetW = imgFloor.width;
       const sheetH = imgFloor.height;
-      const tileW = 62, tileH = 32; // Updated to 62x32
-      const stepX = 64; // 62 + (1px right border + 1px left border shared)
-      const stepY = 34; // 32 + shared borders
-      const cols = 9;   // per your sample wording: 9 per row
-      const rows = 11;  // and 11 rows
+      const tileW = 62, tileH = 32;
+      const cols = 9;   // 9 columns
+      const rows = 11;  // 11 rows
 
       const off = document.createElement('canvas');
       off.width = sheetW; off.height = sheetH;
@@ -225,8 +223,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
-          const sx = 1 + col * stepX;
-          const sy = 1 + row * stepY;
+          // Use the coordinate formula from your examples:
+          // x = 1 + (col * 63), y = 1 + (row * 33)
+          const sx = 1 + (col * 63);  // 63 = 62 + 1 pixel border
+          const sy = 1 + (row * 33);  // 33 = 32 + 1 pixel border
 
           const tcan = document.createElement('canvas');
           tcan.width = tileW; tcan.height = tileH;
