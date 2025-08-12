@@ -80,8 +80,8 @@ document.addEventListener('DOMContentLoaded', () => {
     up: 16     // up
   };
 
-  // Movement animation sequence: walk_1 -> idle -> walk_2 -> idle
-  const MOVEMENT_SEQUENCE = ['walk_1', 'idle', 'walk_2', 'idle'];
+  // Movement animation sequence: walk_1 -> walk_2 -> idle
+  const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
 
   // ---------- STATE ----------
   let ws = null;
@@ -201,7 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
+  // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 62x32, with 1px shared border
   const imgFloor = new Image();
   imgFloor.src = "/assets/floor.png";
   let floorTiles = []; // 1-based indexing
@@ -209,9 +209,9 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const sheetW = imgFloor.width;
       const sheetH = imgFloor.height;
-      const tileW = 61, tileH = 31;
-      const stepX = 63; // 61 + (1px right border + 1px left border shared) => observed from provided coords
-      const stepY = 33; // 31 + shared borders
+      const tileW = 62, tileH = 32; // Updated to 62x32
+      const stepX = 64; // 62 + (1px right border + 1px left border shared)
+      const stepY = 34; // 32 + shared borders
       const cols = 9;   // per your sample wording: 9 per row
       const rows = 11;  // and 11 rows
 
@@ -484,12 +484,17 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
       case 'player_moved':
         if (localPlayer && msg.id === localPlayer.id) { 
+          // Only update position and sequence from server, keep local direction for immediate feedback
           localPlayer.pos_x = msg.x; 
           localPlayer.pos_y = msg.y;
-          localPlayer.direction = msg.direction || localPlayer.direction;
+          // Don't override direction if we just moved - keep the local direction
+          // localPlayer.direction = msg.direction || localPlayer.direction;
           localPlayer.isMoving = msg.isMoving || false;
-          localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
-          localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
+          // Only update animation frame if we're not currently moving (to avoid animation conflicts)
+          if (!localPlayer.isMoving) {
+            localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
+            localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
+          }
         } else {
           if (!otherPlayers[msg.id]) {
             otherPlayers[msg.id] = { 
@@ -624,7 +629,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Movement - Updated for new animation system
+    // Movement - IMMEDIATE DIRECTION UPDATE for sync
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       const k = e.key.toLowerCase();
@@ -649,6 +654,21 @@ document.addEventListener('DOMContentLoaded', () => {
           localPlayer.pos_x = nx;
           localPlayer.pos_y = ny;
           localPlayer.isAttacking = false;
+          localPlayer.isMoving = true;
+          
+          // Advance movement sequence for immediate visual feedback
+          localPlayer.movementSequenceIndex = (localPlayer.movementSequenceIndex + 1) % MOVEMENT_SEQUENCE.length;
+          
+          // Calculate animation frame based on new movement sequence
+          const sequenceType = MOVEMENT_SEQUENCE[localPlayer.movementSequenceIndex];
+          if (sequenceType === 'idle') {
+            localPlayer.animationFrame = DIRECTION_IDLE[newDirection] || DIRECTION_IDLE.down;
+          } else {
+            // walk_1 or walk_2
+            const walkIndex = sequenceType === 'walk_1' ? 0 : 2;
+            const directionOffsets = { down: 0, right: 5, left: 10, up: 15 };
+            localPlayer.animationFrame = (directionOffsets[newDirection] || 0) + walkIndex;
+          }
           
           // Send the move command to server
           send({ 
@@ -658,9 +678,12 @@ document.addEventListener('DOMContentLoaded', () => {
             direction: newDirection
           });
           
-          // Stop moving after a brief moment (but don't change direction)
+          // Stop moving after a brief moment and reset to idle animation
           setTimeout(() => {
             if (localPlayer) {
+              localPlayer.isMoving = false;
+              // Set to idle animation for current direction
+              localPlayer.animationFrame = DIRECTION_IDLE[localPlayer.direction] || DIRECTION_IDLE.down;
               send({ 
                 type: 'animation_update', 
                 isMoving: false, 
@@ -668,7 +691,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 animationFrame: localPlayer.animationFrame
               });
             }
-          }, 300);
+          }, 200); // Reduced from 300 to 200ms for snappier feel
         }
       }
     }
@@ -708,9 +731,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawTile(sx, sy, t) {
-    // Use extracted tile if available; center 61x31 inside 64x32 diamond
+    // Use extracted tile if available; center 62x32 inside 64x32 diamond
     if (t > 0 && floorTiles[t]) {
-      ctx.drawImage(floorTiles[t], sx + 2, sy + 1, 61, 31);
+      ctx.drawImage(floorTiles[t], sx + 1, sy + 0, 62, 32);
     } else {
       // fallback diamond
       ctx.beginPath();
@@ -731,28 +754,24 @@ function drawItemAtTile(sx, sy, itemIndex) {
   const meta = window.getItemMeta(itemIndex);
   if (!meta) return;
 
-  const { img, w, h, anchorX } = meta;
+  const { img, w, h } = meta;
   if (!img || !img.complete) return;
 
-  // Tile center and bottom edge
-  const cx = sx + TILE_W / 2;
-  const tileBottom = sy + TILE_H;
-
-  // X positioning: Use anchorX for horizontal centering
-  const drawX = Math.round(cx - anchorX);
+  // BOTTOM-RIGHT ALIGNMENT with dynamic offset for smaller items
+  // Base position: bottom-right alignment to tile rectangle
+  let drawX = (sx + TILE_W) - w;  // Right-align to tile right edge
+  let drawY = (sy + TILE_H) - h;  // Bottom-align to tile bottom edge
   
-  // Y positioning: FIXED FORMULA based on item #42 being 7px too high
-  // If item #42 was 7px too high with the previous formula, we need to lower all items by 7px
-  // 
-  // New approach: Items should sit ON the tile surface with minimal lift
-  // The tile diamond bottom edge should be the "ground level"
-  const groundLevel = tileBottom;
+  // Apply dynamic offset for items smaller than tile dimensions
+  if (w < 62) {
+    const offsetX = w - 62; // This will be negative (e.g., 40 - 62 = -22)
+    drawX += offsetX;
+  }
   
-  // Use a small, consistent lift that works for the problematic item #42
-  // Since #42 was 7px too high, we'll reduce the lift significantly
-  const itemLiftOffset = 1; // Minimal lift, just enough to not be buried
-  
-  const drawY = Math.round(groundLevel - h - itemLiftOffset);
+  if (h < 32) {
+    const offsetY = h - 32; // This will be negative (e.g., 21 - 32 = -11)
+    drawY += offsetY;
+  }
 
   ctx.drawImage(img, drawX, drawY);
 }
@@ -777,14 +796,20 @@ function drawItemAtTile(sx, sy, itemIndex) {
       const meta = playerSpriteMeta[animFrame];
       
       if (sprite && meta) {
-        // DYNAMIC POSITIONING with corrected offset: x:-14, y:-2
-        // Tile center point where we want the player's "feet" to be
-        const tileCenterX = screenX + TILE_W/2;
-        const tileCenterY = screenY + TILE_H/2;
+        // BOTTOM-RIGHT ALIGNMENT with dynamic offset for smaller sprites (same as items)
+        let spriteX = (screenX + TILE_W) - meta.w;  // Right-align to tile right edge
+        let spriteY = (screenY + TILE_H) - meta.h;  // Bottom-align to tile bottom edge
         
-        // Apply the corrected offset adjustments
-        const spriteX = tileCenterX - meta.w/2 - 14; // Center horizontally with -14 offset
-        const spriteY = tileCenterY - meta.h + 8 - 2; // Position so bottom of sprite is near tile center, +8 for ground contact, -2 offset
+        // Apply dynamic offset for sprites smaller than tile dimensions
+        if (meta.w < 62) {
+          const offsetX = meta.w - 62; // This will be negative
+          spriteX += offsetX;
+        }
+        
+        if (meta.h < 32) {
+          const offsetY = meta.h - 32; // This will be negative
+          spriteY += offsetY;
+        }
         
         ctx.drawImage(sprite, spriteX, spriteY, meta.w, meta.h);
       }
