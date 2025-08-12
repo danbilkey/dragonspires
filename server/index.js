@@ -37,6 +37,9 @@ const DIRECTION_IDLE = {
   up: 16     // up
 };
 
+// Movement animation sequence: walk_1 -> idle -> walk_2 -> idle
+const MOVEMENT_SEQUENCE = ['walk_1', 'idle', 'walk_2', 'idle'];
+
 const server = http.createServer((req, res) => {
   res.writeHead(200, {'Content-Type':'text/plain'});
   res.end('DragonSpires server is running\n');
@@ -46,6 +49,9 @@ const wss = new WebSocket.Server({ server });
 const clients = new Map();      // Map<ws, playerData>
 const usernameToWs = new Map(); // Map<username, ws>
 
+// In-memory item storage
+let mapItems = {}; // { "x,y": itemId }
+
 async function loadPlayer(username) {
   const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
   return r.rows[0];
@@ -54,9 +60,9 @@ async function loadPlayer(username) {
 async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
   const r = await pool.query(
-    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, animation_frame)
-     VALUES ($1, $2, 1, 5, 5, $3, $4, $5, $6) RETURNING *`,
-    [username, hashed, 'down', false, false, DIRECTION_IDLE.down]
+    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, animation_frame, movement_sequence_index)
+     VALUES ($1, $2, 1, 5, 5, $3, $4, $5, $6, $7) RETURNING *`,
+    [username, hashed, 'down', false, false, DIRECTION_IDLE.down, 0]
   );
   return r.rows[0];
 }
@@ -65,10 +71,10 @@ async function updatePosition(playerId, x, y) {
   await pool.query('UPDATE players SET pos_x=$1, pos_y=$2 WHERE id=$3', [x, y, playerId]);
 }
 
-async function updateAnimationState(playerId, direction, isMoving, isAttacking, animationFrame) {
+async function updateAnimationState(playerId, direction, isMoving, isAttacking, animationFrame, movementSequenceIndex) {
   await pool.query(
-    'UPDATE players SET direction=$1, is_moving=$2, is_attacking=$3, animation_frame=$4 WHERE id=$5',
-    [direction, isMoving, isAttacking, animationFrame, playerId]
+    'UPDATE players SET direction=$1, is_moving=$2, is_attacking=$3, animation_frame=$4, movement_sequence_index=$5 WHERE id=$6',
+    [direction, isMoving, isAttacking, animationFrame, movementSequenceIndex, playerId]
   );
 }
 
@@ -85,6 +91,31 @@ async function updateStatsInDb(id, fields) {
   await pool.query(sql, vals);
 }
 
+async function saveItemToDatabase(x, y, itemId) {
+  try {
+    await pool.query(
+      'INSERT INTO map_items (x, y, item_id) VALUES ($1, $2, $3) ON CONFLICT (x, y) DO UPDATE SET item_id = $3',
+      [x, y, itemId]
+    );
+  } catch (error) {
+    console.error('Error saving item to database:', error);
+  }
+}
+
+async function loadItemsFromDatabase() {
+  try {
+    const result = await pool.query('SELECT x, y, item_id FROM map_items');
+    const items = {};
+    result.rows.forEach(row => {
+      items[`${row.x},${row.y}`] = row.item_id;
+    });
+    return items;
+  } catch (error) {
+    console.error('Error loading items from database:', error);
+    return {};
+  }
+}
+
 function broadcast(obj) {
   const s = JSON.stringify(obj);
   for (const [ws] of clients.entries()) {
@@ -96,6 +127,35 @@ function send(ws, obj) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
+// Get animation frame based on direction and movement sequence
+function getMovementAnimationFrame(direction, sequenceIndex) {
+  const sequenceType = MOVEMENT_SEQUENCE[sequenceIndex];
+  if (sequenceType === 'idle') {
+    return DIRECTION_IDLE[direction] || DIRECTION_IDLE.down;
+  } else {
+    // walk_1 or walk_2
+    const walkIndex = sequenceType === 'walk_1' ? 0 : 2;
+    const directionOffsets = {
+      down: 0,
+      right: 5,
+      left: 10,
+      up: 15
+    };
+    return (directionOffsets[direction] || 0) + walkIndex;
+  }
+}
+
+// Get adjacent position based on direction
+function getAdjacentPosition(x, y, direction) {
+  switch (direction) {
+    case 'up': return { x, y: y - 1 };
+    case 'down': return { x, y: y + 1 };
+    case 'left': return { x: x - 1, y };
+    case 'right': return { x: x + 1, y };
+    default: return { x, y };
+  }
+}
+
 // Initialize database with animation columns if they don't exist
 async function initializeDatabase() {
   try {
@@ -105,9 +165,26 @@ async function initializeDatabase() {
       ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'down',
       ADD COLUMN IF NOT EXISTS is_moving BOOLEAN DEFAULT false,
       ADD COLUMN IF NOT EXISTS is_attacking BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS animation_frame INTEGER DEFAULT 1
+      ADD COLUMN IF NOT EXISTS animation_frame INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS movement_sequence_index INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'player'
     `);
-    console.log('Database animation columns initialized');
+
+    // Create map_items table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS map_items (
+        x INTEGER,
+        y INTEGER,
+        item_id INTEGER,
+        PRIMARY KEY (x, y)
+      )
+    `);
+
+    console.log('Database animation columns and map_items table initialized');
+    
+    // Load existing items
+    mapItems = await loadItemsFromDatabase();
+    console.log(`Loaded ${Object.keys(mapItems).length} items from database`);
   } catch (error) {
     console.error('Error initializing database:', error);
   }
@@ -157,14 +234,16 @@ wss.on('connection', (ws) => {
           direction: found.direction ?? 'down',
           isMoving: found.is_moving ?? false,
           isAttacking: found.is_attacking ?? false,
-          animationFrame: found.animation_frame ?? DIRECTION_IDLE.down
+          animationFrame: found.animation_frame ?? DIRECTION_IDLE.down,
+          movementSequenceIndex: found.movement_sequence_index ?? 0,
+          role: found.role ?? 'player'
         };
 
         clients.set(ws, playerData);
         usernameToWs.set(playerData.username, ws);
 
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
-        send(ws, { type: 'login_success', player: playerData, players: others });
+        send(ws, { type: 'login_success', player: playerData, players: others, items: mapItems });
         broadcast({ type: 'player_joined', player: playerData });
       } catch (e) {
         console.error('Login error', e);
@@ -204,14 +283,16 @@ wss.on('connection', (ws) => {
           direction: created.direction ?? 'down',
           isMoving: created.is_moving ?? false,
           isAttacking: created.is_attacking ?? false,
-          animationFrame: created.animation_frame ?? DIRECTION_IDLE.down
+          animationFrame: created.animation_frame ?? DIRECTION_IDLE.down,
+          movementSequenceIndex: created.movement_sequence_index ?? 0,
+          role: created.role ?? 'player'
         };
 
         clients.set(ws, playerData);
         usernameToWs.set(playerData.username, ws);
 
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
-        send(ws, { type: 'signup_success', player: playerData, players: others });
+        send(ws, { type: 'signup_success', player: playerData, players: others, items: mapItems });
         broadcast({ type: 'player_joined', player: playerData });
       } catch (e) {
         console.error('Signup error', e);
@@ -239,22 +320,23 @@ wss.on('connection', (ws) => {
         playerData.pos_x = nx;
         playerData.pos_y = ny;
 
-        // Update animation state
+        // Update direction
         if (msg.direction) {
           playerData.direction = msg.direction;
         }
-        if (typeof msg.isMoving === 'boolean') {
-          playerData.isMoving = msg.isMoving;
-        }
-        if (typeof msg.animationFrame === 'number') {
-          playerData.animationFrame = msg.animationFrame;
-        }
+
+        // Advance movement sequence index
+        playerData.movementSequenceIndex = (playerData.movementSequenceIndex + 1) % MOVEMENT_SEQUENCE.length;
+
+        // Calculate animation frame based on movement sequence
+        playerData.animationFrame = getMovementAnimationFrame(playerData.direction, playerData.movementSequenceIndex);
+        playerData.isMoving = true;
 
         // Save to database
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
           updatePosition(playerData.id, nx, ny),
-          updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame)
+          updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex)
         ]).catch(()=>{});
 
         broadcast({ 
@@ -264,7 +346,8 @@ wss.on('connection', (ws) => {
           y: ny, 
           direction: playerData.direction,
           isMoving: playerData.isMoving,
-          animationFrame: playerData.animationFrame
+          animationFrame: playerData.animationFrame,
+          movementSequenceIndex: playerData.movementSequenceIndex
         });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       }
@@ -286,9 +369,12 @@ wss.on('connection', (ws) => {
       if (typeof msg.animationFrame === 'number') {
         playerData.animationFrame = msg.animationFrame;
       }
+      if (typeof msg.movementSequenceIndex === 'number') {
+        playerData.movementSequenceIndex = msg.movementSequenceIndex;
+      }
 
       // Save animation state to database
-      updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame)
+      updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex)
         .catch(err => console.error('Animation update DB error:', err));
 
       // Broadcast animation update to all clients
@@ -298,7 +384,8 @@ wss.on('connection', (ws) => {
         direction: playerData.direction,
         isMoving: playerData.isMoving,
         isAttacking: playerData.isAttacking,
-        animationFrame: playerData.animationFrame
+        animationFrame: playerData.animationFrame,
+        movementSequenceIndex: playerData.movementSequenceIndex
       });
     }
 
@@ -306,6 +393,58 @@ wss.on('connection', (ws) => {
       if (!playerData || typeof msg.text !== 'string') return;
       const t = msg.text.trim();
       if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
+
+      // Check for admin commands
+      const placeItemMatch = t.match(/^-placeitem\s+(\d+)$/i);
+      if (placeItemMatch) {
+        // Validate admin role
+        if (playerData.role !== 'admin') {
+          // Do nothing for non-admin users
+          return;
+        }
+
+        const itemId = parseInt(placeItemMatch[1]);
+        if (itemId < 0 || itemId > 999) return; // Basic validation
+
+        // Get adjacent position based on player's facing direction
+        const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+        
+        // Check bounds
+        if (adjacentPos.x < 0 || adjacentPos.x >= MAP_WIDTH || adjacentPos.y < 0 || adjacentPos.y >= MAP_HEIGHT) {
+          send(ws, { type: 'chat', text: '~ Cannot place item outside map bounds.' });
+          return;
+        }
+
+        // Update item in memory and database
+        const key = `${adjacentPos.x},${adjacentPos.y}`;
+        if (itemId === 0) {
+          delete mapItems[key];
+          // Remove from database
+          pool.query('DELETE FROM map_items WHERE x=$1 AND y=$2', [adjacentPos.x, adjacentPos.y])
+            .catch(err => console.error('Error removing item from database:', err));
+        } else {
+          mapItems[key] = itemId;
+          // Save to database
+          saveItemToDatabase(adjacentPos.x, adjacentPos.y, itemId);
+        }
+
+        // Broadcast item update to all clients
+        broadcast({
+          type: 'item_placed',
+          x: adjacentPos.x,
+          y: adjacentPos.y,
+          itemId: itemId
+        });
+
+        send(ws, { 
+          type: 'chat', 
+          text: itemId === 0 
+            ? `~ Item removed from (${adjacentPos.x}, ${adjacentPos.y})`
+            : `~ Item ${itemId} placed at (${adjacentPos.x}, ${adjacentPos.y})`
+        });
+        return;
+      }
+
       broadcast({ type: 'chat', text: `${playerData.username}: ${t}` });
     }
   });
@@ -383,7 +522,7 @@ setInterval(async () => {
       p.animationFrame = DIRECTION_IDLE[p.direction] || DIRECTION_IDLE.down;
       
       // Update database
-      updateAnimationState(p.id, p.direction, p.isMoving, false, p.animationFrame)
+      updateAnimationState(p.id, p.direction, p.isMoving, false, p.animationFrame, p.movementSequenceIndex)
         .catch(err => console.error('Auto-stop attack DB error:', err));
       
       // Broadcast the change
@@ -393,7 +532,8 @@ setInterval(async () => {
         direction: p.direction,
         isMoving: p.isMoving,
         isAttacking: false,
-        animationFrame: p.animationFrame
+        animationFrame: p.animationFrame,
+        movementSequenceIndex: p.movementSequenceIndex
       });
     }
   }
