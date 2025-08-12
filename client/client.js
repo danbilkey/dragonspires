@@ -118,6 +118,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let movementAnimationState = 0; // 0=standing, 1=walk_1, 2=walk_2
   let isLocallyAttacking = false; // Local attack state
   let localAttackState = 0; // 0 or 1 for attack_1 or attack_2
+  let lastMoveTime = 0; // Prevent rapid movement through collision objects
 
   // Chat
   let messages = [];
@@ -660,18 +661,33 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Look command with 'l' key
+    // Look command with 'l' key - look in the direction player is facing
     if (loggedIn && localPlayer && e.key === 'l') {
       e.preventDefault();
       
-      // Get item at player's current position
-      const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
-      const itemDetails = getItemDetails(itemId);
+      // Calculate position in front of player based on direction
+      let lookX = localPlayer.pos_x;
+      let lookY = localPlayer.pos_y;
       
-      console.log(`Look command: pos(${localPlayer.pos_x},${localPlayer.pos_y}), itemId=${itemId}, itemDetails=`, itemDetails);
+      switch (playerDirection) {
+        case 'up': lookY -= 1; break;
+        case 'down': lookY += 1; break;
+        case 'left': lookX -= 1; break;
+        case 'right': lookX += 1; break;
+      }
       
-      if (itemDetails && itemDetails.description && itemDetails.description.trim()) {
-        pushChat(`~ ${itemDetails.description}`);
+      // Make sure we're looking within map bounds
+      if (lookX >= 0 && lookX < mapSpec.width && lookY >= 0 && lookY < mapSpec.height) {
+        const itemId = getItemAtPosition(lookX, lookY);
+        const itemDetails = getItemDetails(itemId);
+        
+        console.log(`Look command: facing ${playerDirection}, looking at (${lookX},${lookY}), itemId=${itemId}, itemDetails=`, itemDetails);
+        
+        if (itemDetails && itemDetails.description && itemDetails.description.trim()) {
+          pushChat(`~ ${itemDetails.description}`);
+        } else {
+          pushChat("~ You see nothing.");
+        }
       } else {
         pushChat("~ You see nothing.");
       }
@@ -744,6 +760,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Movement - NEW SYSTEM with direction and animation state
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
+      
+      // Prevent rapid movement (minimum 150ms between moves)
+      const currentTime = Date.now();
+      if (currentTime - lastMoveTime < 150) return;
+      
       const k = e.key.toLowerCase();
       let dx = 0, dy = 0, newDirection = null;
       
@@ -764,9 +785,10 @@ document.addEventListener('DOMContentLoaded', () => {
           
           if (targetItemDetails && targetItemDetails.collision) {
             console.log(`Collision detected with item: ${targetItemDetails.name}`);
-            // Item has collision - don't move but still update animation state
+            // Item has collision - don't move but still update animation state and direction
             playerDirection = newDirection;
             movementAnimationState = (movementAnimationState + 1) % 3;
+            lastMoveTime = currentTime; // Still update move time to prevent rapid inputs
             return; // Don't proceed with movement
           }
           
@@ -788,6 +810,9 @@ document.addEventListener('DOMContentLoaded', () => {
           localPlayer.pos_y = ny;
           localPlayer.isAttacking = false;
           localPlayer.isMoving = true;
+          
+          // Update last move time
+          lastMoveTime = currentTime;
           
           // Send the move command to server
           send({ 
