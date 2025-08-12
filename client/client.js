@@ -59,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Assets ready flags
   let tilesReady = false;
   let mapReady = false;
+  let playerSpritesReady = false;
 
   // Map
   let mapSpec = { width: 10, height: 10, tiles: [] };
@@ -75,6 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Chat
   let messages = [];
   let typingBuffer = "";
+
+  // Player directions - track facing direction for each player
+  let playerDirections = {}; // playerId -> 'down'|'right'|'left'|'up'
 
   // ---------- ASSETS ----------
   const imgTitle = new Image();
@@ -103,93 +107,109 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // Player sprite: crop + **magenta** -> transparent
+  // ---------- PLAYER SPRITES ----------
   const imgPlayerSrc = new Image();
   imgPlayerSrc.src = "/assets/player.gif";
-  let playerSprite = null;
-  imgPlayerSrc.onload = () => {
-    try {
-      const sx = 264, sy = 1, sw = 44, sh = 55;
-      const off = document.createElement('canvas');
-      off.width = sw; off.height = sh;
-      const octx = off.getContext('2d');
-      octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
-      const data = octx.getImageData(0,0,sw,sh);
-      for (let i = 0; i < data.data.length; i += 4) {
-        const r = data.data[i], g = data.data[i+1], b = data.data[i+2];
-        if (r === 255 && g === 0 && b === 255) data.data[i+3] = 0; // magenta
-      }
-      octx.putImageData(data, 0, 0);
-      const img = new Image();
-      img.src = off.toDataURL();
-      playerSprite = img;
-    } catch {
-      playerSprite = imgPlayerSrc;
-    }
-  };
-  // --- NEW: Extract *all* player frames from player.gif using /assets/player.json ---
-let playerFrames = []; // 0..21 (22 frames)
-const AnimIndex = {
-  down_walk_1:0, down:1, down_walk_2:2, down_attack_1:3, down_attack_2:4,
-  right_walk_1:5, right:6, right_walk_2:7, right_attack_1:8, right_attack_2:9,
-  left_walk_1:10, left:11, left_walk_2:12, left_attack_1:13, left_attack_2:14,
-  up_walk_1:15, up:16, up_walk_2:17, up_attack_1:18, up_attack_2:19,
-  stand:20, sit:21
-};
-function idleIndexForDir(dir) {
-  switch (dir) {
-    case 'down': return AnimIndex.down;   // 1-based label: 2
-    case 'left': return AnimIndex.left;   // 12
-    case 'up':   return AnimIndex.up;     // 17
-    case 'right':
-    default:     return AnimIndex.right;  // 7 (default)
-  }
-}
-function waitImage(img) { return new Promise(r => { if (img.complete) r(); else { img.onload = r; img.onerror = r; } }); }
-
-Promise.all([
-  waitImage(imgPlayerSrc),
-  fetch('/assets/player.json').then(r => r.json()).catch(() => null)
-]).then(([_, meta]) => {
-  // Accept either { knight:[...] } or a top-level array [...]
-  const list = Array.isArray(meta?.knight) ? meta.knight
-             : Array.isArray(meta) ? meta
-             : null;
-  if (!list || list.length < 22) return;
-
-  const baseW = list[0][2], baseH = list[0][3];
-
-  const off = document.createElement('canvas');
-  const octx = off.getContext('2d');
-
-  playerFrames = list.map(([sx, sy, sw, sh]) => {
-    off.width = sw; off.height = sh;
-    octx.clearRect(0, 0, sw, sh);
-    octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
-
-    // True magenta -> transparent
-    try {
-      const data = octx.getImageData(0, 0, sw, sh);
-      const d = data.data;
-      for (let i = 0; i < d.length; i += 4) {
-        if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
-      }
-      octx.putImageData(data, 0, 0);
-    } catch {}
-
-    const img = new Image();
-    img.src = off.toDataURL();
-
-    return {
-      img, w: sw, h: sh,
-      offsetX: Math.round((baseW - sw) / 2), // horizontal center
-      offsetY: Math.round(baseH - sh)        // bottom align
-    };
-  });
-});
-
-
   
+  // Animation mapping
+  const ANIMATION_MAP = {
+    1: 'down_walk_1',
+    2: 'down',
+    3: 'down_walk_2',
+    4: 'down_attack_1',
+    5: 'down_attack_2',
+    6: 'right_walk_1',
+    7: 'right',
+    8: 'right_walk_2',
+    9: 'right_attack_1',
+    10: 'right_attack_2',
+    11: 'left_walk_1',
+    12: 'left',
+    13: 'left_walk_2',
+    14: 'left_attack_1',
+    15: 'left_attack_2',
+    16: 'up_walk_1',
+    17: 'up',
+    18: 'up_walk_2',
+    19: 'up_attack_1',
+    20: 'up_attack_2',
+    21: 'stand',
+    22: 'sit'
+  };
+
+  // Directional sprite indices
+  const DIRECTIONAL_SPRITES = {
+    'down': 2,
+    'right': 7,
+    'left': 12,
+    'up': 17
+  };
+
+  let playerSprites = {}; // animation_name -> Image object
+  let playerSpriteMeta = {}; // animation_name -> {w, h}
+
+  // Load player sprites
+  const playerJsonPromise = fetch("/assets/player.json")
+    .then(r => r.json())
+    .catch(() => null);
+
+  function waitImage(img) {
+    return new Promise((resolve) => {
+      if (img.complete) return resolve();
+      img.onload = resolve;
+      img.onerror = resolve;
+    });
+  }
+
+  Promise.all([waitImage(imgPlayerSrc), playerJsonPromise]).then(([_, playerData]) => {
+    if (!playerData || !Array.isArray(playerData.knight)) {
+      console.error("Invalid player.json structure");
+      playerSpritesReady = true;
+      return;
+    }
+
+    const off = document.createElement("canvas");
+    const octx = off.getContext("2d");
+
+    playerData.knight.forEach((coords, idx) => {
+      const [sx, sy, sw, sh] = coords;
+      const animationIndex = idx + 1; // 1-based
+      const animationName = ANIMATION_MAP[animationIndex];
+      
+      if (!animationName) return;
+
+      off.width = sw; 
+      off.height = sh;
+      octx.clearRect(0, 0, sw, sh);
+      octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
+
+      // Make magenta transparent
+      try {
+        const data = octx.getImageData(0, 0, sw, sh);
+        const d = data.data;
+        
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) {
+            d[i + 3] = 0; // make transparent
+          }
+        }
+        
+        octx.putImageData(data, 0, 0);
+      } catch (e) {
+        console.warn("Failed to process sprite transparency:", e);
+      }
+
+      // Create image from processed canvas
+      const sprite = new Image();
+      sprite.src = off.toDataURL();
+      
+      playerSprites[animationName] = sprite;
+      playerSpriteMeta[animationName] = { w: sw, h: sh };
+    });
+
+    playerSpritesReady = true;
+  });
+
   // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
   const imgFloor = new Image();
   imgFloor.src = "/assets/floor.png";
@@ -243,22 +263,21 @@ Promise.all([
       tilesReady = true;
 
       // load map AFTER tiles are ready
-fetch('map.json')
-  .then(r => r.json())
-  .then(m => {
-    if (m && m.width && m.height) {
-      const tiles = Array.isArray(m.tiles) ? m.tiles : (Array.isArray(m.tilemap) ? m.tilemap : null);
-      mapSpec = {
-        width: m.width,
-        height: m.height,
-        tiles: tiles || [],
-        items: Array.isArray(m.items) ? m.items : []
-      };
-    }
-  })
-  .catch(() => {})
-  .finally(() => { mapReady = true; });
-
+      fetch('map.json')
+        .then(r => r.json())
+        .then(m => {
+          if (m && m.width && m.height) {
+            const tiles = Array.isArray(m.tiles) ? m.tiles : (Array.isArray(m.tilemap) ? m.tilemap : null);
+            mapSpec = {
+              width: m.width,
+              height: m.height,
+              tiles: tiles || [],
+              items: Array.isArray(m.items) ? m.items : []
+            };
+          }
+        })
+        .catch(() => {})
+        .finally(() => { mapReady = true; });
 
     } catch (e) {
       console.error("Floor tile extraction failed:", e);
@@ -349,7 +368,22 @@ fetch('map.json')
   window.itemsReady = () => itemsReady;
 })();
 
+  // ---------- HELPER FUNCTIONS ----------
+  function getPlayerDirection(playerId) {
+    return playerDirections[playerId] || 'right'; // default to right
+  }
 
+  function setPlayerDirection(playerId, direction) {
+    playerDirections[playerId] = direction;
+  }
+
+  function getDirectionalSprite(playerId) {
+    const direction = getPlayerDirection(playerId);
+    const animationName = Object.keys(ANIMATION_MAP).find(key => 
+      ANIMATION_MAP[key] === direction
+    );
+    return animationName ? playerSprites[direction] : playerSprites['right'];
+  }
 
   // ---------- WS ----------
   function connectToServer() {
@@ -375,6 +409,7 @@ fetch('map.json')
       chatMode = false;
       localPlayer = null;
       otherPlayers = {};
+      playerDirections = {}; // reset directions
     };
   }
   connectToServer();
@@ -389,30 +424,58 @@ fetch('map.json')
       case 'signup_success': {
         loggedIn = true;
         localPlayer = { ...msg.player };
-        localPlayer.dir = localPlayer.dir || 'right'; // NEW: default facing right
+        // Initialize local player direction
+        if (localPlayer) {
+          setPlayerDirection(localPlayer.id, 'right');
+        }
         otherPlayers = {};
-        if (Array.isArray(msg.players)) msg.players.forEach(p => { if (!localPlayer || p.id !== localPlayer.id) otherPlayers[p.id] = p; });
+        if (Array.isArray(msg.players)) {
+          msg.players.forEach(p => { 
+            if (!localPlayer || p.id !== localPlayer.id) {
+              otherPlayers[p.id] = p;
+              setPlayerDirection(p.id, 'right'); // default for other players
+            }
+          });
+        }
         pushChat("Welcome to DragonSpires!");
         break;
       }
       case 'player_joined':
         if (!localPlayer || msg.player.id !== localPlayer.id) {
           otherPlayers[msg.player.id] = msg.player;
+          setPlayerDirection(msg.player.id, 'right'); // default direction
           pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
         }
         break;
-      case 'player_moved':
-        if (localPlayer && msg.id === localPlayer.id) { localPlayer.pos_x = msg.x; localPlayer.pos_y = msg.y; }
-        else {
-          if (!otherPlayers[msg.id]) otherPlayers[msg.id] = { id: msg.id, username: `#${msg.id}`, pos_x: msg.x, pos_y: msg.y };
-          else { otherPlayers[msg.id].pos_x = msg.x; otherPlayers[msg.id].pos_y = msg.y; }
+      case 'player_moved': {
+        // Determine direction based on movement
+        let direction = 'right'; // default
+        if (msg.dx > 0) direction = 'right';
+        else if (msg.dx < 0) direction = 'left';
+        else if (msg.dy > 0) direction = 'down';
+        else if (msg.dy < 0) direction = 'up';
+
+        if (localPlayer && msg.id === localPlayer.id) { 
+          localPlayer.pos_x = msg.x; 
+          localPlayer.pos_y = msg.y;
+          setPlayerDirection(localPlayer.id, direction);
+        } else {
+          if (!otherPlayers[msg.id]) {
+            otherPlayers[msg.id] = { id: msg.id, username: `#${msg.id}`, pos_x: msg.x, pos_y: msg.y };
+          } else { 
+            otherPlayers[msg.id].pos_x = msg.x; 
+            otherPlayers[msg.id].pos_y = msg.y; 
+          }
+          setPlayerDirection(msg.id, direction);
         }
         break;
+      }
       case 'player_left': {
         const p = otherPlayers[msg.id];
         const name = p?.username ?? msg.id;
         if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
         delete otherPlayers[msg.id];
+        delete playerDirections[msg.id]; // clean up direction tracking
         break;
       }
       case 'chat':
@@ -483,32 +546,32 @@ fetch('map.json')
     }
 
     // Movement (stamina gate; **1** per move)
-if (loggedIn && localPlayer) {
-  if ((localPlayer.stamina ?? 0) <= 0) return;
-  const k = e.key.toLowerCase();
-
-  let dx = 0, dy = 0, newDir = localPlayer.dir || 'right';
-  if (k === 'arrowup' || k === 'w')       { dy = -1; newDir = 'up'; }
-  else if (k === 'arrowdown' || k === 's'){ dy = 1;  newDir = 'down'; }
-  else if (k === 'arrowleft' || k === 'a'){ dx = -1; newDir = 'left'; }
-  else if (k === 'arrowright' || k === 'd'){ dx = 1; newDir = 'right'; }
-
-  // NEW: update facing immediately so sprite reflects intended direction
-  if (newDir !== (localPlayer.dir || 'right')) {
-    localPlayer.dir = newDir;
-  }
-
-  if (dx || dy) {
-    const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
-    if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
-      localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
-      localPlayer.pos_x = nx; localPlayer.pos_y = ny;
-      // dir already set above
-      send({ type: 'move', dx, dy });
+    if (loggedIn && localPlayer) {
+      if ((localPlayer.stamina ?? 0) <= 0) return;
+      const k = e.key.toLowerCase();
+      let dx = 0, dy = 0;
+      if (k === 'arrowup' || k === 'w') dy = -1;
+      else if (k === 'arrowdown' || k === 's') dy = 1;
+      else if (k === 'arrowleft' || k === 'a') dx = -1;
+      else if (k === 'arrowright' || k === 'd') dx = 1;
+      if (dx || dy) {
+        const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
+        if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
+          // Update direction before moving
+          let direction = 'right';
+          if (dx > 0) direction = 'right';
+          else if (dx < 0) direction = 'left';
+          else if (dy > 0) direction = 'down';
+          else if (dy < 0) direction = 'up';
+          
+          setPlayerDirection(localPlayer.id, direction);
+          
+          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
+          localPlayer.pos_x = nx; localPlayer.pos_y = ny;
+          send({ type: 'move', dx, dy });
+        }
+      }
     }
-  }
-}
-
   });
 
   canvas.addEventListener('mousedown', (e) => {
@@ -583,47 +646,39 @@ function drawItemAtTile(sx, sy, itemIndex) {
   ctx.drawImage(img, drawX, drawY);
 }
 
-
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
+    
     // Name centered, adjusted x:-2, y:-14 from previous baseline
     const nameX = screenX + TILE_W / 2 - 2;
     const nameY = screenY - 34; // (-20 - 14)
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
-    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
+    ctx.lineWidth = 3; 
+    ctx.strokeStyle = 'black'; 
+    ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
+    ctx.fillStyle = 'white'; 
+    ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
     ctx.lineWidth = 1;
 
-   const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
-const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
+    // Get directional sprite
+    const direction = getPlayerDirection(p.id);
+    const sprite = playerSprites[direction];
+    const meta = playerSpriteMeta[direction];
 
-// NEW: choose idle frame based on direction if JSON frames are ready
-let usedJsonFrame = false;
-if (Array.isArray(playerFrames) && playerFrames.length === 22) {
-  const dir = (p.dir || 'right');
-  const idx = idleIndexForDir(dir); // 2:down, 7:right, 12:left, 17:up (0-based: 1,6,11,16)
-  const frame = playerFrames[idx];
-  if (frame && frame.img && frame.img.complete && frame.img.naturalWidth > 0) {
-    // align varying sizes: bottoms aligned, horizontal center matched
-    ctx.drawImage(frame.img, drawX + frame.offsetX, drawY + frame.offsetY, frame.w, frame.h);
-    usedJsonFrame = true;
-  }
-}
-if (!usedJsonFrame) {
-  // Fallback to existing single sprite (unchanged)
-  if (playerSprite && playerSprite.complete) {
-    const w = playerSprite.naturalWidth || playerSprite.width;
-    const h = playerSprite.naturalHeight || playerSprite.height;
-    ctx.drawImage(playerSprite, drawX, drawY, w, h);
-  } else {
-    ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
-    ctx.beginPath();
-    ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
-    ctx.fill();
-  }
-}
+    const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
+    const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
 
+    if (playerSpritesReady && sprite && sprite.complete && meta) {
+      // Draw the directional sprite
+      ctx.drawImage(sprite, drawX, drawY, meta.w, meta.h);
+    } else {
+      // Fallback to colored ellipse if sprites not ready
+      ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
+      ctx.beginPath();
+      ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
   }
 
   function drawBarsAndStats() {
@@ -666,6 +721,7 @@ if (!usedJsonFrame) {
       if (y < y1 + pad) break;
     }
   }
+
   function drawChatInput() {
     if (!chatMode) return;
     const { x1, y1, x2, y2, pad, extraY } = CHAT_INPUT;
@@ -752,48 +808,46 @@ if (!usedJsonFrame) {
           const t = (mapSpec.tiles && mapSpec.tiles[y] && typeof mapSpec.tiles[y][x] !== 'undefined') ? mapSpec.tiles[y][x] : 0;
           const { screenX, screenY } = isoScreen(x, y);
           drawTile(screenX, screenY, t);
-
         }
       }
     }
 
-  // Build a quick lookup of players by tile
-const playersByTile = {};
-(function buildPlayersIndex() {
-  if (localPlayer) {
-    const k = `${localPlayer.pos_x},${localPlayer.pos_y}`;
-    (playersByTile[k] ||= []).push({ ...localPlayer, __isLocal: true });
-  }
-  for (const id in otherPlayers) {
-    const p = otherPlayers[id];
-    const k = `${p.pos_x},${p.pos_y}`;
-    (playersByTile[k] ||= []).push(p);
-  }
-})();
+    // Build a quick lookup of players by tile
+    const playersByTile = {};
+    (function buildPlayersIndex() {
+      if (localPlayer) {
+        const k = `${localPlayer.pos_x},${localPlayer.pos_y}`;
+        (playersByTile[k] ||= []).push({ ...localPlayer, __isLocal: true });
+      }
+      for (const id in otherPlayers) {
+        const p = otherPlayers[id];
+        const k = `${p.pos_x},${p.pos_y}`;
+        (playersByTile[k] ||= []).push(p);
+      }
+    })();
 
-// Second pass: items + players in tile order (depth-safe with tall items)
-if (tilesReady && mapReady) {
-  for (let y = 0; y < mapSpec.height; y++) {
-    for (let x = 0; x < mapSpec.width; x++) {
-      const { screenX, screenY } = isoScreen(x, y);
+    // Second pass: items + players in tile order (depth-safe with tall items)
+    if (tilesReady && mapReady) {
+      for (let y = 0; y < mapSpec.height; y++) {
+        for (let x = 0; x < mapSpec.width; x++) {
+          const { screenX, screenY } = isoScreen(x, y);
 
-      // 1) Item on this tile?
-      const it = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined')
-        ? mapSpec.items[y][x]
-        : 0;
-      if (it > 0) drawItemAtTile(screenX, screenY, it);
+          // 1) Item on this tile?
+          const it = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined')
+            ? mapSpec.items[y][x]
+            : 0;
+          if (it > 0) drawItemAtTile(screenX, screenY, it);
 
-      // 2) Players standing on this tile
-      const k = `${x},${y}`;
-      const arr = playersByTile[k];
-      if (arr && arr.length) {
-        // Keep your usual name/sprite stacking; if multiple players share a tile, draw in arrival order
-        for (const p of arr) drawPlayer(p, !!p.__isLocal);
+          // 2) Players standing on this tile
+          const k = `${x},${y}`;
+          const arr = playersByTile[k];
+          if (arr && arr.length) {
+            // Keep your usual name/sprite stacking; if multiple players share a tile, draw in arrival order
+            for (const p of arr) drawPlayer(p, !!p.__isLocal);
+          }
+        }
       }
     }
-  }
-}
-
 
     // Border
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
@@ -834,7 +888,7 @@ if (tilesReady && mapReady) {
     ws.onerror = (e) => console.error('WS error', e);
     ws.onclose = () => {
       connected = false; connectionPaused = false; showLoginGUI = false; loggedIn = false; chatMode = false;
-      localPlayer = null; otherPlayers = {};
+      localPlayer = null; otherPlayers = {}; playerDirections = {};
     };
   }
   window.connectToServer = connectToServer;
