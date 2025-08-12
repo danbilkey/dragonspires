@@ -19,7 +19,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const ITEM_X_NUDGE = 0;//3;   // +right
   const ITEM_Y_NUDGE = 0;//15;  // +up (we subtract this in draw)
 
-
   // Screen anchor for local tile
   const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
 
@@ -47,6 +46,39 @@ document.addEventListener('DOMContentLoaded', () => {
   // Chat areas
   const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
   const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200, extraY: 2 };
+
+  // Animation constants
+  const ANIMATION_NAMES = [
+    'down_walk_1', 'down', 'down_walk_2', 'down_attack_1', 'down_attack_2',
+    'right_walk_1', 'right', 'right_walk_2', 'right_attack_1', 'right_attack_2',
+    'left_walk_1', 'left', 'left_walk_2', 'left_attack_1', 'left_attack_2',
+    'up_walk_1', 'up', 'up_walk_2', 'up_attack_1', 'up_attack_2',
+    'stand', 'sit'
+  ];
+
+  // Walk animation sequences (indices into ANIMATION_NAMES)
+  const WALK_SEQUENCES = {
+    down: [0, 1, 2, 1],   // down_walk_1, down, down_walk_2, down
+    right: [5, 6, 7, 6],  // right_walk_1, right, right_walk_2, right
+    left: [10, 11, 12, 11], // left_walk_1, left, left_walk_2, left
+    up: [15, 16, 17, 16]    // up_walk_1, up, up_walk_2, up
+  };
+
+  // Attack animation pairs
+  const ATTACK_SEQUENCES = {
+    down: [3, 4],   // down_attack_1, down_attack_2
+    right: [8, 9],  // right_attack_1, right_attack_2
+    left: [13, 14], // left_attack_1, left_attack_2
+    up: [18, 19]    // up_attack_1, up_attack_2
+  };
+
+  // Direction animations for idle state
+  const DIRECTION_IDLE = {
+    down: 1,   // down
+    right: 6,  // right
+    left: 11,  // left
+    up: 16     // up
+  };
 
   // ---------- STATE ----------
   let ws = null;
@@ -77,8 +109,12 @@ document.addEventListener('DOMContentLoaded', () => {
   let messages = [];
   let typingBuffer = "";
 
-  // Player directions - track facing direction for each player
-  let playerDirections = {}; // playerId -> 'down'|'right'|'left'|'up'
+  // Animation state
+  let walkAnimationFrame = 0;
+  let walkAnimationTimer = 0;
+  let attackAnimationIndex = 0;
+  let lastAttackTime = 0;
+  let isAttacking = false;
 
   // ---------- ASSETS ----------
   const imgTitle = new Image();
@@ -107,107 +143,62 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-  // ---------- PLAYER SPRITES ----------
+  // Player sprites: extract multiple animations from player.gif using player.json
   const imgPlayerSrc = new Image();
   imgPlayerSrc.src = "/assets/player.gif";
-  
-  // Animation mapping
-  const ANIMATION_MAP = {
-    1: 'down_walk_1',
-    2: 'down',
-    3: 'down_walk_2',
-    4: 'down_attack_1',
-    5: 'down_attack_2',
-    6: 'right_walk_1',
-    7: 'right',
-    8: 'right_walk_2',
-    9: 'right_attack_1',
-    10: 'right_attack_2',
-    11: 'left_walk_1',
-    12: 'left',
-    13: 'left_walk_2',
-    14: 'left_attack_1',
-    15: 'left_attack_2',
-    16: 'up_walk_1',
-    17: 'up',
-    18: 'up_walk_2',
-    19: 'up_attack_1',
-    20: 'up_attack_2',
-    21: 'stand',
-    22: 'sit'
-  };
+  let playerSprites = []; // Array of Image objects for each animation frame
+  let playerSpriteMeta = []; // Array of {w, h} for each sprite
 
-  // Directional sprite indices
-  const DIRECTIONAL_SPRITES = {
-    'down': 2,
-    'right': 7,
-    'left': 12,
-    'up': 17
-  };
-
-  let playerSprites = {}; // animation_name -> Image object
-  let playerSpriteMeta = {}; // animation_name -> {w, h}
-
-  // Load player sprites
-  const playerJsonPromise = fetch("/assets/player.json")
-    .then(r => r.json())
-    .catch(() => null);
-
-  function waitImage(img) {
-    return new Promise((resolve) => {
-      if (img.complete) return resolve();
-      img.onload = resolve;
-      img.onerror = resolve;
-    });
-  }
-
-  Promise.all([waitImage(imgPlayerSrc), playerJsonPromise]).then(([_, playerData]) => {
-    if (!playerData || !Array.isArray(playerData.knight)) {
-      console.error("Invalid player.json structure");
+  Promise.all([
+    new Promise(resolve => {
+      if (imgPlayerSrc.complete) resolve();
+      else { imgPlayerSrc.onload = resolve; imgPlayerSrc.onerror = resolve; }
+    }),
+    fetch('/assets/player.json').then(r => r.json()).catch(() => null)
+  ]).then(([_, playerJson]) => {
+    if (!playerJson || !playerJson.knight) {
+      console.error('Failed to load player.json or knight data');
       playerSpritesReady = true;
       return;
     }
 
-    const off = document.createElement("canvas");
-    const octx = off.getContext("2d");
+    const knightCoords = playerJson.knight;
+    const loadPromises = [];
 
-    playerData.knight.forEach((coords, idx) => {
-      const [sx, sy, sw, sh] = coords;
-      const animationIndex = idx + 1; // 1-based
-      const animationName = ANIMATION_MAP[animationIndex];
-      
-      if (!animationName) return;
-
-      off.width = sw; 
-      off.height = sh;
-      octx.clearRect(0, 0, sw, sh);
-      octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
-
-      // Make magenta transparent
+    knightCoords.forEach(([sx, sy, sw, sh], index) => {
       try {
+        const off = document.createElement('canvas');
+        off.width = sw;
+        off.height = sh;
+        const octx = off.getContext('2d');
+        octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        // Make magenta transparent
         const data = octx.getImageData(0, 0, sw, sh);
         const d = data.data;
-        
         for (let i = 0; i < d.length; i += 4) {
-          if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) {
-            d[i + 3] = 0; // make transparent
-          }
+          if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
         }
-        
         octx.putImageData(data, 0, 0);
-      } catch (e) {
-        console.warn("Failed to process sprite transparency:", e);
-      }
 
-      // Create image from processed canvas
-      const sprite = new Image();
-      sprite.src = off.toDataURL();
-      
-      playerSprites[animationName] = sprite;
-      playerSpriteMeta[animationName] = { w: sw, h: sh };
+        const sprite = new Image();
+        const promise = new Promise(resolve => {
+          sprite.onload = resolve;
+          sprite.onerror = resolve;
+        });
+        sprite.src = off.toDataURL();
+        
+        playerSprites[index] = sprite;
+        playerSpriteMeta[index] = { w: sw, h: sh };
+        loadPromises.push(promise);
+      } catch (e) {
+        console.error(`Failed to process sprite ${index}:`, e);
+      }
     });
 
-    playerSpritesReady = true;
+    Promise.all(loadPromises).then(() => {
+      playerSpritesReady = true;
+    });
   });
 
   // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
@@ -368,21 +359,49 @@ document.addEventListener('DOMContentLoaded', () => {
   window.itemsReady = () => itemsReady;
 })();
 
-  // ---------- HELPER FUNCTIONS ----------
-  function getPlayerDirection(playerId) {
-    return playerDirections[playerId] || 'right'; // default to right
+  // ---------- ANIMATION HELPERS ----------
+  function getCurrentAnimationFrame(player, isLocal = false) {
+    const currentTime = Date.now();
+    
+    // Check if player is attacking
+    if (isLocal && isAttacking) {
+      const attackSeq = ATTACK_SEQUENCES[player.direction] || ATTACK_SEQUENCES.down;
+      return attackSeq[attackAnimationIndex];
+    } else if (!isLocal && player.isAttacking) {
+      return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
+    }
+
+    // Check if player is moving (has a movement direction)
+    if ((isLocal && player.isMoving) || (!isLocal && player.isMoving)) {
+      const walkSeq = WALK_SEQUENCES[player.direction] || WALK_SEQUENCES.down;
+      if (isLocal) {
+        return walkSeq[walkAnimationFrame % walkSeq.length];
+      } else {
+        return player.animationFrame || walkSeq[0];
+      }
+    }
+
+    // Player is idle
+    return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
   }
 
-  function setPlayerDirection(playerId, direction) {
-    playerDirections[playerId] = direction;
+  function updateWalkAnimation() {
+    const currentTime = Date.now();
+    if (currentTime - walkAnimationTimer > 200) { // Change frame every 200ms
+      walkAnimationTimer = currentTime;
+      walkAnimationFrame++;
+    }
   }
 
-  function getDirectionalSprite(playerId) {
-    const direction = getPlayerDirection(playerId);
-    const animationName = Object.keys(ANIMATION_MAP).find(key => 
-      ANIMATION_MAP[key] === direction
-    );
-    return animationName ? playerSprites[direction] : playerSprites['right'];
+  function updateAttackAnimation() {
+    const currentTime = Date.now();
+    if (isAttacking && currentTime - lastAttackTime > 1000) {
+      // Stop attacking after 1 second of no attack input
+      isAttacking = false;
+      if (localPlayer) {
+        send({ type: 'animation_update', isAttacking: false, direction: localPlayer.direction });
+      }
+    }
   }
 
   // ---------- WS ----------
@@ -409,7 +428,6 @@ document.addEventListener('DOMContentLoaded', () => {
       chatMode = false;
       localPlayer = null;
       otherPlayers = {};
-      playerDirections = {}; // reset directions
     };
   }
   connectToServer();
@@ -423,17 +441,24 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'login_success':
       case 'signup_success': {
         loggedIn = true;
-        localPlayer = { ...msg.player };
-        // Initialize local player direction
-        if (localPlayer) {
-          setPlayerDirection(localPlayer.id, 'right');
-        }
+        localPlayer = { 
+          ...msg.player,
+          direction: msg.player.direction || 'down',
+          isMoving: false,
+          isAttacking: false,
+          animationFrame: DIRECTION_IDLE.down
+        };
         otherPlayers = {};
         if (Array.isArray(msg.players)) {
           msg.players.forEach(p => { 
             if (!localPlayer || p.id !== localPlayer.id) {
-              otherPlayers[p.id] = p;
-              setPlayerDirection(p.id, 'right'); // default for other players
+              otherPlayers[p.id] = {
+                ...p,
+                direction: p.direction || 'down',
+                isMoving: p.isMoving || false,
+                isAttacking: p.isAttacking || false,
+                animationFrame: p.animationFrame || DIRECTION_IDLE.down
+              };
             }
           });
         }
@@ -442,40 +467,62 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       case 'player_joined':
         if (!localPlayer || msg.player.id !== localPlayer.id) {
-          otherPlayers[msg.player.id] = msg.player;
-          setPlayerDirection(msg.player.id, 'right'); // default direction
+          otherPlayers[msg.player.id] = {
+            ...msg.player,
+            direction: msg.player.direction || 'down',
+            isMoving: msg.player.isMoving || false,
+            isAttacking: msg.player.isAttacking || false,
+            animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down
+          };
           pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
         }
         break;
-      case 'player_moved': {
-        // Determine direction based on movement
-        let direction = 'right'; // default
-        if (msg.dx > 0) direction = 'right';
-        else if (msg.dx < 0) direction = 'left';
-        else if (msg.dy > 0) direction = 'down';
-        else if (msg.dy < 0) direction = 'up';
-
+      case 'player_moved':
         if (localPlayer && msg.id === localPlayer.id) { 
           localPlayer.pos_x = msg.x; 
           localPlayer.pos_y = msg.y;
-          setPlayerDirection(localPlayer.id, direction);
+          localPlayer.direction = msg.direction || localPlayer.direction;
+          localPlayer.isMoving = msg.isMoving || false;
+          localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
         } else {
           if (!otherPlayers[msg.id]) {
-            otherPlayers[msg.id] = { id: msg.id, username: `#${msg.id}`, pos_x: msg.x, pos_y: msg.y };
+            otherPlayers[msg.id] = { 
+              id: msg.id, 
+              username: `#${msg.id}`, 
+              pos_x: msg.x, 
+              pos_y: msg.y,
+              direction: msg.direction || 'down',
+              isMoving: msg.isMoving || false,
+              isAttacking: false,
+              animationFrame: msg.animationFrame || DIRECTION_IDLE.down
+            };
           } else { 
             otherPlayers[msg.id].pos_x = msg.x; 
-            otherPlayers[msg.id].pos_y = msg.y; 
+            otherPlayers[msg.id].pos_y = msg.y;
+            otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+            otherPlayers[msg.id].isMoving = msg.isMoving || false;
+            otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
           }
-          setPlayerDirection(msg.id, direction);
         }
         break;
-      }
+      case 'animation_update':
+        if (localPlayer && msg.id === localPlayer.id) {
+          localPlayer.direction = msg.direction || localPlayer.direction;
+          localPlayer.isMoving = msg.isMoving || false;
+          localPlayer.isAttacking = msg.isAttacking || false;
+          localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
+        } else if (otherPlayers[msg.id]) {
+          otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+          otherPlayers[msg.id].isMoving = msg.isMoving || false;
+          otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
+          otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
+        }
+        break;
       case 'player_left': {
         const p = otherPlayers[msg.id];
         const name = p?.username ?? msg.id;
         if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
         delete otherPlayers[msg.id];
-        delete playerDirections[msg.id]; // clean up direction tracking
         break;
       }
       case 'chat':
@@ -545,30 +592,76 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    // Attack input
+    if (loggedIn && localPlayer && e.key === 'Tab') {
+      e.preventDefault();
+      isAttacking = true;
+      lastAttackTime = Date.now();
+      attackAnimationIndex = (attackAnimationIndex + 1) % 2; // Toggle between attack frames
+      
+      const attackSeq = ATTACK_SEQUENCES[localPlayer.direction] || ATTACK_SEQUENCES.down;
+      const currentFrame = attackSeq[attackAnimationIndex];
+      
+      send({ 
+        type: 'animation_update', 
+        isAttacking: true, 
+        direction: localPlayer.direction,
+        animationFrame: currentFrame
+      });
+      return;
+    }
+
     // Movement (stamina gate; **1** per move)
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       const k = e.key.toLowerCase();
-      let dx = 0, dy = 0;
-      if (k === 'arrowup' || k === 'w') dy = -1;
-      else if (k === 'arrowdown' || k === 's') dy = 1;
-      else if (k === 'arrowleft' || k === 'a') dx = -1;
-      else if (k === 'arrowright' || k === 'd') dx = 1;
+      let dx = 0, dy = 0, newDirection = localPlayer.direction;
+      
+      if (k === 'arrowup' || k === 'w') { dy = -1; newDirection = 'up'; }
+      else if (k === 'arrowdown' || k === 's') { dy = 1; newDirection = 'down'; }
+      else if (k === 'arrowleft' || k === 'a') { dx = -1; newDirection = 'left'; }
+      else if (k === 'arrowright' || k === 'd') { dx = 1; newDirection = 'right'; }
+      
       if (dx || dy) {
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
-          // Update direction before moving
-          let direction = 'right';
-          if (dx > 0) direction = 'right';
-          else if (dx < 0) direction = 'left';
-          else if (dy > 0) direction = 'down';
-          else if (dy < 0) direction = 'up';
-          
-          setPlayerDirection(localPlayer.id, direction);
-          
           localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
-          localPlayer.pos_x = nx; localPlayer.pos_y = ny;
-          send({ type: 'move', dx, dy });
+          localPlayer.pos_x = nx; 
+          localPlayer.pos_y = ny;
+          localPlayer.direction = newDirection;
+          localPlayer.isMoving = true;
+          
+          // Reset walk animation if direction changed
+          if (newDirection !== localPlayer.direction) {
+            walkAnimationFrame = 0;
+            walkAnimationTimer = Date.now();
+          }
+          
+          // Get the first walk frame for the new direction
+          const walkSeq = WALK_SEQUENCES[newDirection] || WALK_SEQUENCES.down;
+          const currentFrame = walkSeq[0]; // Start with walk_1 frame
+          
+          send({ 
+            type: 'move', 
+            dx, 
+            dy, 
+            direction: newDirection,
+            isMoving: true,
+            animationFrame: currentFrame
+          });
+          
+          // Stop moving after a brief moment
+          setTimeout(() => {
+            if (localPlayer) {
+              localPlayer.isMoving = false;
+              send({ 
+                type: 'animation_update', 
+                isMoving: false, 
+                direction: localPlayer.direction,
+                animationFrame: DIRECTION_IDLE[localPlayer.direction]
+              });
+            }
+          }, 300);
         }
       }
     }
@@ -654,26 +747,30 @@ function drawItemAtTile(sx, sy, itemIndex) {
     const nameY = screenY - 34; // (-20 - 14)
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.lineWidth = 3; 
-    ctx.strokeStyle = 'black'; 
-    ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
-    ctx.fillStyle = 'white'; 
-    ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
+    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
+    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
     ctx.lineWidth = 1;
 
-    // Get directional sprite
-    const direction = getPlayerDirection(p.id);
-    const sprite = playerSprites[direction];
-    const meta = playerSpriteMeta[direction];
-
-    const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
-    const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
-
-    if (playerSpritesReady && sprite && sprite.complete && meta) {
-      // Draw the directional sprite
-      ctx.drawImage(sprite, drawX, drawY, meta.w, meta.h);
+    // Get current animation frame
+    const animFrame = getCurrentAnimationFrame(p, isLocal);
+    
+    if (playerSpritesReady && playerSprites[animFrame] && playerSprites[animFrame].complete) {
+      const sprite = playerSprites[animFrame];
+      const meta = playerSpriteMeta[animFrame];
+      
+      if (sprite && meta) {
+        // Calculate dynamic positioning based on sprite dimensions
+        // Center the sprite horizontally on the tile, and position it so the bottom aligns with tile center
+        const spriteX = screenX + TILE_W/2 - meta.w/2;
+        const spriteY = screenY + TILE_H/2 - meta.h + 10; // +10 to position feet on ground better
+        
+        ctx.drawImage(sprite, spriteX, spriteY, meta.w, meta.h);
+      }
     } else {
-      // Fallback to colored ellipse if sprites not ready
+      // Fallback rendering
+      const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
+      const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
+      
       ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
       ctx.beginPath();
       ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
@@ -721,7 +818,7 @@ function drawItemAtTile(sx, sy, itemIndex) {
       if (y < y1 + pad) break;
     }
   }
-
+  
   function drawChatInput() {
     if (!chatMode) return;
     const { x1, y1, x2, y2, pad, extraY } = CHAT_INPUT;
@@ -800,6 +897,10 @@ function drawItemAtTile(sx, sy, itemIndex) {
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
+
+    // Update animations
+    updateWalkAnimation();
+    updateAttackAnimation();
 
     // Map (only if ready)
     if (tilesReady && mapReady) {
@@ -888,7 +989,7 @@ function drawItemAtTile(sx, sy, itemIndex) {
     ws.onerror = (e) => console.error('WS error', e);
     ws.onclose = () => {
       connected = false; connectionPaused = false; showLoginGUI = false; loggedIn = false; chatMode = false;
-      localPlayer = null; otherPlayers = {}; playerDirections = {};
+      localPlayer = null; otherPlayers = {};
     };
   }
   window.connectToServer = connectToServer;
