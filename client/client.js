@@ -625,12 +625,6 @@ document.addEventListener('DOMContentLoaded', () => {
             isAttacking = false;
           }
           
-          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
-          localPlayer.pos_x = nx; 
-          localPlayer.pos_y = ny;
-          localPlayer.direction = newDirection;
-          localPlayer.isMoving = true;
-          
           // SEQUENTIAL ANIMATION: advance walk animation index for this direction
           if (newDirection !== localPlayer.direction) {
             // Direction changed, reset to start of sequence
@@ -645,8 +639,13 @@ document.addEventListener('DOMContentLoaded', () => {
           const walkSeq = WALK_SEQUENCES[newDirection] || WALK_SEQUENCES.down;
           const currentFrame = walkSeq[walkAnimationIndex];
           
-          // Store the current frame for local player
-          localPlayer.animationFrame = currentFrame;
+          // UPDATE POSITION AND ANIMATION ATOMICALLY to prevent rendering both sprites
+          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
+          localPlayer.pos_x = nx; 
+          localPlayer.pos_y = ny;
+          localPlayer.direction = newDirection;
+          localPlayer.isMoving = true;
+          localPlayer.animationFrame = currentFrame; // Set animation frame immediately with position
           
           send({ 
             type: 'move', 
@@ -768,24 +767,14 @@ function drawItemAtTile(sx, sy, itemIndex) {
       const meta = playerSpriteMeta[animFrame];
       
       if (sprite && meta) {
-        // DYNAMIC POSITIONING: Calculate position based on actual sprite dimensions
-        // All sprites are aligned to bottom-right, so we need to account for varying widths/heights
-        
+        // DYNAMIC POSITIONING with corrected offset: x:-14, y:-2
         // Tile center point where we want the player's "feet" to be
         const tileCenterX = screenX + TILE_W/2;
         const tileCenterY = screenY + TILE_H/2;
         
-        // For bottom-right aligned sprites, we need to position them so they appear centered
-        // The sprite's bottom-right corner represents the character's position
-        // We want to center the character horizontally on the tile
-        
-        // Since sprites are bottom-right aligned, the actual character content 
-        // might not fill the entire sprite dimensions
-        // We'll assume the character is roughly centered in the sprite horizontally
-        // and positioned at the bottom vertically
-        
-        const spriteX = tileCenterX - meta.w/2; // Center horizontally
-        const spriteY = tileCenterY - meta.h + 8; // Position so bottom of sprite is near tile center, +8 for ground contact
+        // Apply the corrected offset adjustments
+        const spriteX = tileCenterX - meta.w/2 - 14; // Center horizontally with -14 offset
+        const spriteY = tileCenterY - meta.h + 8 - 2; // Position so bottom of sprite is near tile center, +8 for ground contact, -2 offset
         
         ctx.drawImage(sprite, spriteX, spriteY, meta.w, meta.h);
       }
