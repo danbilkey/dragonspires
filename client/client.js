@@ -615,27 +615,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loggedIn && localPlayer && e.key === 'Tab') {
       e.preventDefault();
       
-      // Clear any existing attack timeout
-      if (localAttackTimeout) {
-        clearTimeout(localAttackTimeout);
-      }
-      
-      // Send attack to server (server will handle alternating)
+      // Send attack to server (server will handle alternating and timing)
       send({ 
         type: 'attack',
         direction: localPlayer.direction
       });
-      
-      // Set client-side timeout to stop attacking after 1 second
-      localAttackTimeout = setTimeout(() => {
-        if (localPlayer && localPlayer.isAttacking) {
-          send({ 
-            type: 'stop_attack',
-            direction: localPlayer.direction
-          });
-        }
-        localAttackTimeout = null;
-      }, 1000);
       
       return;
     }
@@ -745,28 +729,39 @@ function drawItemAtTile(sx, sy, itemIndex) {
   const { img, w, h, anchorX } = meta;
   if (!img || !img.complete) return;
 
-  // Tile center (contact point on the ground plane)
+  // Tile center and bottom edge
   const cx = sx + TILE_W / 2;
-  const cy = sy + TILE_H / 2;
+  const tileBottom = sy + TILE_H;
 
-  // IMPROVED ITEM POSITIONING:
-  // For items, we want them to appear to "sit" on the tile surface.
-  // The tile surface is the bottom edge of the diamond shape.
-  // We'll position items so their bottom edge aligns with the tile's bottom edge,
-  // but offset them up slightly so they appear to sit ON the tile rather than buried in it.
-  
-  // Calculate positioning:
-  // - X: Center the item horizontally using anchorX
-  // - Y: Position so the item's bottom edge sits slightly above the tile's bottom edge
+  // IMPROVED ITEM POSITIONING for varying widths and heights:
+  // 
+  // For X positioning: Use anchorX which is the computed center of the item's opaque content
   const drawX = Math.round(cx - anchorX);
   
   // For Y positioning: 
-  // - sy + TILE_H is the bottom of the tile diamond
-  // - We want the bottom of the item (drawY + h) to be slightly above this
-  // - Add a small offset (8 pixels) to lift items slightly above the ground
-  const groundLevel = sy + TILE_H;
-  const itemLiftOffset = 8; // pixels to lift item above ground
-  const drawY = Math.round(groundLevel - h - itemLiftOffset);
+  // Items should appear to "sit" on the tile. The key insight is that larger/wider items
+  // often have more visual mass and need different ground contact points.
+  // 
+  // We'll use a proportion-based approach:
+  // - For narrow items (w <= 32): lift them less (they sit closer to ground)
+  // - For medium items (32 < w <= 64): standard lift
+  // - For wide items (w > 64): lift them more (they have more visual presence)
+  
+  let itemLiftOffset;
+  if (w <= 32) {
+    itemLiftOffset = 4; // Less lift for narrow items
+  } else if (w <= 64) {
+    itemLiftOffset = 8; // Standard lift for medium items  
+  } else {
+    itemLiftOffset = 12; // More lift for wide items
+  }
+  
+  // Additionally, adjust based on height - very tall items might need less lift
+  if (h > 64) {
+    itemLiftOffset -= 2; // Slightly less lift for very tall items
+  }
+  
+  const drawY = Math.round(tileBottom - h - itemLiftOffset);
 
   ctx.drawImage(img, drawX, drawY);
 }
