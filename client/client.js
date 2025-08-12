@@ -602,7 +602,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Login GUI typing
     if (!loggedIn && showLoginGUI && activeField) {
-      if (e.key === 'Backspace') {
+      if (e.key === 'Tab') {
+        // Switch between username and password fields
+        e.preventDefault();
+        activeField = (activeField === 'username') ? 'password' : 'username';
+        return;
+      } else if (e.key === 'Backspace') {
         if (activeField === 'username') usernameStr = usernameStr.slice(0, -1);
         else passwordStr = passwordStr.slice(0, -1);
         e.preventDefault();
@@ -613,6 +618,37 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeField === 'username') usernameStr += e.key;
         else passwordStr += e.key;
       }
+      return;
+    }
+
+    // Rotation with '0' key - rotate in place without movement
+    if (loggedIn && localPlayer && e.key === '0') {
+      e.preventDefault();
+      
+      // Cancel any attack animation
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
+        localAttackTimeout = null;
+      }
+      
+      // Cycle through directions: right -> down -> left -> up -> right...
+      const directions = ['right', 'down', 'left', 'up'];
+      const currentIndex = directions.indexOf(localPlayer.direction);
+      const nextIndex = (currentIndex + 1) % directions.length;
+      const newDirection = directions[nextIndex];
+      
+      // Update local state immediately
+      localPlayer.direction = newDirection;
+      localPlayer.isAttacking = false;
+      localPlayer.isMoving = false;
+      localPlayer.animationFrame = DIRECTION_IDLE[newDirection] || DIRECTION_IDLE.down;
+      
+      // Send rotation to server
+      send({
+        type: 'rotate',
+        direction: newDirection
+      });
+      
       return;
     }
 
@@ -653,7 +689,7 @@ document.addEventListener('DOMContentLoaded', () => {
           localPlayer.direction = newDirection;
           localPlayer.pos_x = nx;
           localPlayer.pos_y = ny;
-          localPlayer.isAttacking = false;
+          localPlayer.isAttacking = false; // Ensure attack is cancelled
           localPlayer.isMoving = true;
           
           // Advance movement sequence for immediate visual feedback
@@ -670,7 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localPlayer.animationFrame = (directionOffsets[newDirection] || 0) + walkIndex;
           }
           
-          // Send the move command to server
+          // Send the move command to server (this will cancel attack on server side too)
           send({ 
             type: 'move', 
             dx, 
@@ -731,9 +767,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawTile(sx, sy, t) {
-    // Use extracted tile if available; center 62x32 inside 64x32 diamond
+    // Use extracted tile if available; position 62x32 properly in 64x32 diamond
     if (t > 0 && floorTiles[t]) {
-      ctx.drawImage(floorTiles[t], sx + 1, sy + 0, 62, 32);
+      // Center the 62x32 tile in the 64x32 space
+      ctx.drawImage(floorTiles[t], sx + 1, sy, 62, 32);
     } else {
       // fallback diamond
       ctx.beginPath();
@@ -905,6 +942,11 @@ function drawItemAtTile(sx, sy, itemIndex) {
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
     else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
+
+    // Auto-select username field if no field is selected
+    if (activeField === null) {
+      activeField = 'username';
+    }
 
     // WHITE labels, nudged up by 2px to align
     ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.textAlign = 'left';
