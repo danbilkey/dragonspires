@@ -80,6 +80,9 @@ document.addEventListener('DOMContentLoaded', () => {
     up: 16     // up
   };
 
+  // Movement animation sequence: walk_1 -> idle -> walk_2 -> idle
+  const MOVEMENT_SEQUENCE = ['walk_1', 'idle', 'walk_2', 'idle'];
+
   // ---------- STATE ----------
   let ws = null;
   let connected = false;
@@ -95,6 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Map
   let mapSpec = { width: 10, height: 10, tiles: [] };
+  let mapItems = {}; // { "x,y": itemId }
 
   // Auth GUI
   let usernameStr = "";
@@ -109,8 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let messages = [];
   let typingBuffer = "";
 
-  // Animation state - MODIFIED for sequential movement animation
-  let walkAnimationIndex = 0; // Changed from frame to index for sequential stepping
+  // Animation state
   let attackAnimationIndex = 0;
   let lastAttackTime = 0;
   let isAttacking = false;
@@ -358,7 +361,24 @@ document.addEventListener('DOMContentLoaded', () => {
   window.itemsReady = () => itemsReady;
 })();
 
-  // ---------- ANIMATION HELPERS - MODIFIED ----------
+  // ---------- ANIMATION HELPERS ----------
+  function getMovementAnimationFrame(direction, sequenceIndex) {
+    const sequenceType = MOVEMENT_SEQUENCE[sequenceIndex];
+    if (sequenceType === 'idle') {
+      return DIRECTION_IDLE[direction] || DIRECTION_IDLE.down;
+    } else {
+      // walk_1 or walk_2
+      const walkIndex = sequenceType === 'walk_1' ? 0 : 2;
+      const directionOffsets = {
+        down: 0,
+        right: 5,
+        left: 10,
+        up: 15
+      };
+      return (directionOffsets[direction] || 0) + walkIndex;
+    }
+  }
+
   function getCurrentAnimationFrame(player, isLocal = false) {
     // Check if player is attacking
     if (isLocal && isAttacking) {
@@ -368,21 +388,14 @@ document.addEventListener('DOMContentLoaded', () => {
       return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
     }
 
-    // For other players, always use their sent animation frame
-    if (!isLocal && typeof player.animationFrame !== 'undefined') {
+    // Use the player's animation frame (which is calculated based on movement sequence)
+    if (typeof player.animationFrame !== 'undefined') {
       return player.animationFrame;
     }
 
-    // For local player, use stored animation frame (preserves sequential movement animation)
-    if (isLocal && typeof player.animationFrame !== 'undefined') {
-      return player.animationFrame;
-    }
-
-    // Only fallback to idle if no animation frame is set
+    // Fallback to idle if no animation frame is set
     return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
   }
-
-  // REMOVED: updateWalkAnimation() - no longer needed for sequential animation
 
   function updateAttackAnimation() {
     const currentTime = Date.now();
@@ -419,6 +432,7 @@ document.addEventListener('DOMContentLoaded', () => {
       chatMode = false;
       localPlayer = null;
       otherPlayers = {};
+      mapItems = {};
     };
   }
   connectToServer();
@@ -437,10 +451,10 @@ document.addEventListener('DOMContentLoaded', () => {
           direction: msg.player.direction || 'down',
           isMoving: false,
           isAttacking: false,
-          animationFrame: DIRECTION_IDLE.down
+          animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
+          movementSequenceIndex: msg.player.movementSequenceIndex || 0
         };
         // Reset local animation state
-        walkAnimationIndex = 0;
         isAttacking = false;
         
         otherPlayers = {};
@@ -452,11 +466,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 direction: p.direction || 'down',
                 isMoving: p.isMoving || false,
                 isAttacking: p.isAttacking || false,
-                animationFrame: p.animationFrame || DIRECTION_IDLE.down
+                animationFrame: p.animationFrame || DIRECTION_IDLE.down,
+                movementSequenceIndex: p.movementSequenceIndex || 0
               };
             }
           });
         }
+
+        // Load items if provided
+        if (msg.items) {
+          mapItems = { ...msg.items };
+        }
+
         pushChat("Welcome to DragonSpires!");
         break;
       }
@@ -467,7 +488,8 @@ document.addEventListener('DOMContentLoaded', () => {
             direction: msg.player.direction || 'down',
             isMoving: msg.player.isMoving || false,
             isAttacking: msg.player.isAttacking || false,
-            animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down
+            animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
+            movementSequenceIndex: msg.player.movementSequenceIndex || 0
           };
           pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
         }
@@ -479,6 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
           localPlayer.direction = msg.direction || localPlayer.direction;
           localPlayer.isMoving = msg.isMoving || false;
           localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
+          localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
         } else {
           if (!otherPlayers[msg.id]) {
             otherPlayers[msg.id] = { 
@@ -489,7 +512,8 @@ document.addEventListener('DOMContentLoaded', () => {
               direction: msg.direction || 'down',
               isMoving: msg.isMoving || false,
               isAttacking: false,
-              animationFrame: msg.animationFrame || DIRECTION_IDLE.down
+              animationFrame: msg.animationFrame || DIRECTION_IDLE.down,
+              movementSequenceIndex: msg.movementSequenceIndex || 0
             };
           } else { 
             otherPlayers[msg.id].pos_x = msg.x; 
@@ -497,6 +521,7 @@ document.addEventListener('DOMContentLoaded', () => {
             otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
             otherPlayers[msg.id].isMoving = msg.isMoving || false;
             otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
+            otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
           }
         }
         break;
@@ -506,11 +531,22 @@ document.addEventListener('DOMContentLoaded', () => {
           localPlayer.isMoving = msg.isMoving || false;
           localPlayer.isAttacking = msg.isAttacking || false;
           localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
+          localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
         } else if (otherPlayers[msg.id]) {
           otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
           otherPlayers[msg.id].isMoving = msg.isMoving || false;
           otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
           otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
+          otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
+        }
+        break;
+      case 'item_placed':
+        // Update local item map
+        const key = `${msg.x},${msg.y}`;
+        if (msg.itemId === 0) {
+          delete mapItems[key];
+        } else {
+          mapItems[key] = msg.itemId;
         }
         break;
       case 'player_left': {
@@ -545,7 +581,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ---------- INPUT - MODIFIED ----------
+  // ---------- INPUT ----------
   window.addEventListener('keydown', (e) => {
     if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
 
@@ -587,7 +623,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Attack input - MODIFIED to cancel on movement
+    // Attack input
     if (loggedIn && localPlayer && e.key === 'Tab') {
       e.preventDefault();
       isAttacking = true;
@@ -606,7 +642,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Movement - MODIFIED for sequential animation and attack cancellation
+    // Movement - Updated for new animation system
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       const k = e.key.toLowerCase();
@@ -625,47 +661,23 @@ document.addEventListener('DOMContentLoaded', () => {
             isAttacking = false;
           }
           
-          // SEQUENTIAL ANIMATION: advance walk animation index for this direction
-          if (newDirection !== localPlayer.direction) {
-            // Direction changed, reset to start of sequence
-            walkAnimationIndex = 0;
-          } else {
-            // Same direction, advance to next frame in sequence
-            const walkSeq = WALK_SEQUENCES[newDirection] || WALK_SEQUENCES.down;
-            walkAnimationIndex = (walkAnimationIndex + 1) % walkSeq.length;
-          }
-          
-          // Get the current walk frame for the new direction
-          const walkSeq = WALK_SEQUENCES[newDirection] || WALK_SEQUENCES.down;
-          const currentFrame = walkSeq[walkAnimationIndex];
-          
-          // UPDATE POSITION AND ANIMATION ATOMICALLY to prevent rendering both sprites
-          localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
-          localPlayer.pos_x = nx; 
-          localPlayer.pos_y = ny;
-          localPlayer.direction = newDirection;
-          localPlayer.isMoving = true;
-          localPlayer.animationFrame = currentFrame; // Set animation frame immediately with position
-          
+          // The server will handle movement sequence advancement
+          // Just send the move command
           send({ 
             type: 'move', 
             dx, 
             dy, 
-            direction: newDirection,
-            isMoving: true,
-            animationFrame: currentFrame
+            direction: newDirection
           });
           
           // Stop moving after a brief moment
           setTimeout(() => {
             if (localPlayer) {
-              localPlayer.isMoving = false;
-              // Keep the current animation frame (don't revert to idle immediately)
               send({ 
                 type: 'animation_update', 
                 isMoving: false, 
                 direction: localPlayer.direction,
-                animationFrame: localPlayer.animationFrame // Keep current frame
+                animationFrame: localPlayer.animationFrame
               });
             }
           }, 300);
@@ -746,7 +758,6 @@ function drawItemAtTile(sx, sy, itemIndex) {
   ctx.drawImage(img, drawX, drawY);
 }
 
-  // MODIFIED: Dynamic sprite positioning based on sprite dimensions
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
     
@@ -910,7 +921,7 @@ function drawItemAtTile(sx, sy, itemIndex) {
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
 
-    // Update animations - MODIFIED: removed updateWalkAnimation call
+    // Update animations
     updateAttackAnimation();
 
     // Map (only if ready)
@@ -944,13 +955,18 @@ function drawItemAtTile(sx, sy, itemIndex) {
         for (let x = 0; x < mapSpec.width; x++) {
           const { screenX, screenY } = isoScreen(x, y);
 
-          // 1) Item on this tile?
+          // 1) Item on this tile from map JSON?
           const it = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined')
             ? mapSpec.items[y][x]
             : 0;
           if (it > 0) drawItemAtTile(screenX, screenY, it);
 
-          // 2) Players standing on this tile
+          // 2) Item placed by admin?
+          const itemKey = `${x},${y}`;
+          const placedItem = mapItems[itemKey];
+          if (placedItem > 0) drawItemAtTile(screenX, screenY, placedItem);
+
+          // 3) Players standing on this tile
           const k = `${x},${y}`;
           const arr = playersByTile[k];
           if (arr && arr.length) {
@@ -1000,7 +1016,7 @@ function drawItemAtTile(sx, sy, itemIndex) {
     ws.onerror = (e) => console.error('WS error', e);
     ws.onclose = () => {
       connected = false; connectionPaused = false; showLoginGUI = false; loggedIn = false; chatMode = false;
-      localPlayer = null; otherPlayers = {};
+      localPlayer = null; otherPlayers = {}; mapItems = {};
     };
   }
   window.connectToServer = connectToServer;
