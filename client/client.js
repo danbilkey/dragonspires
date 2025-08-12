@@ -275,6 +275,8 @@ document.addEventListener('DOMContentLoaded', () => {
               tiles: tiles || [],
               items: Array.isArray(m.items) ? m.items : []
             };
+            console.log('Map loaded:', mapSpec);
+            console.log('Map items sample:', mapSpec.items.slice(0, 3)); // Show first 3 rows of items
           }
         })
         .catch(() => {})
@@ -666,7 +668,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const itemDetails = getItemDetails(itemId);
       
-      if (itemDetails && itemDetails.description) {
+      console.log(`Look command: pos(${localPlayer.pos_x},${localPlayer.pos_y}), itemId=${itemId}, itemDetails=`, itemDetails);
+      
+      if (itemDetails && itemDetails.description && itemDetails.description.trim()) {
         pushChat(`~ ${itemDetails.description}`);
       } else {
         pushChat("~ You see nothing.");
@@ -756,7 +760,10 @@ document.addEventListener('DOMContentLoaded', () => {
           const targetItemId = getItemAtPosition(nx, ny);
           const targetItemDetails = getItemDetails(targetItemId);
           
+          console.log(`Movement check to (${nx},${ny}): itemId=${targetItemId}, itemDetails=`, targetItemDetails);
+          
           if (targetItemDetails && targetItemDetails.collision) {
+            console.log(`Collision detected with item: ${targetItemDetails.name}`);
             // Item has collision - don't move but still update animation state
             playerDirection = newDirection;
             movementAnimationState = (movementAnimationState + 1) % 3;
@@ -1167,7 +1174,10 @@ function drawItemAtTile(sx, sy, itemIndex) {
       const playerItemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const playerItemDetails = getItemDetails(playerItemId);
       
+      console.log(`Border item check: pos(${localPlayer.pos_x},${localPlayer.pos_y}), itemId=${playerItemId}, itemDetails=`, playerItemDetails);
+      
       if (playerItemDetails && isItemPickupable(playerItemDetails)) {
+        console.log(`Drawing pickupable item on border: ${playerItemDetails.name}`);
         drawItemOnBorder(playerItemId);
       }
     }
@@ -1192,7 +1202,7 @@ function drawItemAtTile(sx, sy, itemIndex) {
 
   // Helper functions for item details
   function getItemDetails(itemId) {
-    if (!itemDetailsReady || !itemDetails || itemId < 1 || itemId >= itemDetails.length) {
+    if (!itemDetailsReady || !itemDetails || itemId < 1 || itemId > itemDetails.length) {
       return null;
     }
     return itemDetails[itemId - 1]; // Convert to 0-based index
@@ -1205,7 +1215,12 @@ function drawItemAtTile(sx, sy, itemIndex) {
     const placedItem = mapItems[`${x},${y}`] || 0;
     
     // Placed items take priority over map items
-    return placedItem > 0 ? placedItem : mapItem;
+    const finalItem = placedItem > 0 ? placedItem : mapItem;
+    
+    // Debug logging
+    console.log(`getItemAtPosition(${x},${y}): mapItem=${mapItem}, placedItem=${placedItem}, final=${finalItem}`);
+    
+    return finalItem;
   }
 
   function isItemPickupable(itemDetails) {
@@ -1219,7 +1234,7 @@ function drawItemAtTile(sx, sy, itemIndex) {
   window.connectToServer = connectToServer;
 
   // Load item details
-  fetch('/client/assets/itemdetails.json')
+  fetch('/assets/itemdetails.json')  // Changed path - try without /client/
     .then(r => r.json())
     .then(data => {
       if (data && Array.isArray(data.items)) {
@@ -1234,10 +1249,32 @@ function drawItemAtTile(sx, sy, itemIndex) {
         }));
         itemDetailsReady = true;
         console.log(`Loaded ${itemDetails.length} item details`);
+        console.log('Sample item details:', itemDetails.slice(0, 5)); // Debug: show first 5 items
       }
     })
     .catch(err => {
       console.error('Failed to load item details:', err);
-      itemDetailsReady = true; // Set to true anyway to not block the game
+      // Try alternative path
+      fetch('/client/assets/itemdetails.json')
+        .then(r => r.json())
+        .then(data => {
+          if (data && Array.isArray(data.items)) {
+            itemDetails = data.items.map((item, index) => ({
+              id: index + 1,
+              name: item[0],
+              collision: item[1] === "true",
+              type: item[2],
+              statMin: parseInt(item[3]) || 0,
+              statMax: parseInt(item[4]) || 0,
+              description: item[5]
+            }));
+            itemDetailsReady = true;
+            console.log(`Loaded ${itemDetails.length} item details (alternative path)`);
+          }
+        })
+        .catch(err2 => {
+          console.error('Failed to load item details from both paths:', err2);
+          itemDetailsReady = true; // Set to true anyway to not block the game
+        });
     });
 });
