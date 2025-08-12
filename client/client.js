@@ -713,12 +713,22 @@ document.addEventListener('DOMContentLoaded', () => {
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const itemDetails = getItemDetails(itemId);
       
+      // Case 1: There's a pickupable item on the ground
       if (itemDetails && isItemPickupable(itemDetails)) {
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
           y: localPlayer.pos_y,
           itemId: itemId
+        });
+      }
+      // Case 2: No item on ground but player has something in hands - drop it
+      else if ((!itemDetails || !isItemPickupable(itemDetails)) && localPlayer.hands && localPlayer.hands > 0) {
+        send({
+          type: 'pickup_item',
+          x: localPlayer.pos_x,
+          y: localPlayer.pos_y,
+          itemId: 0 // 0 indicates dropping/no item on ground
         });
       }
       
@@ -729,12 +739,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loggedIn && localPlayer && e.key === 't') {
       e.preventDefault();
       
-      const handsItemDetails = getItemDetails(localPlayer.hands);
-      if (handsItemDetails && handsItemDetails.type === 'weapon') {
-        send({
-          type: 'equip_weapon'
-        });
-      }
+      // Always send the command - server will handle the logic
+      send({
+        type: 'equip_weapon'
+      });
       
       return;
     }
@@ -743,12 +751,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loggedIn && localPlayer && e.key === 'y') {
       e.preventDefault();
       
-      const handsItemDetails = getItemDetails(localPlayer.hands);
-      if (handsItemDetails && handsItemDetails.type === 'armor') {
-        send({
-          type: 'equip_armor'
-        });
-      }
+      // Always send the command - server will handle the logic
+      send({
+        type: 'equip_armor'
+      });
       
       return;
     }
