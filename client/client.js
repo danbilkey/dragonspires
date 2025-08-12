@@ -109,9 +109,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let messages = [];
   let typingBuffer = "";
 
-  // Animation state
-  let walkAnimationFrame = 0;
-  let walkAnimationTimer = 0;
+  // Animation state - MODIFIED for sequential movement animation
+  let walkAnimationIndex = 0; // Changed from frame to index for sequential stepping
   let attackAnimationIndex = 0;
   let lastAttackTime = 0;
   let isAttacking = false;
@@ -359,10 +358,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.itemsReady = () => itemsReady;
 })();
 
-  // ---------- ANIMATION HELPERS ----------
+  // ---------- ANIMATION HELPERS - MODIFIED ----------
   function getCurrentAnimationFrame(player, isLocal = false) {
-    const currentTime = Date.now();
-    
     // Check if player is attacking
     if (isLocal && isAttacking) {
       const attackSeq = ATTACK_SEQUENCES[player.direction] || ATTACK_SEQUENCES.down;
@@ -371,27 +368,16 @@ document.addEventListener('DOMContentLoaded', () => {
       return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
     }
 
-    // Check if player is moving (has a movement direction)
-    if ((isLocal && player.isMoving) || (!isLocal && player.isMoving)) {
-      const walkSeq = WALK_SEQUENCES[player.direction] || WALK_SEQUENCES.down;
-      if (isLocal) {
-        return walkSeq[walkAnimationFrame % walkSeq.length];
-      } else {
-        return player.animationFrame || walkSeq[0];
-      }
+    // For other players, use their sent animation frame
+    if (!isLocal && typeof player.animationFrame !== 'undefined') {
+      return player.animationFrame;
     }
 
-    // Player is idle
+    // For local player when idle, use direction idle
     return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
   }
 
-  function updateWalkAnimation() {
-    const currentTime = Date.now();
-    if (currentTime - walkAnimationTimer > 200) { // Change frame every 200ms
-      walkAnimationTimer = currentTime;
-      walkAnimationFrame++;
-    }
-  }
+  // REMOVED: updateWalkAnimation() - no longer needed for sequential animation
 
   function updateAttackAnimation() {
     const currentTime = Date.now();
@@ -448,6 +434,10 @@ document.addEventListener('DOMContentLoaded', () => {
           isAttacking: false,
           animationFrame: DIRECTION_IDLE.down
         };
+        // Reset local animation state
+        walkAnimationIndex = 0;
+        isAttacking = false;
+        
         otherPlayers = {};
         if (Array.isArray(msg.players)) {
           msg.players.forEach(p => { 
@@ -550,7 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ---------- INPUT ----------
+  // ---------- INPUT - MODIFIED ----------
   window.addEventListener('keydown', (e) => {
     if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
 
@@ -592,7 +582,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Attack input
+    // Attack input - MODIFIED to cancel on movement
     if (loggedIn && localPlayer && e.key === 'Tab') {
       e.preventDefault();
       isAttacking = true;
@@ -611,7 +601,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Movement (stamina gate; **1** per move)
+    // Movement - MODIFIED for sequential animation and attack cancellation
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       const k = e.key.toLowerCase();
@@ -625,21 +615,33 @@ document.addEventListener('DOMContentLoaded', () => {
       if (dx || dy) {
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
+          // CANCEL ATTACK ANIMATION IMMEDIATELY ON MOVEMENT
+          if (isAttacking) {
+            isAttacking = false;
+          }
+          
           localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 1); // 1 per move
           localPlayer.pos_x = nx; 
           localPlayer.pos_y = ny;
           localPlayer.direction = newDirection;
           localPlayer.isMoving = true;
           
-          // Reset walk animation if direction changed
+          // SEQUENTIAL ANIMATION: advance walk animation index for this direction
           if (newDirection !== localPlayer.direction) {
-            walkAnimationFrame = 0;
-            walkAnimationTimer = Date.now();
+            // Direction changed, reset to start of sequence
+            walkAnimationIndex = 0;
+          } else {
+            // Same direction, advance to next frame in sequence
+            const walkSeq = WALK_SEQUENCES[newDirection] || WALK_SEQUENCES.down;
+            walkAnimationIndex = (walkAnimationIndex + 1) % walkSeq.length;
           }
           
-          // Get the first walk frame for the new direction
+          // Get the current walk frame for the new direction
           const walkSeq = WALK_SEQUENCES[newDirection] || WALK_SEQUENCES.down;
-          const currentFrame = walkSeq[0]; // Start with walk_1 frame
+          const currentFrame = walkSeq[walkAnimationIndex];
+          
+          // Store the current frame for local player
+          localPlayer.animationFrame = currentFrame;
           
           send({ 
             type: 'move', 
@@ -654,11 +656,12 @@ document.addEventListener('DOMContentLoaded', () => {
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
+              // Keep the current animation frame (don't revert to idle immediately)
               send({ 
                 type: 'animation_update', 
                 isMoving: false, 
                 direction: localPlayer.direction,
-                animationFrame: DIRECTION_IDLE[localPlayer.direction]
+                animationFrame: localPlayer.animationFrame // Keep current frame
               });
             }
           }, 300);
@@ -739,6 +742,7 @@ function drawItemAtTile(sx, sy, itemIndex) {
   ctx.drawImage(img, drawX, drawY);
 }
 
+  // MODIFIED: Dynamic sprite positioning based on sprite dimensions
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
     
@@ -759,10 +763,24 @@ function drawItemAtTile(sx, sy, itemIndex) {
       const meta = playerSpriteMeta[animFrame];
       
       if (sprite && meta) {
-        // Calculate dynamic positioning based on sprite dimensions
-        // Center the sprite horizontally on the tile, and position it so the bottom aligns with tile center
-        const spriteX = screenX + TILE_W/2 - meta.w/2;
-        const spriteY = screenY + TILE_H/2 - meta.h + 10; // +10 to position feet on ground better
+        // DYNAMIC POSITIONING: Calculate position based on actual sprite dimensions
+        // All sprites are aligned to bottom-right, so we need to account for varying widths/heights
+        
+        // Tile center point where we want the player's "feet" to be
+        const tileCenterX = screenX + TILE_W/2;
+        const tileCenterY = screenY + TILE_H/2;
+        
+        // For bottom-right aligned sprites, we need to position them so they appear centered
+        // The sprite's bottom-right corner represents the character's position
+        // We want to center the character horizontally on the tile
+        
+        // Since sprites are bottom-right aligned, the actual character content 
+        // might not fill the entire sprite dimensions
+        // We'll assume the character is roughly centered in the sprite horizontally
+        // and positioned at the bottom vertically
+        
+        const spriteX = tileCenterX - meta.w/2; // Center horizontally
+        const spriteY = tileCenterY - meta.h + 8; // Position so bottom of sprite is near tile center, +8 for ground contact
         
         ctx.drawImage(sprite, spriteX, spriteY, meta.w, meta.h);
       }
@@ -898,8 +916,7 @@ function drawItemAtTile(sx, sy, itemIndex) {
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
 
-    // Update animations
-    updateWalkAnimation();
+    // Update animations - MODIFIED: removed updateWalkAnimation call
     updateAttackAnimation();
 
     // Map (only if ready)
