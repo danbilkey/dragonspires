@@ -611,7 +611,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Attack input - FIXED CLIENT-SIDE TIMEOUT
+    // Attack input - ALTERNATING ATTACK ANIMATIONS
     if (loggedIn && localPlayer && e.key === 'Tab') {
       e.preventDefault();
       
@@ -620,7 +620,7 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(localAttackTimeout);
       }
       
-      // Send attack to server
+      // Send attack to server (server will handle alternating)
       send({ 
         type: 'attack',
         direction: localPlayer.direction
@@ -749,10 +749,24 @@ function drawItemAtTile(sx, sy, itemIndex) {
   const cx = sx + TILE_W / 2;
   const cy = sy + TILE_H / 2;
 
-  // Place the sprite so its bottom-center of opaque content
-  // sits on the tile center.
+  // IMPROVED ITEM POSITIONING:
+  // For items, we want them to appear to "sit" on the tile surface.
+  // The tile surface is the bottom edge of the diamond shape.
+  // We'll position items so their bottom edge aligns with the tile's bottom edge,
+  // but offset them up slightly so they appear to sit ON the tile rather than buried in it.
+  
+  // Calculate positioning:
+  // - X: Center the item horizontally using anchorX
+  // - Y: Position so the item's bottom edge sits slightly above the tile's bottom edge
   const drawX = Math.round(cx - anchorX);
-  const drawY = Math.round(cy - h);
+  
+  // For Y positioning: 
+  // - sy + TILE_H is the bottom of the tile diamond
+  // - We want the bottom of the item (drawY + h) to be slightly above this
+  // - Add a small offset (8 pixels) to lift items slightly above the ground
+  const groundLevel = sy + TILE_H;
+  const itemLiftOffset = 8; // pixels to lift item above ground
+  const drawY = Math.round(groundLevel - h - itemLiftOffset);
 
   ctx.drawImage(img, drawX, drawY);
 }
