@@ -21,9 +21,21 @@ function looksMalicious(text) {
   return sqlLikePattern.test(text);
 }
 
-// idle frame index for each facing (per knight sheet mapping)
-const IDLE_INDEX = { down: 1, right: 6, left: 11, up: 16, stand: 20, sit: 21 };
-function idleIndexFor(dir) { return IDLE_INDEX[dir] ?? IDLE_INDEX.down; }
+// Animation constants
+const ANIMATION_NAMES = [
+  'down_walk_1', 'down', 'down_walk_2', 'down_attack_1', 'down_attack_2',
+  'right_walk_1', 'right', 'right_walk_2', 'right_attack_1', 'right_attack_2',
+  'left_walk_1', 'left', 'left_walk_2', 'left_attack_1', 'left_attack_2',
+  'up_walk_1', 'up', 'up_walk_2', 'up_attack_1', 'up_attack_2',
+  'stand', 'sit'
+];
+
+const DIRECTION_IDLE = {
+  down: 1,   // down
+  right: 6,  // right
+  left: 11,  // left
+  up: 16     // up
+};
 
 const server = http.createServer((req, res) => {
   res.writeHead(200, {'Content-Type':'text/plain'});
@@ -38,22 +50,35 @@ async function loadPlayer(username) {
   const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
   return r.rows[0];
 }
+
 async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
   const r = await pool.query(
-    `INSERT INTO players (username, password, map_id, pos_x, pos_y)
-     VALUES ($1, $2, 1, 5, 5) RETURNING *`,
-    [username, hashed]
+    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, animation_frame)
+     VALUES ($1, $2, 1, 5, 5, $3, $4, $5, $6) RETURNING *`,
+    [username, hashed, 'down', false, false, DIRECTION_IDLE.down]
   );
   return r.rows[0];
 }
+
 async function updatePosition(playerId, x, y) {
   await pool.query('UPDATE players SET pos_x=$1, pos_y=$2 WHERE id=$3', [x, y, playerId]);
 }
+
+async function updateAnimationState(playerId, direction, isMoving, isAttacking, animationFrame) {
+  await pool.query(
+    'UPDATE players SET direction=$1, is_moving=$2, is_attacking=$3, animation_frame=$4 WHERE id=$5',
+    [direction, isMoving, isAttacking, animationFrame, playerId]
+  );
+}
+
 async function updateStatsInDb(id, fields) {
   const cols = [], vals = [];
   let idx = 1;
-  for (const [k,v] of Object.entries(fields)) { cols.push(`${k}=$${idx++}`); vals.push(v); }
+  for (const [k,v] of Object.entries(fields)) { 
+    cols.push(`${k}=$${idx++}`); 
+    vals.push(v); 
+  }
   vals.push(id);
   if (!cols.length) return;
   const sql = `UPDATE players SET ${cols.join(', ')} WHERE id=$${idx}`;
@@ -66,9 +91,30 @@ function broadcast(obj) {
     if (ws.readyState === WebSocket.OPEN) ws.send(s);
   }
 }
+
 function send(ws, obj) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
+
+// Initialize database with animation columns if they don't exist
+async function initializeDatabase() {
+  try {
+    // Add animation columns to players table if they don't exist
+    await pool.query(`
+      ALTER TABLE players 
+      ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'down',
+      ADD COLUMN IF NOT EXISTS is_moving BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS is_attacking BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS animation_frame INTEGER DEFAULT 1
+    `);
+    console.log('Database animation columns initialized');
+  } catch (error) {
+    console.error('Error initializing database:', error);
+  }
+}
+
+// Initialize database on startup
+initializeDatabase();
 
 wss.on('connection', (ws) => {
   let playerData = null;
@@ -108,9 +154,10 @@ wss.on('connection', (ws) => {
           weapon: found.weapon ?? '',
           armor: found.armor ?? '',
           hands: found.hands ?? '',
-          // NEW: runtime animation state
-          dir: 'down',
-          animIndex: idleIndexFor('down')
+          direction: found.direction ?? 'down',
+          isMoving: found.is_moving ?? false,
+          isAttacking: found.is_attacking ?? false,
+          animationFrame: found.animation_frame ?? DIRECTION_IDLE.down
         };
 
         clients.set(ws, playerData);
@@ -154,9 +201,10 @@ wss.on('connection', (ws) => {
           weapon: created.weapon ?? '',
           armor: created.armor ?? '',
           hands: created.hands ?? '',
-          // NEW: runtime animation state
-          dir: 'down',
-          animIndex: idleIndexFor('down')
+          direction: created.direction ?? 'down',
+          isMoving: created.is_moving ?? false,
+          isAttacking: created.is_attacking ?? false,
+          animationFrame: created.animation_frame ?? DIRECTION_IDLE.down
         };
 
         clients.set(ws, playerData);
@@ -191,43 +239,67 @@ wss.on('connection', (ws) => {
         playerData.pos_x = nx;
         playerData.pos_y = ny;
 
-        // NEW: carry along direction/animIndex from client if provided
-        if (typeof msg.dir === 'string') playerData.dir = msg.dir;
-        if (Number.isInteger(msg.animIndex)) playerData.animIndex = msg.animIndex;
+        // Update animation state
+        if (msg.direction) {
+          playerData.direction = msg.direction;
+        }
+        if (typeof msg.isMoving === 'boolean') {
+          playerData.isMoving = msg.isMoving;
+        }
+        if (typeof msg.animationFrame === 'number') {
+          playerData.animationFrame = msg.animationFrame;
+        }
 
+        // Save to database
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
-          updatePosition(playerData.id, nx, ny)
+          updatePosition(playerData.id, nx, ny),
+          updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame)
         ]).catch(()=>{});
 
-        broadcast({ type: 'player_moved', id: playerData.id, x: nx, y: ny, dir: playerData.dir, animIndex: playerData.animIndex });
+        broadcast({ 
+          type: 'player_moved', 
+          id: playerData.id, 
+          x: nx, 
+          y: ny, 
+          direction: playerData.direction,
+          isMoving: playerData.isMoving,
+          animationFrame: playerData.animationFrame
+        });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       }
     }
 
-    // NEW: attack animation (toggle between _attack_1 and _attack_2)
-    else if (msg.type === 'attack') {
+    else if (msg.type === 'animation_update') {
       if (!playerData) return;
-      if (typeof msg.dir === 'string') playerData.dir = msg.dir;
-      if (Number.isInteger(msg.animIndex)) playerData.animIndex = msg.animIndex;
 
-      broadcast({ type: 'player_update', id: playerData.id, dir: playerData.dir, animIndex: playerData.animIndex });
+      // Update animation state
+      if (msg.direction) {
+        playerData.direction = msg.direction;
+      }
+      if (typeof msg.isMoving === 'boolean') {
+        playerData.isMoving = msg.isMoving;
+      }
+      if (typeof msg.isAttacking === 'boolean') {
+        playerData.isAttacking = msg.isAttacking;
+      }
+      if (typeof msg.animationFrame === 'number') {
+        playerData.animationFrame = msg.animationFrame;
+      }
 
-      // server-side safety reset after 1s in case client never resets
-      clearTimeout(playerData._attackTimer);
-      playerData._attackTimer = setTimeout(() => {
-        playerData.animIndex = idleIndexFor(playerData.dir);
-        broadcast({ type: 'player_update', id: playerData.id, dir: playerData.dir, animIndex: playerData.animIndex });
-      }, 1000);
-    }
+      // Save animation state to database
+      updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame)
+        .catch(err => console.error('Animation update DB error:', err));
 
-    // NEW: explicit animation update (idle reset, sit/stand, etc.)
-    else if (msg.type === 'animation') {
-      if (!playerData) return;
-      if (typeof msg.dir === 'string') playerData.dir = msg.dir;
-      if (Number.isInteger(msg.animIndex)) playerData.animIndex = msg.animIndex;
-      clearTimeout(playerData._attackTimer);
-      broadcast({ type: 'player_update', id: playerData.id, dir: playerData.dir, animIndex: playerData.animIndex });
+      // Broadcast animation update to all clients
+      broadcast({
+        type: 'animation_update',
+        id: playerData.id,
+        direction: playerData.direction,
+        isMoving: playerData.isMoving,
+        isAttacking: playerData.isAttacking,
+        animationFrame: playerData.animationFrame
+      });
     }
 
     else if (msg.type === 'chat') {
@@ -240,7 +312,6 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     if (playerData) {
-      clearTimeout(playerData._attackTimer);
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
       broadcast({ type: 'player_left', id: playerData.id });
@@ -302,6 +373,31 @@ setInterval(async () => {
     try { await updateStatsInDb(u.id, { magic: u.magic }); } catch(e){ console.error('magic regen db', e); }
   }
 }, 30000);
+
+// Auto-stop attacking animation after 1 second of inactivity
+setInterval(async () => {
+  const now = Date.now();
+  for (const [ws, p] of clients.entries()) {
+    if (p.isAttacking && p.lastAttackTime && (now - p.lastAttackTime) > 1000) {
+      p.isAttacking = false;
+      p.animationFrame = DIRECTION_IDLE[p.direction] || DIRECTION_IDLE.down;
+      
+      // Update database
+      updateAnimationState(p.id, p.direction, p.isMoving, false, p.animationFrame)
+        .catch(err => console.error('Auto-stop attack DB error:', err));
+      
+      // Broadcast the change
+      broadcast({
+        type: 'animation_update',
+        id: p.id,
+        direction: p.direction,
+        isMoving: p.isMoving,
+        isAttacking: false,
+        animationFrame: p.animationFrame
+      });
+    }
+  }
+}, 1000);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
