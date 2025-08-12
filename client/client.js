@@ -109,6 +109,12 @@ document.addEventListener('DOMContentLoaded', () => {
   let localPlayer = null;
   let otherPlayers = {};
 
+  // NEW: Simplified direction and animation state system
+  let playerDirection = 'down'; // Current facing direction
+  let movementAnimationState = 0; // 0=standing, 1=walk_1, 2=walk_2
+  let isLocallyAttacking = false; // Local attack state
+  let localAttackState = 0; // 0 or 1 for attack_1 or attack_2
+
   // Chat
   let messages = [];
   let typingBuffer = "";
@@ -466,6 +472,12 @@ document.addEventListener('DOMContentLoaded', () => {
           movementSequenceIndex: msg.player.movementSequenceIndex || 0
         };
         
+        // Initialize local state variables
+        playerDirection = localPlayer.direction;
+        movementAnimationState = 0;
+        isLocallyAttacking = false;
+        localAttackState = 0;
+        
         otherPlayers = {};
         if (Array.isArray(msg.players)) {
           msg.players.forEach(p => { 
@@ -654,43 +666,61 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Cycle through directions: right -> down -> left -> up -> right...
       const directions = ['right', 'down', 'left', 'up'];
-      const currentIndex = directions.indexOf(localPlayer.direction);
+      const currentIndex = directions.indexOf(playerDirection);
       const nextIndex = (currentIndex + 1) % directions.length;
-      const newDirection = directions[nextIndex];
+      playerDirection = directions[nextIndex];
       
-      // Update local state immediately
-      localPlayer.direction = newDirection;
+      // Reset to standing animation
+      movementAnimationState = 0;
+      isLocallyAttacking = false;
+      
+      // Update local player object for server sync
+      localPlayer.direction = playerDirection;
       localPlayer.isAttacking = false;
       localPlayer.isMoving = false;
-      localPlayer.animationFrame = DIRECTION_IDLE[newDirection] || DIRECTION_IDLE.down;
       
       // Send rotation to server
       send({
         type: 'rotate',
-        direction: newDirection
+        direction: playerDirection
       });
       
       return;
     }
 
-    // Attack input - ALTERNATING ATTACK ANIMATIONS
+    // Attack input - NEW SYSTEM
     if (loggedIn && localPlayer && e.key === 'Tab') {
       e.preventDefault();
       
-      // Send attack to server (server will handle alternating and timing)
+      // Start local attack state
+      isLocallyAttacking = true;
+      localAttackState = (localAttackState + 1) % 2; // Alternate between 0 and 1
+      
+      // Set timeout to stop attack after 1 second
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
+      }
+      
+      localAttackTimeout = setTimeout(() => {
+        isLocallyAttacking = false;
+        movementAnimationState = 0; // Reset to standing
+        localAttackTimeout = null;
+      }, 1000);
+      
+      // Send attack to server
       send({ 
         type: 'attack',
-        direction: localPlayer.direction
+        direction: playerDirection
       });
       
       return;
     }
 
-    // Movement - IMMEDIATE DIRECTION UPDATE for sync
+    // Movement - NEW SYSTEM with direction and animation state
     if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       const k = e.key.toLowerCase();
-      let dx = 0, dy = 0, newDirection = localPlayer.direction;
+      let dx = 0, dy = 0, newDirection = null;
       
       if (k === 'arrowup' || k === 'w') { dy = -1; newDirection = 'up'; }
       else if (k === 'arrowdown' || k === 's') { dy = 1; newDirection = 'down'; }
@@ -705,50 +735,40 @@ document.addEventListener('DOMContentLoaded', () => {
             clearTimeout(localAttackTimeout);
             localAttackTimeout = null;
           }
+          isLocallyAttacking = false;
           
-          // IMMEDIATELY UPDATE LOCAL STATE for instant visual feedback
-          localPlayer.direction = newDirection;
+          // UPDATE DIRECTION AND ANIMATION STATE
+          playerDirection = newDirection;
+          // Increment animation state: 0->1->2->0->1->2...
+          movementAnimationState = (movementAnimationState + 1) % 3;
+          
+          // IMMEDIATELY UPDATE LOCAL PLAYER OBJECT
+          localPlayer.direction = playerDirection;
           localPlayer.pos_x = nx;
           localPlayer.pos_y = ny;
-          localPlayer.isAttacking = false; // Ensure attack is cancelled
+          localPlayer.isAttacking = false;
           localPlayer.isMoving = true;
           
-          // Advance movement sequence for immediate visual feedback
-          localPlayer.movementSequenceIndex = (localPlayer.movementSequenceIndex + 1) % MOVEMENT_SEQUENCE.length;
-          
-          // Calculate animation frame based on new movement sequence
-          const sequenceType = MOVEMENT_SEQUENCE[localPlayer.movementSequenceIndex];
-          if (sequenceType === 'idle') {
-            localPlayer.animationFrame = DIRECTION_IDLE[newDirection] || DIRECTION_IDLE.down;
-          } else {
-            // walk_1 or walk_2
-            const walkIndex = sequenceType === 'walk_1' ? 0 : 2;
-            const directionOffsets = { down: 0, right: 5, left: 10, up: 15 };
-            localPlayer.animationFrame = (directionOffsets[newDirection] || 0) + walkIndex;
-          }
-          
-          // Send the move command to server (this will cancel attack on server side too)
+          // Send the move command to server
           send({ 
             type: 'move', 
             dx, 
             dy, 
-            direction: newDirection
+            direction: playerDirection
           });
           
-          // Stop moving after a brief moment and reset to idle animation
+          // Stop moving after a brief moment and reset to standing
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
-              // Set to idle animation for current direction
-              localPlayer.animationFrame = DIRECTION_IDLE[localPlayer.direction] || DIRECTION_IDLE.down;
+              movementAnimationState = 0; // Reset to standing after movement
               send({ 
                 type: 'animation_update', 
                 isMoving: false, 
-                direction: localPlayer.direction,
-                animationFrame: localPlayer.animationFrame
+                direction: playerDirection
               });
             }
-          }, 200); // Reduced from 300 to 200ms for snappier feel
+          }, 200);
         }
       }
     }
@@ -846,17 +866,40 @@ function drawItemAtTile(sx, sy, itemIndex) {
     ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
     ctx.lineWidth = 1;
 
-    // Get current animation frame
-    const animFrame = getCurrentAnimationFrame(p, isLocal);
+    // NEW: Calculate animation frame based on direction + state system
+    let animFrame;
+    
+    if (isLocal) {
+      // Use local state variables for immediate feedback
+      if (isLocallyAttacking) {
+        // Attack animation based on direction + attack state
+        const attackSeq = ATTACK_SEQUENCES[playerDirection] || ATTACK_SEQUENCES.down;
+        animFrame = attackSeq[localAttackState];
+      } else {
+        // Movement animation based on direction + movement state
+        if (movementAnimationState === 0) {
+          // Standing
+          animFrame = DIRECTION_IDLE[playerDirection] || DIRECTION_IDLE.down;
+        } else {
+          // Walking (walk_1 or walk_2)
+          const walkIndex = movementAnimationState === 1 ? 0 : 2; // 1->walk_1(0), 2->walk_2(2)
+          const directionOffsets = { down: 0, right: 5, left: 10, up: 15 };
+          animFrame = (directionOffsets[playerDirection] || 0) + walkIndex;
+        }
+      }
+    } else {
+      // Use server state for other players
+      animFrame = getCurrentAnimationFrame(p, false);
+    }
     
     if (playerSpritesReady && playerSprites[animFrame] && playerSprites[animFrame].complete) {
       const sprite = playerSprites[animFrame];
       const meta = playerSpriteMeta[animFrame];
       
       if (sprite && meta) {
-        // BOTTOM-RIGHT ALIGNMENT with dynamic offset for smaller sprites (same as items)
-        let spriteX = (screenX + TILE_W) - meta.w;  // Right-align to tile right edge
-        let spriteY = (screenY + TILE_H) - meta.h;  // Bottom-align to tile bottom edge
+        // FIXED POSITIONING: Apply x:-7, y:-12 offset
+        let spriteX = (screenX + TILE_W) - meta.w - 7;  // Additional -7 offset
+        let spriteY = (screenY + TILE_H) - meta.h - 12; // Additional -12 offset
         
         // Apply dynamic offset for sprites smaller than tile dimensions
         if (meta.w < 62) {
