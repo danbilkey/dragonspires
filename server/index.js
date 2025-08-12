@@ -110,6 +110,31 @@ function getItemAtPosition(x, y, mapSpec) {
   return placedItem > 0 ? placedItem : mapItem;
 }
 
+// We need to load the map spec on server for proper item detection
+let serverMapSpec = null;
+
+async function loadMapSpec() {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const mapPath = path.join(__dirname, '..', 'map.json'); // Assuming map.json is in parent directory
+    const data = await fs.readFile(mapPath, 'utf8');
+    const parsed = JSON.parse(data);
+    
+    if (parsed && parsed.width && parsed.height) {
+      serverMapSpec = {
+        width: parsed.width,
+        height: parsed.height,
+        tiles: Array.isArray(parsed.tiles) ? parsed.tiles : (Array.isArray(parsed.tilemap) ? parsed.tilemap : []),
+        items: Array.isArray(parsed.items) ? parsed.items : []
+      };
+      console.log('Server loaded map spec');
+    }
+  } catch (error) {
+    console.error('Failed to load map spec on server:', error);
+  }
+}
+
 async function loadPlayer(username) {
   const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
   return r.rows[0];
@@ -332,6 +357,7 @@ async function initializeDatabase() {
 // Initialize database on startup
 initializeDatabase();
 loadItemDetails();
+loadMapSpec();
 
 wss.on('connection', (ws) => {
   let playerData = null;
@@ -461,7 +487,7 @@ wss.on('connection', (ws) => {
 
       if (nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT) {
         // Server-side collision check
-        const targetItemId = getItemAtPosition(nx, ny, null); // We don't have mapSpec on server, but can check placed items
+        const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
         const targetItemDetails = getItemDetails(targetItemId);
         
         if (targetItemDetails && targetItemDetails.collision) {
@@ -597,8 +623,8 @@ wss.on('connection', (ws) => {
       
       const { x, y, itemId } = msg;
       
-      // Verify item exists at position
-      const actualItemId = getItemAtPosition(x, y, null);
+      // Verify item exists at position (check both map items and placed items)
+      const actualItemId = getItemAtPosition(x, y, serverMapSpec);
       if (actualItemId !== itemId) return;
       
       // Verify item is pickupable
@@ -608,21 +634,72 @@ wss.on('connection', (ws) => {
       const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
       if (!pickupableTypes.includes(itemDetails.type)) return;
       
+      // Check if there's no item on ground - this means player wants to drop their hands item
+      if (itemId === 0) {
+        // Drop hands item to ground
+        const handsItem = playerData.hands || 0;
+        if (handsItem === 0) return; // Nothing in hands to drop
+        
+        playerData.hands = 0;
+        
+        // Place item on ground
+        const key = `${x},${y}`;
+        mapItems[key] = handsItem;
+        saveItemToDatabase(x, y, handsItem);
+        
+        // Update player in database
+        updateStatsInDb(playerData.id, { hands: playerData.hands })
+          .catch(err => console.error('Error updating player hands:', err));
+        
+        // Broadcast changes
+        broadcast({
+          type: 'item_placed',
+          x: x,
+          y: y,
+          itemId: handsItem
+        });
+        
+        broadcast({
+          type: 'player_equipment_update',
+          id: playerData.id,
+          hands: playerData.hands
+        });
+        
+        return;
+      }
+      
       // Exchange with hands
       const oldHands = playerData.hands || 0;
       playerData.hands = itemId;
       
-      // Remove item from map/place old hands item
+      // Handle item removal/placement
       const key = `${x},${y}`;
-      if (oldHands > 0) {
-        mapItems[key] = oldHands;
-        // Save to database
-        saveItemToDatabase(x, y, oldHands);
+      
+      // Check if this was a map item (not placed item)
+      const isMapItem = (serverMapSpec && serverMapSpec.items && 
+                        serverMapSpec.items[y] && 
+                        typeof serverMapSpec.items[y][x] !== 'undefined' && 
+                        serverMapSpec.items[y][x] === itemId);
+      
+      if (isMapItem) {
+        // This was a map item - we need to "remove" it by placing a 0 or hands item
+        if (oldHands > 0) {
+          mapItems[key] = oldHands; // Place hands item
+          saveItemToDatabase(x, y, oldHands);
+        } else {
+          mapItems[key] = 0; // Mark as empty (overrides map item)
+          saveItemToDatabase(x, y, 0);
+        }
       } else {
-        delete mapItems[key];
-        // Remove from database
-        pool.query('DELETE FROM map_items WHERE x=$1 AND y=$2', [x, y])
-          .catch(err => console.error('Error removing item from database:', err));
+        // This was a placed item
+        if (oldHands > 0) {
+          mapItems[key] = oldHands;
+          saveItemToDatabase(x, y, oldHands);
+        } else {
+          delete mapItems[key];
+          pool.query('DELETE FROM map_items WHERE x=$1 AND y=$2', [x, y])
+            .catch(err => console.error('Error removing item from database:', err));
+        }
       }
       
       // Update player in database
@@ -647,15 +724,27 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'equip_weapon') {
       if (!playerData) return;
       
-      const handsItemDetails = getItemDetails(playerData.hands);
-      if (!handsItemDetails || handsItemDetails.type !== 'weapon') return;
+      const handsItem = playerData.hands || 0;
+      const weaponItem = playerData.weapon || 0;
       
-      // Exchange weapon and hands
-      const oldWeapon = playerData.weapon || 0;
-      const oldHands = playerData.hands || 0;
-      
-      playerData.weapon = oldHands;
-      playerData.hands = oldWeapon;
+      // Case 1: Has weapon item in hands, exchange with weapon slot
+      if (handsItem > 0) {
+        const handsItemDetails = getItemDetails(handsItem);
+        if (!handsItemDetails || handsItemDetails.type !== 'weapon') return;
+        
+        // Exchange weapon and hands
+        playerData.weapon = handsItem;
+        playerData.hands = weaponItem;
+      }
+      // Case 2: No item in hands but has weapon equipped, unequip to hands
+      else if (handsItem === 0 && weaponItem > 0) {
+        playerData.hands = weaponItem;
+        playerData.weapon = 0;
+      }
+      // Case 3: Nothing to do (no weapon in hands or weapon slot)
+      else {
+        return;
+      }
       
       // Update database
       updateStatsInDb(playerData.id, { weapon: playerData.weapon, hands: playerData.hands })
@@ -673,15 +762,27 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'equip_armor') {
       if (!playerData) return;
       
-      const handsItemDetails = getItemDetails(playerData.hands);
-      if (!handsItemDetails || handsItemDetails.type !== 'armor') return;
+      const handsItem = playerData.hands || 0;
+      const armorItem = playerData.armor || 0;
       
-      // Exchange armor and hands
-      const oldArmor = playerData.armor || 0;
-      const oldHands = playerData.hands || 0;
-      
-      playerData.armor = oldHands;
-      playerData.hands = oldArmor;
+      // Case 1: Has armor item in hands, exchange with armor slot
+      if (handsItem > 0) {
+        const handsItemDetails = getItemDetails(handsItem);
+        if (!handsItemDetails || handsItemDetails.type !== 'armor') return;
+        
+        // Exchange armor and hands
+        playerData.armor = handsItem;
+        playerData.hands = armorItem;
+      }
+      // Case 2: No item in hands but has armor equipped, unequip to hands
+      else if (handsItem === 0 && armorItem > 0) {
+        playerData.hands = armorItem;
+        playerData.armor = 0;
+      }
+      // Case 3: Nothing to do (no armor in hands or armor slot)
+      else {
+        return;
+      }
       
       // Update database
       updateStatsInDb(playerData.id, { armor: playerData.armor, hands: playerData.hands })
