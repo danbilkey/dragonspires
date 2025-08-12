@@ -113,10 +113,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let messages = [];
   let typingBuffer = "";
 
-  // Animation state
-  let attackAnimationIndex = 0;
-  let lastAttackTime = 0;
-  let isAttacking = false;
+  // Animation state - SIMPLIFIED ATTACK HANDLING
+  let localAttackTimeout = null; // Track our own attack timeout
 
   // ---------- ASSETS ----------
   const imgTitle = new Image();
@@ -380,11 +378,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function getCurrentAnimationFrame(player, isLocal = false) {
-    // Check if player is attacking
-    if (isLocal && isAttacking) {
-      const attackSeq = ATTACK_SEQUENCES[player.direction] || ATTACK_SEQUENCES.down;
-      return attackSeq[attackAnimationIndex];
-    } else if (!isLocal && player.isAttacking) {
+    // For local player, use the server-provided state
+    // For other players, use their server-provided state
+    if (player.isAttacking) {
       return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
     }
 
@@ -395,17 +391,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Fallback to idle if no animation frame is set
     return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
-  }
-
-  function updateAttackAnimation() {
-    const currentTime = Date.now();
-    if (isAttacking && currentTime - lastAttackTime > 1000) {
-      // Stop attacking after 1 second of no attack input
-      isAttacking = false;
-      if (localPlayer) {
-        send({ type: 'animation_update', isAttacking: false, direction: localPlayer.direction });
-      }
-    }
   }
 
   // ---------- WS ----------
@@ -433,6 +418,11 @@ document.addEventListener('DOMContentLoaded', () => {
       localPlayer = null;
       otherPlayers = {};
       mapItems = {};
+      // Clear any pending attack timeout
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
+        localAttackTimeout = null;
+      }
     };
   }
   connectToServer();
@@ -454,8 +444,6 @@ document.addEventListener('DOMContentLoaded', () => {
           animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
           movementSequenceIndex: msg.player.movementSequenceIndex || 0
         };
-        // Reset local animation state
-        isAttacking = false;
         
         otherPlayers = {};
         if (Array.isArray(msg.players)) {
@@ -623,22 +611,32 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Attack input
+    // Attack input - FIXED CLIENT-SIDE TIMEOUT
     if (loggedIn && localPlayer && e.key === 'Tab') {
       e.preventDefault();
-      isAttacking = true;
-      lastAttackTime = Date.now();
-      attackAnimationIndex = (attackAnimationIndex + 1) % 2; // Toggle between attack frames
       
-      const attackSeq = ATTACK_SEQUENCES[localPlayer.direction] || ATTACK_SEQUENCES.down;
-      const currentFrame = attackSeq[attackAnimationIndex];
+      // Clear any existing attack timeout
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
+      }
       
+      // Send attack to server
       send({ 
-        type: 'animation_update', 
-        isAttacking: true, 
-        direction: localPlayer.direction,
-        animationFrame: currentFrame
+        type: 'attack',
+        direction: localPlayer.direction
       });
+      
+      // Set client-side timeout to stop attacking after 1 second
+      localAttackTimeout = setTimeout(() => {
+        if (localPlayer && localPlayer.isAttacking) {
+          send({ 
+            type: 'stop_attack',
+            direction: localPlayer.direction
+          });
+        }
+        localAttackTimeout = null;
+      }, 1000);
+      
       return;
     }
 
@@ -657,8 +655,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
           // CANCEL ATTACK ANIMATION IMMEDIATELY ON MOVEMENT
-          if (isAttacking) {
-            isAttacking = false;
+          if (localAttackTimeout) {
+            clearTimeout(localAttackTimeout);
+            localAttackTimeout = null;
           }
           
           // The server will handle movement sequence advancement
@@ -739,7 +738,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
 function drawItemAtTile(sx, sy, itemIndex) {
-  if (!window.getItemMeta) return;
+  if (!window.getItemMeta || !window.itemsReady()) return;
   const meta = window.getItemMeta(itemIndex);
   if (!meta) return;
 
@@ -921,9 +920,6 @@ function drawItemAtTile(sx, sy, itemIndex) {
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
 
-    // Update animations
-    updateAttackAnimation();
-
     // Map (only if ready)
     if (tilesReady && mapReady) {
       for (let y = 0; y < mapSpec.height; y++) {
@@ -950,7 +946,7 @@ function drawItemAtTile(sx, sy, itemIndex) {
     })();
 
     // Second pass: items + players in tile order (depth-safe with tall items)
-    if (tilesReady && mapReady) {
+    if (tilesReady && mapReady && window.itemsReady()) {
       for (let y = 0; y < mapSpec.height; y++) {
         for (let x = 0; x < mapSpec.width; x++) {
           const { screenX, screenY } = isoScreen(x, y);
@@ -961,10 +957,12 @@ function drawItemAtTile(sx, sy, itemIndex) {
             : 0;
           if (it > 0) drawItemAtTile(screenX, screenY, it);
 
-          // 2) Item placed by admin?
+          // 2) Item placed by admin? (This should render AFTER the map item)
           const itemKey = `${x},${y}`;
           const placedItem = mapItems[itemKey];
-          if (placedItem > 0) drawItemAtTile(screenX, screenY, placedItem);
+          if (placedItem && placedItem > 0) {
+            drawItemAtTile(screenX, screenY, placedItem);
+          }
 
           // 3) Players standing on this tile
           const k = `${x},${y}`;
