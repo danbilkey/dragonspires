@@ -127,7 +127,69 @@ document.addEventListener('DOMContentLoaded', () => {
       playerSprite = imgPlayerSrc;
     }
   };
+  // --- NEW: Extract *all* player frames from player.gif using /assets/player.json ---
+let playerFrames = []; // 0..21 (22 frames)
+const AnimIndex = {
+  down_walk_1:0, down:1, down_walk_2:2, down_attack_1:3, down_attack_2:4,
+  right_walk_1:5, right:6, right_walk_2:7, right_attack_1:8, right_attack_2:9,
+  left_walk_1:10, left:11, left_walk_2:12, left_attack_1:13, left_attack_2:14,
+  up_walk_1:15, up:16, up_walk_2:17, up_attack_1:18, up_attack_2:19,
+  stand:20, sit:21
+};
+function idleIndexForDir(dir) {
+  switch (dir) {
+    case 'down': return AnimIndex.down;   // 2
+    case 'left': return AnimIndex.left;   // 12
+    case 'up':   return AnimIndex.up;     // 17
+    case 'right':
+    default:     return AnimIndex.right;  // 7 (default)
+  }
+}
+// Wait helper
+function waitImage(img) { return new Promise(r => { if (img.complete) r(); else { img.onload = r; img.onerror = r; } }); }
 
+Promise.all([
+  waitImage(imgPlayerSrc),
+  fetch('/assets/player.json').then(r => r.json()).catch(() => null)
+]).then(([_, meta]) => {
+  if (!meta || !Array.isArray(meta.knight)) return;
+  const list = meta.knight; // array of [x, y, w, h] in the given order (1..22)
+
+  // Use first frame as the baseline to align bottoms and center frames
+  const baseW = list[0][2], baseH = list[0][3];
+
+  const off = document.createElement('canvas');
+  const octx = off.getContext('2d');
+
+  playerFrames = list.map(([sx, sy, sw, sh]) => {
+    off.width = sw; off.height = sh;
+    octx.clearRect(0, 0, sw, sh);
+    octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
+
+    // True magenta -> transparent
+    try {
+      const data = octx.getImageData(0, 0, sw, sh);
+      const d = data.data;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
+      }
+      octx.putImageData(data, 0, 0);
+    } catch {}
+
+    const img = new Image();
+    img.src = off.toDataURL();
+
+    return {
+      img, w: sw, h: sh,
+      // horizontally center each varying width around the same anchor;
+      // align bottoms using the first frame as baseline:
+      offsetX: Math.round((baseW - sw) / 2),
+      offsetY: Math.round(baseH - sh)
+    };
+  });
+});
+
+  
   // Floor tiles from /assets/floor.png: 9 rows x 11 columns, each 61x31, with 1px shared border
   const imgFloor = new Image();
   imgFloor.src = "/assets/floor.png";
@@ -327,6 +389,7 @@ fetch('map.json')
       case 'signup_success': {
         loggedIn = true;
         localPlayer = { ...msg.player };
+        localPlayer.dir = localPlayer.dir || 'right'; // NEW: default facing right
         otherPlayers = {};
         if (Array.isArray(msg.players)) msg.players.forEach(p => { if (!localPlayer || p.id !== localPlayer.id) otherPlayers[p.id] = p; });
         pushChat("Welcome to DragonSpires!");
@@ -424,10 +487,10 @@ fetch('map.json')
       if ((localPlayer.stamina ?? 0) <= 0) return;
       const k = e.key.toLowerCase();
       let dx = 0, dy = 0;
-      if (k === 'arrowup' || k === 'w') dy = -1;
-      else if (k === 'arrowdown' || k === 's') dy = 1;
-      else if (k === 'arrowleft' || k === 'a') dx = -1;
-      else if (k === 'arrowright' || k === 'd') dx = 1;
+       if (k === 'arrowup' || k === 'w')       { dy = -1; newDir = 'up'; }
+        else if (k === 'arrowdown' || k === 's'){ dy = 1;  newDir = 'down'; }
+        else if (k === 'arrowleft' || k === 'a'){ dx = -1; newDir = 'left'; }
+        else if (k === 'arrowright' || k === 'd'){ dx = 1; newDir = 'right'; }
       if (dx || dy) {
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
@@ -523,18 +586,35 @@ function drawItemAtTile(sx, sy, itemIndex) {
     ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
     ctx.lineWidth = 1;
 
-    const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
-    const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
-    if (playerSprite && playerSprite.complete) {
-      const w = playerSprite.naturalWidth || playerSprite.width;
-      const h = playerSprite.naturalHeight || playerSprite.height;
-      ctx.drawImage(playerSprite, drawX, drawY, w, h);
-    } else {
-      ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
-      ctx.beginPath();
-      ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
-      ctx.fill();
-    }
+   const drawX = screenX + PLAYER_OFFSET_X + SPRITE_CENTER_ADJ_X;
+const drawY = screenY + PLAYER_OFFSET_Y + SPRITE_CENTER_ADJ_Y;
+
+// NEW: choose idle frame based on direction if JSON frames are ready
+let usedJsonFrame = false;
+if (Array.isArray(playerFrames) && playerFrames.length === 22) {
+  const dir = (p.dir || 'right');
+  const idx = idleIndexForDir(dir); // 2:down, 7:right, 12:left, 17:up (0-based: 1,6,11,16)
+  const frame = playerFrames[idx];
+  if (frame && frame.img && frame.img.complete && frame.img.naturalWidth > 0) {
+    // align varying sizes: bottoms aligned, horizontal center matched
+    ctx.drawImage(frame.img, drawX + frame.offsetX, drawY + frame.offsetY, frame.w, frame.h);
+    usedJsonFrame = true;
+  }
+}
+if (!usedJsonFrame) {
+  // Fallback to existing single sprite (unchanged)
+  if (playerSprite && playerSprite.complete) {
+    const w = playerSprite.naturalWidth || playerSprite.width;
+    const h = playerSprite.naturalHeight || playerSprite.height;
+    ctx.drawImage(playerSprite, drawX, drawY, w, h);
+  } else {
+    ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
+    ctx.beginPath();
+    ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+}
+
   }
 
   function drawBarsAndStats() {
