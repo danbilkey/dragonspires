@@ -368,12 +368,17 @@ document.addEventListener('DOMContentLoaded', () => {
       return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
     }
 
-    // For other players, use their sent animation frame
+    // For other players, always use their sent animation frame
     if (!isLocal && typeof player.animationFrame !== 'undefined') {
       return player.animationFrame;
     }
 
-    // For local player when idle, use direction idle
+    // For local player, use stored animation frame (preserves sequential movement animation)
+    if (isLocal && typeof player.animationFrame !== 'undefined') {
+      return player.animationFrame;
+    }
+
+    // Only fallback to idle if no animation frame is set
     return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
   }
 
