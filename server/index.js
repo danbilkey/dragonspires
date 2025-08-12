@@ -454,6 +454,33 @@ wss.on('connection', (ws) => {
       }
     }
 
+    else if (msg.type === 'rotate') {
+      if (!playerData) return;
+      
+      // Update direction without moving
+      if (msg.direction) {
+        playerData.direction = msg.direction;
+        playerData.isAttacking = false;
+        playerData.isMoving = false;
+        playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
+        
+        // Update database
+        updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
+          .catch(err => console.error('Rotation DB error:', err));
+        
+        // Broadcast rotation to all clients
+        broadcast({
+          type: 'animation_update',
+          id: playerData.id,
+          direction: playerData.direction,
+          isMoving: false,
+          isAttacking: false,
+          animationFrame: playerData.animationFrame,
+          movementSequenceIndex: playerData.movementSequenceIndex
+        });
+      }
+    }
+
     else if (msg.type === 'attack') {
       if (!playerData) return;
       
