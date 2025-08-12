@@ -45,8 +45,8 @@ const ATTACK_SEQUENCES = {
   up: [18, 19]    // up_attack_1, up_attack_2
 };
 
-// Movement animation sequence: walk_1 -> idle -> walk_2 -> idle
-const MOVEMENT_SEQUENCE = ['walk_1', 'idle', 'walk_2', 'idle'];
+// Movement animation sequence: walk_1 -> walk_2 -> idle
+const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
 
 const server = http.createServer((req, res) => {
   res.writeHead(200, {'Content-Type':'text/plain'});
