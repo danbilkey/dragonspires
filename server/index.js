@@ -57,6 +57,7 @@ const wss = new WebSocket.Server({ server });
 const clients = new Map();      // Map<ws, playerData>
 const usernameToWs = new Map(); // Map<username, ws>
 const attackTimeouts = new Map(); // Map<playerId, timeoutId> for attack timeouts
+const playerAttackIndex = new Map(); // Map<playerId, attackIndex> for alternating attacks
 
 // In-memory item storage
 let mapItems = {}; // { "x,y": itemId }
@@ -176,9 +177,22 @@ function startAttackAnimation(playerData, ws) {
   // Set attacking state
   playerData.isAttacking = true;
   
-  // Get attack animation frame (start with first attack frame)
+  // Get current attack index for this player and alternate it
+  let currentIndex = playerAttackIndex.get(playerData.id);
+  if (currentIndex === undefined) {
+    // First attack starts with index 0
+    currentIndex = 0;
+  } else {
+    // Alternate between 0 and 1
+    currentIndex = currentIndex === 0 ? 1 : 0;
+  }
+  playerAttackIndex.set(playerData.id, currentIndex);
+  
+  // Get attack animation frame based on alternating index
   const attackSeq = ATTACK_SEQUENCES[playerData.direction] || ATTACK_SEQUENCES.down;
-  playerData.animationFrame = attackSeq[0]; // Start with first attack frame
+  playerData.animationFrame = attackSeq[currentIndex];
+  
+  console.log(`Player ${playerData.id} attacking with ${playerData.direction}_attack_${currentIndex + 1} (frame ${playerData.animationFrame})`);
   
   // Update database
   updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, true, playerData.animationFrame, playerData.movementSequenceIndex)
@@ -404,7 +418,7 @@ wss.on('connection', (ws) => {
         playerData.pos_x = nx;
         playerData.pos_y = ny;
 
-        // Update direction
+        // IMMEDIATELY update direction for consistent state
         if (msg.direction) {
           playerData.direction = msg.direction;
         }
@@ -415,14 +429,16 @@ wss.on('connection', (ws) => {
         // Calculate animation frame based on movement sequence
         playerData.animationFrame = getMovementAnimationFrame(playerData.direction, playerData.movementSequenceIndex);
         playerData.isMoving = true;
+        playerData.isAttacking = false; // Ensure attack state is cleared
 
-        // Save to database
+        // Save to database immediately
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
           updatePosition(playerData.id, nx, ny),
           updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex)
         ]).catch(()=>{});
 
+        // Broadcast the updated state immediately
         broadcast({ 
           type: 'player_moved', 
           id: playerData.id, 
@@ -430,6 +446,7 @@ wss.on('connection', (ws) => {
           y: ny, 
           direction: playerData.direction,
           isMoving: playerData.isMoving,
+          isAttacking: playerData.isAttacking,
           animationFrame: playerData.animationFrame,
           movementSequenceIndex: playerData.movementSequenceIndex
         });
@@ -445,7 +462,9 @@ wss.on('connection', (ws) => {
         playerData.direction = msg.direction;
       }
       
-      // Start attack animation
+      console.log(`Player ${playerData.id} starting attack facing ${playerData.direction}`);
+      
+      // Start attack animation (this will handle alternating)
       startAttackAnimation(playerData, ws);
     }
 
@@ -560,6 +579,9 @@ wss.on('connection', (ws) => {
         clearTimeout(attackTimeout);
         attackTimeouts.delete(playerData.id);
       }
+      
+      // Clear attack index tracking
+      playerAttackIndex.delete(playerData.id);
       
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
