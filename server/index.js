@@ -1,4 +1,4 @@
-// server/index.js
+else if (msg.type === 'chat') {// server/index.js
 require('dotenv').config();
 const http = require('http');
 const WebSocket = require('ws');
@@ -61,6 +61,54 @@ const playerAttackIndex = new Map(); // Map<playerId, attackIndex> for alternati
 
 // In-memory item storage
 let mapItems = {}; // { "x,y": itemId }
+
+// Item details for server-side collision checking
+let itemDetails = [];
+let itemDetailsReady = false;
+
+// Load item details on server startup
+async function loadItemDetails() {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const itemDetailsPath = path.join(__dirname, 'itemdetails.json');
+    const data = await fs.readFile(itemDetailsPath, 'utf8');
+    const parsed = JSON.parse(data);
+    
+    if (parsed && Array.isArray(parsed.items)) {
+      itemDetails = parsed.items.map((item, index) => ({
+        id: index + 1,
+        name: item[0],
+        collision: item[1] === "true",
+        type: item[2],
+        statMin: parseInt(item[3]) || 0,
+        statMax: parseInt(item[4]) || 0,
+        description: item[5]
+      }));
+      itemDetailsReady = true;
+      console.log(`Server loaded ${itemDetails.length} item details`);
+    }
+  } catch (error) {
+    console.error('Failed to load server item details:', error);
+    itemDetailsReady = true; // Don't block server startup
+  }
+}
+
+function getItemDetails(itemId) {
+  if (!itemDetailsReady || !itemDetails || itemId < 1 || itemId > itemDetails.length) {
+    return null;
+  }
+  return itemDetails[itemId - 1];
+}
+
+function getItemAtPosition(x, y, mapSpec) {
+  // Check both map items and placed items, same logic as client
+  const mapItem = (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
+    ? mapSpec.items[y][x] : 0;
+  const placedItem = mapItems[`${x},${y}`] || 0;
+  
+  return placedItem > 0 ? placedItem : mapItem;
+}
 
 async function loadPlayer(username) {
   const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
@@ -285,6 +333,7 @@ async function initializeDatabase() {
 
 // Initialize database on startup
 initializeDatabase();
+loadItemDetails();
 
 wss.on('connection', (ws) => {
   let playerData = null;
@@ -321,9 +370,9 @@ wss.on('connection', (ws) => {
           magic: found.magic ?? 0,
           max_magic: found.max_magic ?? 0,
           gold: found.gold ?? 0,
-          weapon: found.weapon ?? '',
-          armor: found.armor ?? '',
-          hands: found.hands ?? '',
+          weapon: found.weapon ?? 0,
+          armor: found.armor ?? 0,
+          hands: found.hands ?? 0,
           direction: found.direction ?? 'down',
           isMoving: found.is_moving ?? false,
           isAttacking: found.is_attacking ?? false,
@@ -370,9 +419,9 @@ wss.on('connection', (ws) => {
           magic: created.magic ?? 0,
           max_magic: created.max_magic ?? 0,
           gold: created.gold ?? 0,
-          weapon: created.weapon ?? '',
-          armor: created.armor ?? '',
-          hands: created.hands ?? '',
+          weapon: created.weapon ?? 0,
+          armor: created.armor ?? 0,
+          hands: created.hands ?? 0,
           direction: created.direction ?? 'down',
           isMoving: created.is_moving ?? false,
           isAttacking: created.is_attacking ?? false,
@@ -413,6 +462,15 @@ wss.on('connection', (ws) => {
       const ny = playerData.pos_y + dy;
 
       if (nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT) {
+        // Server-side collision check
+        const targetItemId = getItemAtPosition(nx, ny, null); // We don't have mapSpec on server, but can check placed items
+        const targetItemDetails = getItemDetails(targetItemId);
+        
+        if (targetItemDetails && targetItemDetails.collision) {
+          // Collision detected - don't allow movement
+          return;
+        }
+
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
@@ -538,7 +596,109 @@ wss.on('connection', (ws) => {
       });
     }
 
-    else if (msg.type === 'chat') {
+    else if (msg.type === 'pickup_item') {
+      if (!playerData) return;
+      
+      const { x, y, itemId } = msg;
+      
+      // Verify item exists at position
+      const actualItemId = getItemAtPosition(x, y, null);
+      if (actualItemId !== itemId) return;
+      
+      // Verify item is pickupable
+      const itemDetails = getItemDetails(itemId);
+      if (!itemDetails) return;
+      
+      const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
+      if (!pickupableTypes.includes(itemDetails.type)) return;
+      
+      // Exchange with hands
+      const oldHands = playerData.hands || 0;
+      playerData.hands = itemId;
+      
+      // Remove item from map/place old hands item
+      const key = `${x},${y}`;
+      if (oldHands > 0) {
+        mapItems[key] = oldHands;
+        // Save to database
+        saveItemToDatabase(x, y, oldHands);
+      } else {
+        delete mapItems[key];
+        // Remove from database
+        pool.query('DELETE FROM map_items WHERE x=$1 AND y=$2', [x, y])
+          .catch(err => console.error('Error removing item from database:', err));
+      }
+      
+      // Update player in database
+      updateStatsInDb(playerData.id, { hands: playerData.hands })
+        .catch(err => console.error('Error updating player hands:', err));
+      
+      // Broadcast changes
+      broadcast({
+        type: 'item_placed',
+        x: x,
+        y: y,
+        itemId: oldHands
+      });
+      
+      broadcast({
+        type: 'player_equipment_update',
+        id: playerData.id,
+        hands: playerData.hands
+      });
+    }
+
+    else if (msg.type === 'equip_weapon') {
+      if (!playerData) return;
+      
+      const handsItemDetails = getItemDetails(playerData.hands);
+      if (!handsItemDetails || handsItemDetails.type !== 'weapon') return;
+      
+      // Exchange weapon and hands
+      const oldWeapon = playerData.weapon || 0;
+      const oldHands = playerData.hands || 0;
+      
+      playerData.weapon = oldHands;
+      playerData.hands = oldWeapon;
+      
+      // Update database
+      updateStatsInDb(playerData.id, { weapon: playerData.weapon, hands: playerData.hands })
+        .catch(err => console.error('Error updating player equipment:', err));
+      
+      // Broadcast equipment update
+      broadcast({
+        type: 'player_equipment_update',
+        id: playerData.id,
+        weapon: playerData.weapon,
+        hands: playerData.hands
+      });
+    }
+
+    else if (msg.type === 'equip_armor') {
+      if (!playerData) return;
+      
+      const handsItemDetails = getItemDetails(playerData.hands);
+      if (!handsItemDetails || handsItemDetails.type !== 'armor') return;
+      
+      // Exchange armor and hands
+      const oldArmor = playerData.armor || 0;
+      const oldHands = playerData.hands || 0;
+      
+      playerData.armor = oldHands;
+      playerData.hands = oldArmor;
+      
+      // Update database
+      updateStatsInDb(playerData.id, { armor: playerData.armor, hands: playerData.hands })
+        .catch(err => console.error('Error updating player equipment:', err));
+      
+      // Broadcast equipment update
+      broadcast({
+        type: 'player_equipment_update',
+        id: playerData.id,
+        armor: playerData.armor,
+        hands: playerData.hands
+      });
+    }
       if (!playerData || typeof msg.text !== 'string') return;
       const t = msg.text.trim();
       if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
