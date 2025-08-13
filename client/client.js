@@ -811,6 +811,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loggedIn && localPlayer && e.key === 'Tab') {
       e.preventDefault();
       
+      // Check stamina requirement (at least 10)
+      if ((localPlayer.stamina ?? 0) < 10) {
+        console.log('Not enough stamina to attack (need 10, have ' + (localPlayer.stamina ?? 0) + ')');
+        return;
+      }
+      
+      // Reduce stamina by 10 locally for immediate feedback
+      localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 10);
+      
       isLocallyAttacking = true;
       localAttackState = (localAttackState + 1) % 2;
       
@@ -1076,7 +1085,24 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!window.getItemMeta || !window.itemsReady()) return;
     const meta = window.getItemMeta(itemId);
     if (!meta || !meta.img || !meta.img.complete) return;
-    ctx.drawImage(meta.img, x, y);
+
+    const { img, w, h } = meta;
+    
+    // Apply dynamic offset for items smaller than tile dimensions
+    let drawX = x;
+    let drawY = y;
+    
+    if (w < 62) {
+      const offsetX = w - 62; // This will be negative (e.g., 40 - 62 = -22)
+      drawX += offsetX;
+    }
+    
+    if (h < 32) {
+      const offsetY = h - 32; // This will be negative (e.g., 20 - 32 = -12)
+      drawY += offsetY;
+    }
+
+    ctx.drawImage(img, drawX, drawY);
   }
 
   // ---------- SCENES ----------
