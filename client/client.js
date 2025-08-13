@@ -1314,9 +1314,14 @@ function drawItemAtTile(sx, sy, itemIndex) {
       ? mapSpec.items[y][x] : 0;
     const placedItem = mapItems[`${x},${y}`];
     
-    // If there's a placed item entry (including 0), it overrides the map item
-    if (placedItem !== undefined) {
+    // If there's a placed item entry (but not -1 which means "picked up"), it overrides the map item
+    if (placedItem !== undefined && placedItem !== -1) {
       return placedItem;
+    }
+    
+    // If placedItem is -1, it means the map item was picked up, so return 0
+    if (placedItem === -1) {
+      return 0;
     }
     
     // Otherwise return the map item
