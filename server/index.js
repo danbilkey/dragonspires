@@ -671,17 +671,13 @@ wss.on('connection', (ws) => {
       
       console.log(`Pickup request: player at (${x},${y}), itemId=${itemId}`);
       
-      // Check what's actually at this position
-      const actualItemId = getItemAtPosition(x, y, serverMapSpec);
-      console.log(`Actual item at position: ${actualItemId}`);
-      
       // Special case: itemId=0 means player wants to drop their hands item
       if (itemId === 0) {
         console.log('Drop item request');
         const handsItem = playerData.hands || 0;
         if (handsItem === 0) {
           console.log('No item in hands to drop');
-          return; // Nothing in hands to drop
+          return;
         }
         
         console.log(`Dropping item ${handsItem} to ground`);
@@ -714,7 +710,10 @@ wss.on('connection', (ws) => {
         return;
       }
       
-      // Verify item exists at position (check both map items and placed items)
+      // Verify item exists at position
+      const actualItemId = getItemAtPosition(x, y, serverMapSpec);
+      console.log(`Actual item at position: ${actualItemId}`);
+      
       if (actualItemId !== itemId) {
         console.log(`Item mismatch: expected ${itemId}, found ${actualItemId}`);
         return;
@@ -739,17 +738,11 @@ wss.on('connection', (ws) => {
       const oldHands = playerData.hands || 0;
       playerData.hands = itemId;
       
-      // Handle item removal/placement
-      const key = `${x},${y}`;
-      
       // NEW LOGIC: Check if this position has a placed item override
+      const key = `${x},${y}`;
       const hasPlacedOverride = mapItems.hasOwnProperty(key);
-      const originalMapItem = (serverMapSpec && serverMapSpec.items && 
-                              serverMapSpec.items[y] && 
-                              typeof serverMapSpec.items[y][x] !== 'undefined') 
-                              ? serverMapSpec.items[y][x] : 0;
       
-      console.log(`hasPlacedOverride: ${hasPlacedOverride}, originalMapItem: ${originalMapItem}`);
+      console.log(`hasPlacedOverride: ${hasPlacedOverride}, oldHands: ${oldHands}`);
       
       if (hasPlacedOverride) {
         // This is a placed item (admin placed or dropped item)
@@ -776,23 +769,18 @@ wss.on('connection', (ws) => {
         if (oldHands > 0) {
           mapItems[key] = oldHands; // Place hands item
           saveItemToDatabase(x, y, oldHands);
-          broadcast({
-            type: 'item_placed',
-            x: x,
-            y: y,
-            itemId: oldHands
-          });
         } else {
           // Mark map item as picked up with -1
           mapItems[key] = -1;
           saveItemToDatabase(x, y, -1);
-          broadcast({
-            type: 'item_placed',
-            x: x,
-            y: y,
-            itemId: -1
-          });
         }
+        
+        broadcast({
+          type: 'item_placed',
+          x: x,
+          y: y,
+          itemId: oldHands > 0 ? oldHands : -1
+        });
       }
       
       // Update player in database
