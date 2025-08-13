@@ -1,376 +1,4 @@
-// client.js - Browser-side game client
-document.addEventListener('DOMContentLoaded', () => {
-  // ---------- CONFIG ----------
-  const PROD_WS = "wss://dragonspires.onrender.com";
-  const DEV_WS = "ws://localhost:3000";
-  const WS_URL = location.hostname.includes('localhost') ? DEV_WS : PROD_WS;
-
-  const canvas = document.getElementById('gameCanvas');
-  if (!canvas) { console.error('Missing <canvas id="gameCanvas">'); return; }
-  const ctx = canvas.getContext('2d');
-
-  const CANVAS_W = 640, CANVAS_H = 480;
-  canvas.width = CANVAS_W; canvas.height = CANVAS_H;
-
-  // Logical diamond for positioning
-  const TILE_W = 64, TILE_H = 32;
-
-  // Item fine-tuning (center on tile a bit better)
-  const ITEM_X_NUDGE = 0;//3;   // +right
-  const ITEM_Y_NUDGE = 0;//15;  // +up (we subtract this in draw)
-
-  // Screen anchor for local tile
-  const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
-
-  // World/camera offsets (as previously tuned)
-  const WORLD_SHIFT_X = -32, WORLD_SHIFT_Y = 16;
-  const CENTER_LOC_ADJ_X = 32, CENTER_LOC_ADJ_Y = -8;
-  const CENTER_LOC_FINE_X = -5, CENTER_LOC_FINE_Y = 0;
-
-  // Sprite offsets (as tuned earlier)
-  const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16;
-  const SPRITE_CENTER_ADJ_X = 23;  // = 64 - 41
-  const SPRITE_CENTER_ADJ_Y = -20; // = -24 + 4
-
-  // GUI (+50,+50)
-  const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
-  const FIELD_H = 16;
-  const FIELD_TOP = (y) => (y - 13);
-  const GUI = {
-    username: { x: 260 + GUI_OFFSET_X, y: 34 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
-    password: { x: 260 + GUI_OFFSET_X, y: 58 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
-    loginBtn:  { x: 260 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 },
-    signupBtn: { x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
-  };
-
-  // Chat areas
-  const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
-  const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200, extraY: 2 };
-
-  // Animation constants
-  const ANIMATION_NAMES = [
-    'down_walk_1', 'down', 'down_walk_2', 'down_attack_1', 'down_attack_2',
-    'right_walk_1', 'right', 'right_walk_2', 'right_attack_1', 'right_attack_2',
-    'left_walk_1', 'left', 'left_walk_2', 'left_attack_1', 'left_attack_2',
-    'up_walk_1', 'up', 'up_walk_2', 'up_attack_1', 'up_attack_2',
-    'stand', 'sit'
-  ];
-
-  // Walk animation sequences (indices into ANIMATION_NAMES)
-  const WALK_SEQUENCES = {
-    down: [0, 1, 2, 1],   // down_walk_1, down, down_walk_2, down
-    right: [5, 6, 7, 6],  // right_walk_1, right, right_walk_2, right
-    left: [10, 11, 12, 11], // left_walk_1, left, left_walk_2, left
-    up: [15, 16, 17, 16]    // up_walk_1, up, up_walk_2, up
-  };
-
-  // Attack animation pairs
-  const ATTACK_SEQUENCES = {
-    down: [3, 4],   // down_attack_1, down_attack_2
-    right: [8, 9],  // right_attack_1, right_attack_2
-    left: [13, 14], // left_attack_1, left_attack_2
-    up: [18, 19]    // up_attack_1, up_attack_2
-  };
-
-  // Direction animations for idle state
-  const DIRECTION_IDLE = {
-    down: 1,   // down
-    right: 6,  // right
-    left: 11,  // left
-    up: 16     // up
-  };
-
-  // Movement animation sequence: walk_1 -> walk_2 -> idle
-  const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
-
-  // ---------- STATE ----------
-  let ws = null;
-  let connected = false;
-  let connectionPaused = false;
-  let showLoginGUI = false;
-  let loggedIn = false;
-  let chatMode = false;
-
-  // Assets ready flags
-  let tilesReady = false;
-  let mapReady = false;
-  let playerSpritesReady = false;
-  let itemDetailsReady = false;
-
-  // Map
-  let mapSpec = { width: 10, height: 10, tiles: [] };
-  let mapItems = {}; // { "x,y": itemId }
-
-  // Item details
-  let itemDetails = []; // Array of item detail objects
-
-  // Auth GUI
-  let usernameStr = "";
-  let passwordStr = "";
-  let activeField = null;
-
-  // Players
-  let localPlayer = null;
-  let otherPlayers = {};
-
-  // NEW: Simplified direction and animation state system
-  let playerDirection = 'down'; // Current facing direction
-  let movementAnimationState = 0; // 0=standing, 1=walk_1, 2=walk_2
-  let isLocallyAttacking = false; // Local attack state
-  let localAttackState = 0; // 0 or 1 for attack_1 or attack_2
-  let lastMoveTime = 0; // Prevent rapid movement through collision objects
-
-  // Chat
-  let messages = [];
-  let typingBuffer = "";
-
-  // Animation state - SIMPLIFIED ATTACK HANDLING
-  let localAttackTimeout = null; // Track our own attack timeout
-
-  // ---------- ASSETS ----------
-  const imgTitle = new Image();
-  imgTitle.src = "/assets/title.GIF";
-
-  // Border: magenta keyed
-  const imgBorder = new Image();
-  imgBorder.src = "/assets/game_border_2025.gif";
-  let borderProcessed = null;
-  imgBorder.onload = () => {
-    try {
-      const w = imgBorder.width, h = imgBorder.height;
-      const off = document.createElement('canvas');
-      off.width = w; off.height = h;
-      const octx = off.getContext('2d');
-      octx.drawImage(imgBorder, 0, 0);
-      const data = octx.getImageData(0, 0, w, h);
-      const d = data.data;
-      for (let i = 0; i < d.length; i += 4) {
-        if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
-      }
-      octx.putImageData(data, 0, 0);
-      borderProcessed = off;
-    } catch {
-      borderProcessed = null;
-    }
-  };
-
-  // Player sprites: extract multiple animations from player.gif using player.json
-  const imgPlayerSrc = new Image();
-  imgPlayerSrc.src = "/assets/player.gif";
-  let playerSprites = []; // Array of Image objects for each animation frame
-  let playerSpriteMeta = []; // Array of {w, h} for each sprite
-
-  Promise.all([
-    new Promise(resolve => {
-      if (imgPlayerSrc.complete) resolve();
-      else { imgPlayerSrc.onload = resolve; imgPlayerSrc.onerror = resolve; }
-    }),
-    fetch('/assets/player.json').then(r => r.json()).catch(() => null)
-  ]).then(([_, playerJson]) => {
-    if (!playerJson || !playerJson.knight) {
-      console.error('Failed to load player.json or knight data');
-      playerSpritesReady = true;
-      return;
-    }
-
-    const knightCoords = playerJson.knight;
-    const loadPromises = [];
-
-    knightCoords.forEach(([sx, sy, sw, sh], index) => {
-      try {
-        const off = document.createElement('canvas');
-        off.width = sw;
-        off.height = sh;
-        const octx = off.getContext('2d');
-        octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
-
-        // Make magenta transparent
-        const data = octx.getImageData(0, 0, sw, sh);
-        const d = data.data;
-        for (let i = 0; i < d.length; i += 4) {
-          if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
-        }
-        octx.putImageData(data, 0, 0);
-
-        const sprite = new Image();
-        const promise = new Promise(resolve => {
-          sprite.onload = resolve;
-          sprite.onerror = resolve;
-        });
-        sprite.src = off.toDataURL();
-        
-        playerSprites[index] = sprite;
-        playerSpriteMeta[index] = { w: sw, h: sh };
-        loadPromises.push(promise);
-      } catch (e) {
-        console.error(`Failed to process sprite ${index}:`, e);
-      }
-    });
-
-    Promise.all(loadPromises).then(() => {
-      playerSpritesReady = true;
-    });
-  });
-
-  // Floor tiles from /assets/floor.png: 9 columns x 11 rows, each 62x32, with 1px overlapping border
-  const imgFloor = new Image();
-  imgFloor.src = "/assets/floor.png";
-  let floorTiles = []; // 1-based indexing
-  imgFloor.onload = async () => {
-    try {
-      const sheetW = imgFloor.width;
-      const sheetH = imgFloor.height;
-      const tileW = 62, tileH = 32;
-      const cols = 9;   // 9 columns
-      const rows = 11;  // 11 rows
-
-      const off = document.createElement('canvas');
-      off.width = sheetW; off.height = sheetH;
-      const octx = off.getContext('2d');
-      octx.drawImage(imgFloor, 0, 0);
-
-      let idCounter = 1;
-      const loadPromises = [];
-
-      for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-          // Use the coordinate formula from your examples:
-          // x = 1 + (col * 63), y = 1 + (row * 33)
-          const sx = 1 + (col * 63);  // 63 = 62 + 1 pixel border
-          const sy = 1 + (row * 33);  // 33 = 32 + 1 pixel border
-
-          const tcan = document.createElement('canvas');
-          tcan.width = tileW; tcan.height = tileH;
-          const tctx = tcan.getContext('2d', { willReadFrequently: true });
-          tctx.drawImage(off, sx, sy, tileW, tileH, 0, 0, tileW, tileH);
-
-          // magenta -> transparent (if present in art)
-          const imgData = tctx.getImageData(0, 0, tileW, tileH);
-          const d = imgData.data;
-          for (let i = 0; i < d.length; i += 4) {
-            if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
-          }
-          tctx.putImageData(imgData, 0, 0);
-
-          const tileImg = new Image();
-          const p = new Promise((resolve) => { tileImg.onload = resolve; tileImg.onerror = resolve; });
-          tileImg.src = tcan.toDataURL();
-          floorTiles[idCounter] = tileImg;
-          loadPromises.push(p);
-          idCounter++;
-        }
-      }
-
-      await Promise.all(loadPromises);
-      tilesReady = true;
-
-      fetch('map.json')
-        .then(r => r.json())
-        .then(m => {
-          if (m && m.width && m.height) {
-            const tiles = Array.isArray(m.tiles) ? m.tiles : (Array.isArray(m.tilemap) ? m.tilemap : null);
-            mapSpec = {
-              width: m.width,
-              height: m.height,
-              tiles: tiles || [],
-              items: Array.isArray(m.items) ? m.items : []
-            };
-          }
-        })
-        .catch(() => {})
-        .finally(() => { mapReady = true; });
-
-    } catch (e) {
-      console.error("Floor tile extraction failed:", e);
-      tilesReady = true; mapReady = true; // fail-safe
-    }
-  };
-
-// ---------- ITEMS (sheet + coords, true magenta keyed, formula-based anchoring) ----------
-(() => {
-  const imgItems = new Image();
-  imgItems.src = "/assets/item.gif";
-
-  const itemsJsonPromise = fetch("/assets/item.json")
-    .then(r => r.json())
-    .catch(() => null);
-
-  const itemSprites = []; // 1-based
-  const itemMeta = [];    // 1-based: { img, w, h, leftPad, anchorX }
-  let itemsReady = false;
-
-  function waitImage(img) {
-    return new Promise((resolve) => {
-      if (img.complete) return resolve();
-      img.onload = resolve;
-      img.onerror = resolve;
-    });
-  }
-
-  Promise.all([waitImage(imgItems), itemsJsonPromise]).then(([_, meta]) => {
-    if (!meta || !Array.isArray(meta.item_coords)) return;
-
-    const off = document.createElement("canvas");
-    const octx = off.getContext("2d");
-
-    meta.item_coords.forEach((quad, idx) => {
-      const [sx, sy, sw, sh] = quad;
-      off.width = sw; off.height = sh;
-      octx.clearRect(0, 0, sw, sh);
-      octx.drawImage(imgItems, sx, sy, sw, sh, 0, 0, sw, sh);
-
-      // Make true magenta transparent + compute leftPad (first opaque column)
-      let leftPad = 0;
-      try {
-        // Set willReadFrequently for better performance
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = sw; tempCanvas.height = sh;
-        const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
-        tempCtx.drawImage(off, 0, 0);
-        
-        const data = tempCtx.getImageData(0, 0, sw, sh);
-        const d = data.data;
-
-        // magenta -> transparent
-        for (let i = 0; i < d.length; i += 4) {
-          if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
-        }
-
-        // find first opaque column from the left
-        leftPad = sw; // default "none found"
-        outer:
-        for (let x = 0; x < sw; x++) {
-          for (let y = 0; y < sh; y++) {
-            const a = d[((y * sw) + x) * 4 + 3];
-            if (a !== 0) { leftPad = x; break outer; }
-          }
-        }
-        if (leftPad === sw) leftPad = 0; // all transparent (safety)
-
-        tempCtx.putImageData(data, 0, 0);
-        octx.clearRect(0, 0, sw, sh);
-        octx.drawImage(tempCanvas, 0, 0);
-      } catch {
-        leftPad = 0; // fallback if canvas is tainted (shouldn't be here)
-      }
-
-      // Bottom-center anchor inside the sprite (relative to left edge)
-      // Rightmost opaque column is at sw - 1 (bottom-right justified),
-      // so center between leftPad and (sw - 1).
-      const anchorX = (leftPad + (sw - 1)) / 2;
-
-      // Freeze the processed pixels into an <img>
-      const sprite = new Image();
-      sprite.src = off.toDataURL();
-
-      itemSprites[idx + 1] = sprite;
-      itemMeta[idx + 1] = { img: sprite, w: sw, h: sh, leftPad, anchorX };
-    });
-
-    itemsReady = true;
-  });
-
-  // accessors
+// accessors
   window.getItemSprite = (i) => itemSprites[i] || null;
   window.getItemMeta   = (i) => itemMeta[i] || null;
   window.itemSpriteCount = () => itemSprites.length - 1;
@@ -839,20 +467,9 @@ document.addEventListener('DOMContentLoaded', () => {
       
       if (dx || dy) {
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
-        if (nx >= 0 && nx < mapSpec.width && ny >= 0 && ny < mapSpec.height) {
-          
-          // Check for collision with items
-          const targetItemId = getItemAtPosition(nx, ny);
-          const targetItemDetails = getItemDetails(targetItemId);
-          
-          if (targetItemDetails && targetItemDetails.collision) {
-            // Item has collision - don't move but still update animation state and direction
-            playerDirection = newDirection;
-            movementAnimationState = (movementAnimationState + 1) % 3;
-            lastMoveTime = currentTime; // Still update move time to prevent rapid inputs
-            return; // Don't proceed with movement
-          }
-          
+        
+        // Use the new collision checking function
+        if (canMoveTo(nx, ny, localPlayer.id)) {
           // CANCEL ATTACK ANIMATION IMMEDIATELY ON MOVEMENT
           if (localAttackTimeout) {
             clearTimeout(localAttackTimeout);
@@ -888,13 +505,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (localPlayer) {
               localPlayer.isMoving = false;
               movementAnimationState = 0; // Reset to standing after movement
-              send({ 
-                type: 'animation_update', 
-                isMoving: false, 
-                direction: playerDirection
-              });
             }
           }, 200);
+        } else {
+          // Can't move but still update direction and animation for visual feedback
+          playerDirection = newDirection;
+          movementAnimationState = (movementAnimationState + 1) % 3;
+          lastMoveTime = currentTime; // Still update move time to prevent rapid inputs
         }
       }
     }
@@ -1329,6 +946,33 @@ function drawItemAtTile(sx, sy, itemIndex) {
   function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
   window.connectToServer = connectToServer;
 
+  // Load floor collision data
+  fetch('/client/assets/floorcollision.json')
+    .then(r => r.json())
+    .then(data => {
+      if (data && Array.isArray(data.floor)) {
+        floorCollision = data.floor;
+        floorCollisionReady = true;
+        console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
+      }
+    })
+    .catch(err => {
+      // Try alternative path
+      fetch('/assets/floorcollision.json')
+        .then(r => r.json())
+        .then(data => {
+          if (data && Array.isArray(data.floor)) {
+            floorCollision = data.floor;
+            floorCollisionReady = true;
+            console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
+          }
+        })
+        .catch(err2 => {
+          floorCollisionReady = true; // Set to true anyway to not block the game
+          console.warn('Failed to load floor collision data');
+        });
+    });
+
   // Load item details
   fetch('/assets/itemdetails.json')  // Changed path - try without /client/
     .then(r => r.json())
@@ -1368,4 +1012,448 @@ function drawItemAtTile(sx, sy, itemIndex) {
           itemDetailsReady = true; // Set to true anyway to not block the game
         });
     });
-});
+});// client.js - Browser-side game client
+document.addEventListener('DOMContentLoaded', () => {
+  // ---------- CONFIG ----------
+  const PROD_WS = "wss://dragonspires.onrender.com";
+  const DEV_WS = "ws://localhost:3000";
+  const WS_URL = location.hostname.includes('localhost') ? DEV_WS : PROD_WS;
+
+  const canvas = document.getElementById('gameCanvas');
+  if (!canvas) { console.error('Missing <canvas id="gameCanvas">'); return; }
+  const ctx = canvas.getContext('2d');
+
+  const CANVAS_W = 640, CANVAS_H = 480;
+  canvas.width = CANVAS_W; canvas.height = CANVAS_H;
+
+  // Logical diamond for positioning
+  const TILE_W = 64, TILE_H = 32;
+
+  // Item fine-tuning (center on tile a bit better)
+  const ITEM_X_NUDGE = 0;//3;   // +right
+  const ITEM_Y_NUDGE = 0;//15;  // +up (we subtract this in draw)
+
+  // Screen anchor for local tile
+  const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
+
+  // World/camera offsets (as previously tuned)
+  const WORLD_SHIFT_X = -32, WORLD_SHIFT_Y = 16;
+  const CENTER_LOC_ADJ_X = 32, CENTER_LOC_ADJ_Y = -8;
+  const CENTER_LOC_FINE_X = -5, CENTER_LOC_FINE_Y = 0;
+
+  // Sprite offsets (as tuned earlier)
+  const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16;
+  const SPRITE_CENTER_ADJ_X = 23;  // = 64 - 41
+  const SPRITE_CENTER_ADJ_Y = -20; // = -24 + 4
+
+  // GUI (+50,+50)
+  const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
+  const FIELD_H = 16;
+  const FIELD_TOP = (y) => (y - 13);
+  const GUI = {
+    username: { x: 260 + GUI_OFFSET_X, y: 34 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
+    password: { x: 260 + GUI_OFFSET_X, y: 58 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
+    loginBtn:  { x: 260 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 },
+    signupBtn: { x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
+  };
+
+  // Chat areas
+  const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
+  const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200, extraY: 2 };
+
+  // Animation constants
+  const ANIMATION_NAMES = [
+    'down_walk_1', 'down', 'down_walk_2', 'down_attack_1', 'down_attack_2',
+    'right_walk_1', 'right', 'right_walk_2', 'right_attack_1', 'right_attack_2',
+    'left_walk_1', 'left', 'left_walk_2', 'left_attack_1', 'left_attack_2',
+    'up_walk_1', 'up', 'up_walk_2', 'up_attack_1', 'up_attack_2',
+    'stand', 'sit'
+  ];
+
+  // Walk animation sequences (indices into ANIMATION_NAMES)
+  const WALK_SEQUENCES = {
+    down: [0, 1, 2, 1],   // down_walk_1, down, down_walk_2, down
+    right: [5, 6, 7, 6],  // right_walk_1, right, right_walk_2, right
+    left: [10, 11, 12, 11], // left_walk_1, left, left_walk_2, left
+    up: [15, 16, 17, 16]    // up_walk_1, up, up_walk_2, up
+  };
+
+  // Attack animation pairs
+  const ATTACK_SEQUENCES = {
+    down: [3, 4],   // down_attack_1, down_attack_2
+    right: [8, 9],  // right_attack_1, right_attack_2
+    left: [13, 14], // left_attack_1, left_attack_2
+    up: [18, 19]    // up_attack_1, up_attack_2
+  };
+
+  // Direction animations for idle state
+  const DIRECTION_IDLE = {
+    down: 1,   // down
+    right: 6,  // right
+    left: 11,  // left
+    up: 16     // up
+  };
+
+  // Movement animation sequence: walk_1 -> walk_2 -> idle
+  const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
+
+  // ---------- STATE ----------
+  let ws = null;
+  let connected = false;
+  let connectionPaused = false;
+  let showLoginGUI = false;
+  let loggedIn = false;
+  let chatMode = false;
+
+  // Assets ready flags
+  let tilesReady = false;
+  let mapReady = false;
+  let playerSpritesReady = false;
+  let itemDetailsReady = false;
+  let floorCollisionReady = false;
+
+  // Map
+  let mapSpec = { width: 64, height: 64, tiles: [] };
+  let mapItems = {}; // { "x,y": itemId }
+
+  // Item details
+  let itemDetails = []; // Array of item detail objects
+
+  // Floor collision data
+  let floorCollision = []; // Array of collision data
+
+  // Auth GUI
+  let usernameStr = "";
+  let passwordStr = "";
+  let activeField = null;
+
+  // Players
+  let localPlayer = null;
+  let otherPlayers = {};
+
+  // NEW: Simplified direction and animation state system
+  let playerDirection = 'down'; // Current facing direction
+  let movementAnimationState = 0; // 0=standing, 1=walk_1, 2=walk_2
+  let isLocallyAttacking = false; // Local attack state
+  let localAttackState = 0; // 0 or 1 for attack_1 or attack_2
+  let lastMoveTime = 0; // Prevent rapid movement through collision objects
+
+  // Chat
+  let messages = [];
+  let typingBuffer = "";
+
+  // Animation state - SIMPLIFIED ATTACK HANDLING
+  let localAttackTimeout = null; // Track our own attack timeout
+
+  // ---------- COLLISION HELPERS ----------
+  function hasFloorCollision(x, y) {
+    if (!floorCollisionReady || !floorCollision || 
+        x < 0 || y < 0 || x >= mapSpec.width || y >= mapSpec.height) {
+      return false; // No collision data or out of bounds
+    }
+    
+    // Get the floor tile ID at this position
+    const tileId = (mapSpec.tiles && mapSpec.tiles[y] && 
+                    typeof mapSpec.tiles[y][x] !== 'undefined') 
+                    ? mapSpec.tiles[y][x] : 0;
+    
+    // If no tile (ID 0) or tile ID is out of range, no collision
+    if (tileId <= 0 || tileId > floorCollision.length) {
+      return false;
+    }
+    
+    // Look up collision for this tile ID (convert to 0-based index)
+    return floorCollision[tileId - 1] === true || floorCollision[tileId - 1] === "true";
+  }
+
+  function isPlayerAtPosition(x, y, excludePlayerId = null) {
+    // Check local player
+    if (localPlayer && localPlayer.pos_x === x && localPlayer.pos_y === y) {
+      if (!excludePlayerId || localPlayer.id !== excludePlayerId) {
+        return true;
+      }
+    }
+    
+    // Check other players
+    for (const id in otherPlayers) {
+      const player = otherPlayers[id];
+      if (player.pos_x === x && player.pos_y === y) {
+        if (!excludePlayerId || player.id !== excludePlayerId) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  function canMoveTo(x, y, excludePlayerId = null) {
+    // Check map bounds
+    if (x < 0 || x >= mapSpec.width || y < 0 || y >= mapSpec.height) {
+      return false;
+    }
+    
+    // Check floor collision
+    if (hasFloorCollision(x, y)) {
+      return false;
+    }
+    
+    // Check item collision
+    const targetItemId = getItemAtPosition(x, y);
+    const targetItemDetails = getItemDetails(targetItemId);
+    if (targetItemDetails && targetItemDetails.collision) {
+      return false;
+    }
+    
+    // Check player collision
+    if (isPlayerAtPosition(x, y, excludePlayerId)) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  // ---------- ASSETS ----------
+  const imgTitle = new Image();
+  imgTitle.src = "/assets/title.GIF";
+
+  // Border: magenta keyed
+  const imgBorder = new Image();
+  imgBorder.src = "/assets/game_border_2025.gif";
+  let borderProcessed = null;
+  imgBorder.onload = () => {
+    try {
+      const w = imgBorder.width, h = imgBorder.height;
+      const off = document.createElement('canvas');
+      off.width = w; off.height = h;
+      const octx = off.getContext('2d');
+      octx.drawImage(imgBorder, 0, 0);
+      const data = octx.getImageData(0, 0, w, h);
+      const d = data.data;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
+      }
+      octx.putImageData(data, 0, 0);
+      borderProcessed = off;
+    } catch {
+      borderProcessed = null;
+    }
+  };
+
+  // Player sprites: extract multiple animations from player.gif using player.json
+  const imgPlayerSrc = new Image();
+  imgPlayerSrc.src = "/assets/player.gif";
+  let playerSprites = []; // Array of Image objects for each animation frame
+  let playerSpriteMeta = []; // Array of {w, h} for each sprite
+
+  Promise.all([
+    new Promise(resolve => {
+      if (imgPlayerSrc.complete) resolve();
+      else { imgPlayerSrc.onload = resolve; imgPlayerSrc.onerror = resolve; }
+    }),
+    fetch('/assets/player.json').then(r => r.json()).catch(() => null)
+  ]).then(([_, playerJson]) => {
+    if (!playerJson || !playerJson.knight) {
+      console.error('Failed to load player.json or knight data');
+      playerSpritesReady = true;
+      return;
+    }
+
+    const knightCoords = playerJson.knight;
+    const loadPromises = [];
+
+    knightCoords.forEach(([sx, sy, sw, sh], index) => {
+      try {
+        const off = document.createElement('canvas');
+        off.width = sw;
+        off.height = sh;
+        const octx = off.getContext('2d');
+        octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        // Make magenta transparent
+        const data = octx.getImageData(0, 0, sw, sh);
+        const d = data.data;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
+        }
+        octx.putImageData(data, 0, 0);
+
+        const sprite = new Image();
+        const promise = new Promise(resolve => {
+          sprite.onload = resolve;
+          sprite.onerror = resolve;
+        });
+        sprite.src = off.toDataURL();
+        
+        playerSprites[index] = sprite;
+        playerSpriteMeta[index] = { w: sw, h: sh };
+        loadPromises.push(promise);
+      } catch (e) {
+        console.error(`Failed to process sprite ${index}:`, e);
+      }
+    });
+
+    Promise.all(loadPromises).then(() => {
+      playerSpritesReady = true;
+    });
+  });
+
+  // Floor tiles from /assets/floor.png: 9 columns x 11 rows, each 62x32, with 1px overlapping border
+  const imgFloor = new Image();
+  imgFloor.src = "/assets/floor.png";
+  let floorTiles = []; // 1-based indexing
+  imgFloor.onload = async () => {
+    try {
+      const sheetW = imgFloor.width;
+      const sheetH = imgFloor.height;
+      const tileW = 62, tileH = 32;
+      const cols = 9;   // 9 columns
+      const rows = 11;  // 11 rows
+
+      const off = document.createElement('canvas');
+      off.width = sheetW; off.height = sheetH;
+      const octx = off.getContext('2d');
+      octx.drawImage(imgFloor, 0, 0);
+
+      let idCounter = 1;
+      const loadPromises = [];
+
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          // Use the coordinate formula from your examples:
+          // x = 1 + (col * 63), y = 1 + (row * 33)
+          const sx = 1 + (col * 63);  // 63 = 62 + 1 pixel border
+          const sy = 1 + (row * 33);  // 33 = 32 + 1 pixel border
+
+          const tcan = document.createElement('canvas');
+          tcan.width = tileW; tcan.height = tileH;
+          const tctx = tcan.getContext('2d', { willReadFrequently: true });
+          tctx.drawImage(off, sx, sy, tileW, tileH, 0, 0, tileW, tileH);
+
+          // magenta -> transparent (if present in art)
+          const imgData = tctx.getImageData(0, 0, tileW, tileH);
+          const d = imgData.data;
+          for (let i = 0; i < d.length; i += 4) {
+            if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
+          }
+          tctx.putImageData(imgData, 0, 0);
+
+          const tileImg = new Image();
+          const p = new Promise((resolve) => { tileImg.onload = resolve; tileImg.onerror = resolve; });
+          tileImg.src = tcan.toDataURL();
+          floorTiles[idCounter] = tileImg;
+          loadPromises.push(p);
+          idCounter++;
+        }
+      }
+
+      await Promise.all(loadPromises);
+      tilesReady = true;
+
+      fetch('map.json')
+        .then(r => r.json())
+        .then(m => {
+          if (m && m.width && m.height) {
+            const tiles = Array.isArray(m.tiles) ? m.tiles : (Array.isArray(m.tilemap) ? m.tilemap : null);
+            mapSpec = {
+              width: m.width,
+              height: m.height,
+              tiles: tiles || [],
+              items: Array.isArray(m.items) ? m.items : []
+            };
+          }
+        })
+        .catch(() => {})
+        .finally(() => { mapReady = true; });
+
+    } catch (e) {
+      console.error("Floor tile extraction failed:", e);
+      tilesReady = true; mapReady = true; // fail-safe
+    }
+  };
+
+// ---------- ITEMS (sheet + coords, true magenta keyed, formula-based anchoring) ----------
+(() => {
+  const imgItems = new Image();
+  imgItems.src = "/assets/item.gif";
+
+  const itemsJsonPromise = fetch("/assets/item.json")
+    .then(r => r.json())
+    .catch(() => null);
+
+  const itemSprites = []; // 1-based
+  const itemMeta = [];    // 1-based: { img, w, h, leftPad, anchorX }
+  let itemsReady = false;
+
+  function waitImage(img) {
+    return new Promise((resolve) => {
+      if (img.complete) return resolve();
+      img.onload = resolve;
+      img.onerror = resolve;
+    });
+  }
+
+  Promise.all([waitImage(imgItems), itemsJsonPromise]).then(([_, meta]) => {
+    if (!meta || !Array.isArray(meta.item_coords)) return;
+
+    const off = document.createElement("canvas");
+    const octx = off.getContext("2d");
+
+    meta.item_coords.forEach((quad, idx) => {
+      const [sx, sy, sw, sh] = quad;
+      off.width = sw; off.height = sh;
+      octx.clearRect(0, 0, sw, sh);
+      octx.drawImage(imgItems, sx, sy, sw, sh, 0, 0, sw, sh);
+
+      // Make true magenta transparent + compute leftPad (first opaque column)
+      let leftPad = 0;
+      try {
+        // Set willReadFrequently for better performance
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = sw; tempCanvas.height = sh;
+        const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
+        tempCtx.drawImage(off, 0, 0);
+        
+        const data = tempCtx.getImageData(0, 0, sw, sh);
+        const d = data.data;
+
+        // magenta -> transparent
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
+        }
+
+        // find first opaque column from the left
+        leftPad = sw; // default "none found"
+        outer:
+        for (let x = 0; x < sw; x++) {
+          for (let y = 0; y < sh; y++) {
+            const a = d[((y * sw) + x) * 4 + 3];
+            if (a !== 0) { leftPad = x; break outer; }
+          }
+        }
+        if (leftPad === sw) leftPad = 0; // all transparent (safety)
+
+        tempCtx.putImageData(data, 0, 0);
+        octx.clearRect(0, 0, sw, sh);
+        octx.drawImage(tempCanvas, 0, 0);
+      } catch {
+        leftPad = 0; // fallback if canvas is tainted (shouldn't be here)
+      }
+
+      // Bottom-center anchor inside the sprite (relative to left edge)
+      // Rightmost opaque column is at sw - 1 (bottom-right justified),
+      // so center between leftPad and (sw - 1).
+      const anchorX = (leftPad + (sw - 1)) / 2;
+
+      // Freeze the processed pixels into an <img>
+      const sprite = new Image();
+      sprite.src = off.toDataURL();
+
+      itemSprites[idx + 1] = sprite;
+      itemMeta[idx + 1] = { img: sprite, w: sw, h: sh, leftPad, anchorX };
+    });
+
+    itemsReady = true;
+  });
+
+  // accessors
