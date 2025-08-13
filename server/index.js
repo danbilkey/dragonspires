@@ -117,8 +117,12 @@ async function loadMapSpec() {
   try {
     const fs = require('fs').promises;
     const path = require('path');
-    // Try multiple possible paths for map.json
+    // Try multiple possible paths for map.json including /maps/ directory
     const possiblePaths = [
+      path.join(__dirname, '..', 'maps', 'map.json'),
+      path.join(__dirname, 'maps', 'map.json'),
+      path.join(__dirname, '..', '..', 'maps', 'map.json'),
+      path.join(process.cwd(), 'maps', 'map.json'),
       path.join(__dirname, '..', 'map.json'),
       path.join(__dirname, 'map.json'),
       path.join(__dirname, '..', '..', 'map.json'),
