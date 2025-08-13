@@ -589,11 +589,15 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'item_placed':
         // Update local item map
         const key = `${msg.x},${msg.y}`;
+        console.log(`Received item_placed: (${msg.x},${msg.y}) = ${msg.itemId}`);
         if (msg.itemId === 0) {
           delete mapItems[key];
+          console.log(`Deleted mapItems["${key}"]`);
         } else {
           mapItems[key] = msg.itemId; // This includes -1 for picked up map items
+          console.log(`Set mapItems["${key}"] = ${msg.itemId}`);
         }
+        console.log(`mapItems now:`, mapItems);
         break;
       case 'player_left': {
         const p = otherPlayers[msg.id];
@@ -1307,17 +1311,22 @@ function drawItemAtTile(sx, sy, itemIndex) {
       ? mapSpec.items[y][x] : 0;
     const placedItem = mapItems[`${x},${y}`];
     
+    console.log(`getItemAtPosition(${x},${y}): mapItem=${mapItem}, placedItem=${placedItem}`);
+    
     // If there's a placed item entry (but not -1 which means "picked up"), it overrides the map item
     if (placedItem !== undefined && placedItem !== -1) {
+      console.log(`→ Returning placed item: ${placedItem}`);
       return placedItem;
     }
     
     // If placedItem is -1, it means the map item was picked up, so return 0
     if (placedItem === -1) {
+      console.log(`→ Map item picked up, returning 0`);
       return 0;
     }
     
     // Otherwise return the map item
+    console.log(`→ Returning map item: ${mapItem}`);
     return mapItem;
   }
 
