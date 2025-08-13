@@ -1,229 +1,4 @@
-// accessors
-  window.getItemSprite = (i) => itemSprites[i] || null;
-  window.getItemMeta   = (i) => itemMeta[i] || null;
-  window.itemSpriteCount = () => itemSprites.length - 1;
-  window.itemsReady = () => itemsReady;
-})();
-
-  // ---------- ANIMATION HELPERS ----------
-  function getMovementAnimationFrame(direction, sequenceIndex) {
-    const sequenceType = MOVEMENT_SEQUENCE[sequenceIndex];
-    if (sequenceType === 'idle') {
-      return DIRECTION_IDLE[direction] || DIRECTION_IDLE.down;
-    } else {
-      // walk_1 or walk_2
-      const walkIndex = sequenceType === 'walk_1' ? 0 : 2;
-      const directionOffsets = {
-        down: 0,
-        right: 5,
-        left: 10,
-        up: 15
-      };
-      return (directionOffsets[direction] || 0) + walkIndex;
-    }
-  }
-
-  function getCurrentAnimationFrame(player, isLocal = false) {
-    // For local player, use the server-provided state
-    // For other players, use their server-provided state
-    if (player.isAttacking) {
-      return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
-    }
-
-    // Use the player's animation frame (which is calculated based on movement sequence)
-    if (typeof player.animationFrame !== 'undefined') {
-      return player.animationFrame;
-    }
-
-    // Fallback to idle if no animation frame is set
-    return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
-  }
-
-  // ---------- WS ----------
-  function connectToServer() {
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-    
-    console.log('Attempting to connect to:', WS_URL);
-    ws = new WebSocket(WS_URL);
-
-    ws.onopen = () => {
-      console.log('WebSocket connected successfully');
-      connected = true;
-      connectionPaused = true;
-      showLoginGUI = false;
-    };
-    ws.onmessage = (ev) => {
-      const data = safeParse(ev.data);
-      if (!data) return;
-      handleServerMessage(data);
-    };
-    ws.onerror = (e) => {
-      console.error('WebSocket error:', e);
-      console.log('Failed to connect to:', WS_URL);
-    };
-    ws.onclose = (e) => {
-      console.log('WebSocket closed:', e.code, e.reason);
-      connected = false;
-      connectionPaused = false;
-      showLoginGUI = false;
-      loggedIn = false;
-      chatMode = false;
-      localPlayer = null;
-      otherPlayers = {};
-      mapItems = {};
-      // Clear any pending attack timeout
-      if (localAttackTimeout) {
-        clearTimeout(localAttackTimeout);
-        localAttackTimeout = null;
-      }
-      
-      // Auto-reconnect after 3 seconds if not manually closed
-      if (e.code !== 1000) { // 1000 = normal closure
-        console.log('Attempting to reconnect in 3 seconds...');
-        setTimeout(connectToServer, 3000);
-      }
-    };
-  }
-  connectToServer();
-
-  function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
-  function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
-  function pushChat(line) { messages.push(String(line)); if (messages.length > 200) messages.shift(); }
-
-  function handleServerMessage(msg) {
-    switch (msg.type) {
-      case 'login_success':
-      case 'signup_success': {
-        loggedIn = true;
-        localPlayer = { 
-          ...msg.player,
-          direction: msg.player.direction || 'down',
-          isMoving: false,
-          isAttacking: false,
-          animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
-          movementSequenceIndex: msg.player.movementSequenceIndex || 0,
-          weapon: msg.player.weapon || 0,
-          armor: msg.player.armor || 0,
-          hands: msg.player.hands || 0
-        };
-        
-        // Initialize local state variables
-        playerDirection = localPlayer.direction;
-        movementAnimationState = 0;
-        isLocallyAttacking = false;
-        localAttackState = 0;
-        
-        otherPlayers = {};
-        if (Array.isArray(msg.players)) {
-          msg.players.forEach(p => { 
-            if (!localPlayer || p.id !== localPlayer.id) {
-              otherPlayers[p.id] = {
-                ...p,
-                direction: p.direction || 'down',
-                isMoving: p.isMoving || false,
-                isAttacking: p.isAttacking || false,
-                animationFrame: p.animationFrame || DIRECTION_IDLE.down,
-                movementSequenceIndex: p.movementSequenceIndex || 0
-              };
-            }
-          });
-        }
-
-        // Load items if provided
-        if (msg.items) {
-          mapItems = { ...msg.items };
-        }
-
-        pushChat("Welcome to DragonSpires!");
-        break;
-      }
-      case 'player_joined':
-        if (!localPlayer || msg.player.id !== localPlayer.id) {
-          otherPlayers[msg.player.id] = {
-            ...msg.player,
-            direction: msg.player.direction || 'down',
-            isMoving: msg.player.isMoving || false,
-            isAttacking: msg.player.isAttacking || false,
-            animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
-            movementSequenceIndex: msg.player.movementSequenceIndex || 0
-          };
-          pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
-        }
-        break;
-      case 'player_moved':
-        if (localPlayer && msg.id === localPlayer.id) { 
-          // Only update position and sequence from server, keep local direction for immediate feedback
-          localPlayer.pos_x = msg.x; 
-          localPlayer.pos_y = msg.y;
-          // Don't override direction if we just moved - keep the local direction
-          // localPlayer.direction = msg.direction || localPlayer.direction;
-          localPlayer.isMoving = msg.isMoving || false;
-          // Only update animation frame if we're not currently moving (to avoid animation conflicts)
-          if (!localPlayer.isMoving) {
-            localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
-            localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
-          }
-        } else {
-          if (!otherPlayers[msg.id]) {
-            otherPlayers[msg.id] = { 
-              id: msg.id, 
-              username: `#${msg.id}`, 
-              pos_x: msg.x, 
-              pos_y: msg.y,
-              direction: msg.direction || 'down',
-              isMoving: msg.isMoving || false,
-              isAttacking: false,
-              animationFrame: msg.animationFrame || DIRECTION_IDLE.down,
-              movementSequenceIndex: msg.movementSequenceIndex || 0
-            };
-          } else { 
-            otherPlayers[msg.id].pos_x = msg.x; 
-            otherPlayers[msg.id].pos_y = msg.y;
-            otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
-            otherPlayers[msg.id].isMoving = msg.isMoving || false;
-            otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
-            otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
-          }
-        }
-        break;
-      case 'animation_update':
-        if (localPlayer && msg.id === localPlayer.id) {
-          localPlayer.direction = msg.direction || localPlayer.direction;
-          localPlayer.isMoving = msg.isMoving || false;
-          localPlayer.isAttacking = msg.isAttacking || false;
-          localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
-          localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
-        } else if (otherPlayers[msg.id]) {
-          otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
-          otherPlayers[msg.id].isMoving = msg.isMoving || false;
-          otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
-          otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
-          otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
-        }
-        break;
-      case 'player_equipment_update':
-        if (localPlayer && msg.id === localPlayer.id) {
-          // Update local player equipment
-          if ('weapon' in msg) localPlayer.weapon = msg.weapon;
-          if ('armor' in msg) localPlayer.armor = msg.armor;
-          if ('hands' in msg) localPlayer.hands = msg.hands;
-        } else if (otherPlayers[msg.id]) {
-          // Update other player equipment
-          if ('weapon' in msg) otherPlayers[msg.id].weapon = msg.weapon;
-          if ('armor' in msg) otherPlayers[msg.id].armor = msg.armor;
-          if ('hands' in msg) otherPlayers[msg.id].hands = msg.hands;
-        }
-        break;
-      case 'item_placed':
-        // Update local item map
-        const key = `${msg.x},${msg.y}`;
-        if (msg.itemId === 0) {
-          delete mapItems[key];
-        } else {
-          mapItems[key] = msg.itemId; // This includes -1 for picked up map items
-        }
-        break;
-      case 'player_left': {
+case 'player_left': {
         const p = otherPlayers[msg.id];
         const name = p?.username ?? msg.id;
         if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
@@ -1457,3 +1232,231 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // accessors
+  window.getItemSprite = (i) => itemSprites[i] || null;
+  window.getItemMeta   = (i) => itemMeta[i] || null;
+  window.itemSpriteCount = () => itemSprites.length - 1;
+  window.itemsReady = () => itemsReady;
+})();
+
+  // ---------- ANIMATION HELPERS ----------
+  function getMovementAnimationFrame(direction, sequenceIndex) {
+    const sequenceType = MOVEMENT_SEQUENCE[sequenceIndex];
+    if (sequenceType === 'idle') {
+      return DIRECTION_IDLE[direction] || DIRECTION_IDLE.down;
+    } else {
+      // walk_1 or walk_2
+      const walkIndex = sequenceType === 'walk_1' ? 0 : 2;
+      const directionOffsets = {
+        down: 0,
+        right: 5,
+        left: 10,
+        up: 15
+      };
+      return (directionOffsets[direction] || 0) + walkIndex;
+    }
+  }
+
+  function getCurrentAnimationFrame(player, isLocal = false) {
+    // For local player, use the server-provided state
+    // For other players, use their server-provided state
+    if (player.isAttacking) {
+      return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
+    }
+
+    // Use the player's animation frame (which is calculated based on movement sequence)
+    if (typeof player.animationFrame !== 'undefined') {
+      return player.animationFrame;
+    }
+
+    // Fallback to idle if no animation frame is set
+    return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
+  }
+
+  // ---------- WS ----------
+  function connectToServer() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    
+    console.log('Attempting to connect to:', WS_URL);
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected successfully');
+      connected = true;
+      connectionPaused = true;
+      showLoginGUI = false;
+    };
+    ws.onmessage = (ev) => {
+      const data = safeParse(ev.data);
+      if (!data) return;
+      handleServerMessage(data);
+    };
+    ws.onerror = (e) => {
+      console.error('WebSocket error:', e);
+      console.log('Failed to connect to:', WS_URL);
+    };
+    ws.onclose = (e) => {
+      console.log('WebSocket closed:', e.code, e.reason);
+      connected = false;
+      connectionPaused = false;
+      showLoginGUI = false;
+      loggedIn = false;
+      chatMode = false;
+      localPlayer = null;
+      otherPlayers = {};
+      mapItems = {};
+      // Clear any pending attack timeout
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
+        localAttackTimeout = null;
+      }
+      
+      // Auto-reconnect after 3 seconds if not manually closed
+      if (e.code !== 1000) { // 1000 = normal closure
+        console.log('Attempting to reconnect in 3 seconds...');
+        setTimeout(connectToServer, 3000);
+      }
+    };
+  }
+  connectToServer();
+
+  function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
+  function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+  function pushChat(line) { messages.push(String(line)); if (messages.length > 200) messages.shift(); }
+
+  function handleServerMessage(msg) {
+    switch (msg.type) {
+      case 'login_success':
+      case 'signup_success': {
+        loggedIn = true;
+        localPlayer = { 
+          ...msg.player,
+          direction: msg.player.direction || 'down',
+          isMoving: false,
+          isAttacking: false,
+          animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
+          movementSequenceIndex: msg.player.movementSequenceIndex || 0,
+          weapon: msg.player.weapon || 0,
+          armor: msg.player.armor || 0,
+          hands: msg.player.hands || 0
+        };
+        
+        // Initialize local state variables
+        playerDirection = localPlayer.direction;
+        movementAnimationState = 0;
+        isLocallyAttacking = false;
+        localAttackState = 0;
+        
+        otherPlayers = {};
+        if (Array.isArray(msg.players)) {
+          msg.players.forEach(p => { 
+            if (!localPlayer || p.id !== localPlayer.id) {
+              otherPlayers[p.id] = {
+                ...p,
+                direction: p.direction || 'down',
+                isMoving: p.isMoving || false,
+                isAttacking: p.isAttacking || false,
+                animationFrame: p.animationFrame || DIRECTION_IDLE.down,
+                movementSequenceIndex: p.movementSequenceIndex || 0
+              };
+            }
+          });
+        }
+
+        // Load items if provided
+        if (msg.items) {
+          mapItems = { ...msg.items };
+        }
+
+        pushChat("Welcome to DragonSpires!");
+        break;
+      }
+      case 'player_joined':
+        if (!localPlayer || msg.player.id !== localPlayer.id) {
+          otherPlayers[msg.player.id] = {
+            ...msg.player,
+            direction: msg.player.direction || 'down',
+            isMoving: msg.player.isMoving || false,
+            isAttacking: msg.player.isAttacking || false,
+            animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
+            movementSequenceIndex: msg.player.movementSequenceIndex || 0
+          };
+          pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
+        }
+        break;
+      case 'player_moved':
+        if (localPlayer && msg.id === localPlayer.id) { 
+          // Only update position and sequence from server, keep local direction for immediate feedback
+          localPlayer.pos_x = msg.x; 
+          localPlayer.pos_y = msg.y;
+          // Don't override direction if we just moved - keep the local direction
+          // localPlayer.direction = msg.direction || localPlayer.direction;
+          localPlayer.isMoving = msg.isMoving || false;
+          // Only update animation frame if we're not currently moving (to avoid animation conflicts)
+          if (!localPlayer.isMoving) {
+            localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
+            localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
+          }
+        } else {
+          if (!otherPlayers[msg.id]) {
+            otherPlayers[msg.id] = { 
+              id: msg.id, 
+              username: `#${msg.id}`, 
+              pos_x: msg.x, 
+              pos_y: msg.y,
+              direction: msg.direction || 'down',
+              isMoving: msg.isMoving || false,
+              isAttacking: false,
+              animationFrame: msg.animationFrame || DIRECTION_IDLE.down,
+              movementSequenceIndex: msg.movementSequenceIndex || 0
+            };
+          } else { 
+            otherPlayers[msg.id].pos_x = msg.x; 
+            otherPlayers[msg.id].pos_y = msg.y;
+            otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+            otherPlayers[msg.id].isMoving = msg.isMoving || false;
+            otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
+            otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
+          }
+        }
+        break;
+      case 'animation_update':
+        if (localPlayer && msg.id === localPlayer.id) {
+          localPlayer.direction = msg.direction || localPlayer.direction;
+          localPlayer.isMoving = msg.isMoving || false;
+          localPlayer.isAttacking = msg.isAttacking || false;
+          localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
+          localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
+        } else if (otherPlayers[msg.id]) {
+          otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+          otherPlayers[msg.id].isMoving = msg.isMoving || false;
+          otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
+          otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
+          otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
+        }
+        break;
+      case 'player_equipment_update':
+        if (localPlayer && msg.id === localPlayer.id) {
+          // Update local player equipment
+          if ('weapon' in msg) localPlayer.weapon = msg.weapon;
+          if ('armor' in msg) localPlayer.armor = msg.armor;
+          if ('hands' in msg) localPlayer.hands = msg.hands;
+        } else if (otherPlayers[msg.id]) {
+          // Update other player equipment
+          if ('weapon' in msg) otherPlayers[msg.id].weapon = msg.weapon;
+          if ('armor' in msg) otherPlayers[msg.id].armor = msg.armor;
+          if ('hands' in msg) otherPlayers[msg.id].hands = msg.hands;
+        }
+        break;
+      case 'item_placed':
+        // Update local item map
+        const key = `${msg.x},${msg.y}`;
+        if (msg.itemId === 0) {
+          delete mapItems[key];
+        } else {
+          mapItems[key] = msg.itemId; // This includes -1 for picked up map items
+        }
+        break;
+      case 'player_left': {
+        const p = otherPlayers[msg.id];
+        const name = p?.username ?? msg.id;
+        if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left Dr
