@@ -742,7 +742,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const itemDetails = getItemDetails(itemId);
       
+      console.log(`Pickup attempt: position (${localPlayer.pos_x},${localPlayer.pos_y}), itemId: ${itemId}, itemDetails:`, itemDetails);
+      
       if (itemDetails && isItemPickupable(itemDetails)) {
+        console.log(`Sending pickup request for item ${itemId}`);
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
@@ -751,12 +754,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
       else if ((!itemDetails || !isItemPickupable(itemDetails)) && localPlayer.hands && localPlayer.hands > 0) {
+        console.log(`Dropping item from hands: ${localPlayer.hands}`);
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
           y: localPlayer.pos_y,
           itemId: 0
         });
+      } else {
+        console.log(`No action taken - no pickupable item and no hands item to drop`);
       }
       
       return;
@@ -1254,8 +1260,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.connectToServer = connectToServer;
 
-  // Load floor collision data
-  fetch('/client/assets/floorcollision.json')
+  // Load floor collision data - fix path issue
+  const baseUrl = location.hostname.includes('localhost') ? '' : '';
+  
+  fetch(`${baseUrl}/assets/floorcollision.json`)
     .then(r => r.json())
     .then(data => {
       if (data && Array.isArray(data.floor)) {
@@ -1265,7 +1273,8 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     })
     .catch(err => {
-      fetch('/assets/floorcollision.json')
+      // Try alternative paths
+      fetch('/client/assets/floorcollision.json')
         .then(r => r.json())
         .then(data => {
           if (data && Array.isArray(data.floor)) {
@@ -1275,13 +1284,25 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         })
         .catch(err2 => {
-          floorCollisionReady = true;
-          console.warn('Failed to load floor collision data');
+          // Try without any path prefix
+          fetch('floorcollision.json')
+            .then(r => r.json())
+            .then(data => {
+              if (data && Array.isArray(data.floor)) {
+                floorCollision = data.floor;
+                floorCollisionReady = true;
+                console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
+              }
+            })
+            .catch(err3 => {
+              floorCollisionReady = true;
+              console.warn('Failed to load floor collision data from all paths');
+            });
         });
     });
 
-  // Load item details
-  fetch('/assets/itemdetails.json')
+  // Load item details - fix path issue
+  fetch(`${baseUrl}/assets/itemdetails.json`)
     .then(r => r.json())
     .then(data => {
       if (data && Array.isArray(data.items)) {
@@ -1295,9 +1316,11 @@ document.addEventListener('DOMContentLoaded', () => {
           description: item[5]
         }));
         itemDetailsReady = true;
+        console.log(`Client loaded ${itemDetails.length} item details`);
       }
     })
     .catch(err => {
+      // Try alternative paths
       fetch('/client/assets/itemdetails.json')
         .then(r => r.json())
         .then(data => {
@@ -1312,10 +1335,32 @@ document.addEventListener('DOMContentLoaded', () => {
               description: item[5]
             }));
             itemDetailsReady = true;
+            console.log(`Client loaded ${itemDetails.length} item details`);
           }
         })
         .catch(err2 => {
-          itemDetailsReady = true;
+          // Try without any path prefix
+          fetch('itemdetails.json')
+            .then(r => r.json())
+            .then(data => {
+              if (data && Array.isArray(data.items)) {
+                itemDetails = data.items.map((item, index) => ({
+                  id: index + 1,
+                  name: item[0],
+                  collision: item[1] === "true",
+                  type: item[2],
+                  statMin: parseInt(item[3]) || 0,
+                  statMax: parseInt(item[4]) || 0,
+                  description: item[5]
+                }));
+                itemDetailsReady = true;
+                console.log(`Client loaded ${itemDetails.length} item details`);
+              }
+            })
+            .catch(err3 => {
+              itemDetailsReady = true;
+              console.warn('Failed to load item details from all paths');
+            });
         });
     });
 });
