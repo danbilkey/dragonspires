@@ -117,8 +117,33 @@ async function loadMapSpec() {
   try {
     const fs = require('fs').promises;
     const path = require('path');
-    const mapPath = path.join(__dirname, '..', 'map.json'); // Assuming map.json is in parent directory
-    const data = await fs.readFile(mapPath, 'utf8');
+    // Try multiple possible paths for map.json
+    const possiblePaths = [
+      path.join(__dirname, '..', 'map.json'),
+      path.join(__dirname, 'map.json'),
+      path.join(__dirname, '..', '..', 'map.json'),
+      path.join(process.cwd(), 'map.json')
+    ];
+    
+    let data = null;
+    let usedPath = null;
+    
+    for (const mapPath of possiblePaths) {
+      try {
+        data = await fs.readFile(mapPath, 'utf8');
+        usedPath = mapPath;
+        break;
+      } catch (err) {
+        // Try next path
+        continue;
+      }
+    }
+    
+    if (!data) {
+      console.error('Could not find map.json in any of the expected paths:', possiblePaths);
+      return;
+    }
+    
     const parsed = JSON.parse(data);
     
     if (parsed && parsed.width && parsed.height) {
@@ -128,7 +153,12 @@ async function loadMapSpec() {
         tiles: Array.isArray(parsed.tiles) ? parsed.tiles : (Array.isArray(parsed.tilemap) ? parsed.tilemap : []),
         items: Array.isArray(parsed.items) ? parsed.items : []
       };
-      console.log('Server loaded map spec');
+      console.log(`Server loaded map spec from: ${usedPath}`);
+      console.log(`Map dimensions: ${serverMapSpec.width}x${serverMapSpec.height}`);
+      console.log(`Map has ${serverMapSpec.items.length} item rows`);
+      if (serverMapSpec.items.length > 0) {
+        console.log(`Sample items row 0:`, serverMapSpec.items[0]);
+      }
     }
   } catch (error) {
     console.error('Failed to load map spec on server:', error);
@@ -623,23 +653,22 @@ wss.on('connection', (ws) => {
       
       const { x, y, itemId } = msg;
       
-      // Verify item exists at position (check both map items and placed items)
+      console.log(`Pickup request: player at (${x},${y}), itemId=${itemId}`);
+      
+      // Check what's actually at this position
       const actualItemId = getItemAtPosition(x, y, serverMapSpec);
-      if (actualItemId !== itemId) return;
+      console.log(`Actual item at position: ${actualItemId}`);
       
-      // Verify item is pickupable
-      const itemDetails = getItemDetails(itemId);
-      if (!itemDetails) return;
-      
-      const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
-      if (!pickupableTypes.includes(itemDetails.type)) return;
-      
-      // Check if there's no item on ground - this means player wants to drop their hands item
+      // Special case: itemId=0 means player wants to drop their hands item
       if (itemId === 0) {
-        // Drop hands item to ground
+        console.log('Drop item request');
         const handsItem = playerData.hands || 0;
-        if (handsItem === 0) return; // Nothing in hands to drop
+        if (handsItem === 0) {
+          console.log('No item in hands to drop');
+          return; // Nothing in hands to drop
+        }
         
+        console.log(`Dropping item ${handsItem} to ground`);
         playerData.hands = 0;
         
         // Place item on ground
@@ -665,8 +694,30 @@ wss.on('connection', (ws) => {
           hands: playerData.hands
         });
         
+        console.log('Item dropped successfully');
         return;
       }
+      
+      // Verify item exists at position (check both map items and placed items)
+      if (actualItemId !== itemId) {
+        console.log(`Item mismatch: expected ${itemId}, found ${actualItemId}`);
+        return;
+      }
+      
+      // Verify item is pickupable
+      const itemDetails = getItemDetails(itemId);
+      if (!itemDetails) {
+        console.log(`No item details found for item ${itemId}`);
+        return;
+      }
+      
+      const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
+      if (!pickupableTypes.includes(itemDetails.type)) {
+        console.log(`Item ${itemId} type '${itemDetails.type}' not pickupable`);
+        return;
+      }
+      
+      console.log(`Picking up item ${itemId} (${itemDetails.name})`);
       
       // Exchange with hands
       const oldHands = playerData.hands || 0;
@@ -680,6 +731,8 @@ wss.on('connection', (ws) => {
                         serverMapSpec.items[y] && 
                         typeof serverMapSpec.items[y][x] !== 'undefined' && 
                         serverMapSpec.items[y][x] === itemId);
+      
+      console.log(`Is map item: ${isMapItem}, old hands: ${oldHands}`);
       
       if (isMapItem) {
         // This was a map item - we need to "remove" it by placing a 0 or hands item
@@ -719,6 +772,8 @@ wss.on('connection', (ws) => {
         id: playerData.id,
         hands: playerData.hands
       });
+      
+      console.log('Pickup completed successfully');
     }
 
     else if (msg.type === 'equip_weapon') {
