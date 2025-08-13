@@ -105,9 +105,15 @@ function getItemAtPosition(x, y, mapSpec) {
   // Check both map items and placed items, same logic as client
   const mapItem = (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
     ? mapSpec.items[y][x] : 0;
-  const placedItem = mapItems[`${x},${y}`] || 0;
+  const placedItem = mapItems[`${x},${y}`];
   
-  return placedItem > 0 ? placedItem : mapItem;
+  // If there's a placed item entry (including 0), it overrides the map item
+  if (placedItem !== undefined) {
+    return placedItem;
+  }
+  
+  // Otherwise return the map item
+  return mapItem;
 }
 
 // We need to load the map spec on server for proper item detection
@@ -740,13 +746,8 @@ wss.on('connection', (ws) => {
       
       if (isMapItem) {
         // This was a map item - we need to "remove" it by placing a 0 or hands item
-        if (oldHands > 0) {
-          mapItems[key] = oldHands; // Place hands item
-          saveItemToDatabase(x, y, oldHands);
-        } else {
-          mapItems[key] = 0; // Mark as empty (overrides map item)
-          saveItemToDatabase(x, y, 0);
-        }
+        mapItems[key] = oldHands; // Always set the override (0 for empty, or hands item)
+        saveItemToDatabase(x, y, oldHands);
       } else {
         // This was a placed item
         if (oldHands > 0) {
