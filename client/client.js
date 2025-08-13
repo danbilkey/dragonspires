@@ -1312,11 +1312,15 @@ function drawItemAtTile(sx, sy, itemIndex) {
     // Check both map items (from JSON) and placed items (from admin)
     const mapItem = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
       ? mapSpec.items[y][x] : 0;
-    const placedItem = mapItems[`${x},${y}`] || 0;
+    const placedItem = mapItems[`${x},${y}`];
     
-    // Placed items take priority over map items
-    const finalItem = placedItem > 0 ? placedItem : mapItem;
-    return finalItem;
+    // If there's a placed item entry (including 0), it overrides the map item
+    if (placedItem !== undefined) {
+      return placedItem;
+    }
+    
+    // Otherwise return the map item
+    return mapItem;
   }
 
   function isItemPickupable(itemDetails) {
