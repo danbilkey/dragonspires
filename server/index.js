@@ -669,30 +669,35 @@ wss.on('connection', (ws) => {
       
       const { x, y, itemId } = msg;
       
-      console.log(`Pickup request: player at (${x},${y}), itemId=${itemId}`);
+      console.log(`=== PICKUP DEBUG ===`);
+      console.log(`Position: (${x},${y}), Requested itemId: ${itemId}`);
+      console.log(`mapItems at this position:`, mapItems[`${x},${y}`]);
+      
+      // Check what the map originally has at this position
+      const originalMapItem = (serverMapSpec && serverMapSpec.items && 
+                              serverMapSpec.items[y] && 
+                              typeof serverMapSpec.items[y][x] !== 'undefined') 
+                              ? serverMapSpec.items[y][x] : 0;
+      console.log(`Original map item at position: ${originalMapItem}`);
+      
+      // Check what our getItemAtPosition function returns
+      const actualItemId = getItemAtPosition(x, y, serverMapSpec);
+      console.log(`getItemAtPosition returns: ${actualItemId}`);
+      console.log(`===================`);
       
       // Special case: itemId=0 means player wants to drop their hands item
       if (itemId === 0) {
-        console.log('Drop item request');
         const handsItem = playerData.hands || 0;
-        if (handsItem === 0) {
-          console.log('No item in hands to drop');
-          return;
-        }
+        if (handsItem === 0) return;
         
-        console.log(`Dropping item ${handsItem} to ground`);
         playerData.hands = 0;
-        
-        // Place item on ground - always treated as placed item
         const key = `${x},${y}`;
         mapItems[key] = handsItem;
         saveItemToDatabase(x, y, handsItem);
         
-        // Update player in database
         updateStatsInDb(playerData.id, { hands: playerData.hands })
           .catch(err => console.error('Error updating player hands:', err));
         
-        // Broadcast changes
         broadcast({
           type: 'item_placed',
           x: x,
@@ -706,95 +711,61 @@ wss.on('connection', (ws) => {
           hands: playerData.hands
         });
         
-        console.log('Item dropped successfully');
         return;
       }
       
-      // Verify item exists at position
-      const actualItemId = getItemAtPosition(x, y, serverMapSpec);
-      console.log(`Actual item at position: ${actualItemId}`);
-      
+      // Verify item exists
       if (actualItemId !== itemId) {
-        console.log(`Item mismatch: expected ${itemId}, found ${actualItemId}`);
+        console.log(`ERROR: Item mismatch! Expected ${itemId}, found ${actualItemId}`);
         return;
       }
       
       // Verify item is pickupable
       const itemDetails = getItemDetails(itemId);
       if (!itemDetails) {
-        console.log(`No item details found for item ${itemId}`);
+        console.log(`ERROR: No item details for item ${itemId}`);
         return;
       }
       
       const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
       if (!pickupableTypes.includes(itemDetails.type)) {
-        console.log(`Item ${itemId} type '${itemDetails.type}' not pickupable`);
+        console.log(`ERROR: Item ${itemId} type '${itemDetails.type}' not pickupable`);
         return;
       }
       
-      console.log(`Picking up item ${itemId} (${itemDetails.name})`);
-      
-      // Exchange with hands
+      // SIMPLE TEST: Just remove the item completely for now
       const oldHands = playerData.hands || 0;
       playerData.hands = itemId;
       
-      // NEW LOGIC: Check if this position has a placed item override
       const key = `${x},${y}`;
-      const hasPlacedOverride = mapItems.hasOwnProperty(key);
       
-      console.log(`hasPlacedOverride: ${hasPlacedOverride}, oldHands: ${oldHands}`);
+      console.log(`BEFORE pickup - mapItems["${key}"] =`, mapItems[key]);
       
-      if (hasPlacedOverride) {
-        // This is a placed item (admin placed or dropped item)
-        console.log('Handling as placed item');
-        if (oldHands > 0) {
-          mapItems[key] = oldHands;
-          saveItemToDatabase(x, y, oldHands);
-        } else {
-          delete mapItems[key];
-          pool.query('DELETE FROM map_items WHERE x=$1 AND y=$2', [x, y])
-            .catch(err => console.error('Error removing item from database:', err));
-        }
-        
-        // Broadcast the change
-        broadcast({
-          type: 'item_placed',
-          x: x,
-          y: y,
-          itemId: oldHands
-        });
-      } else {
-        // This is an original map item
-        console.log('Handling as original map item');
-        if (oldHands > 0) {
-          mapItems[key] = oldHands; // Place hands item
-          saveItemToDatabase(x, y, oldHands);
-        } else {
-          // Mark map item as picked up with -1
-          mapItems[key] = -1;
-          saveItemToDatabase(x, y, -1);
-        }
-        
-        broadcast({
-          type: 'item_placed',
-          x: x,
-          y: y,
-          itemId: oldHands > 0 ? oldHands : -1
-        });
-      }
+      // Mark as picked up with -1 (this should make it disappear)
+      mapItems[key] = -1;
+      saveItemToDatabase(x, y, -1);
       
-      // Update player in database
+      console.log(`AFTER pickup - mapItems["${key}"] =`, mapItems[key]);
+      
+      // Update player
       updateStatsInDb(playerData.id, { hands: playerData.hands })
         .catch(err => console.error('Error updating player hands:', err));
       
-      // Broadcast equipment update
+      // Broadcast that this position now has -1 (picked up)
+      broadcast({
+        type: 'item_placed',
+        x: x,
+        y: y,
+        itemId: -1
+      });
+      
       broadcast({
         type: 'player_equipment_update',
         id: playerData.id,
         hands: playerData.hands
       });
       
-      console.log('Pickup completed successfully');
+      console.log(`Pickup completed - should be invisible now`);
     }
 
     else if (msg.type === 'equip_weapon') {
