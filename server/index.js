@@ -66,12 +66,66 @@ let mapItems = {}; // { "x,y": itemId }
 let itemDetails = [];
 let itemDetailsReady = false;
 
+// Floor collision data
+let floorCollision = [];
+let floorCollisionReady = false;
+
+// Load floor collision data on server startup
+async function loadFloorCollision() {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const collisionPath = path.join(__dirname, 'assets', 'floorcollision.json');
+    const data = await fs.readFile(collisionPath, 'utf8');
+    const parsed = JSON.parse(data);
+    
+    if (parsed && Array.isArray(parsed.floor)) {
+      floorCollision = parsed.floor;
+      floorCollisionReady = true;
+      console.log(`Server loaded floor collision data: ${floorCollision.length} tiles`);
+    }
+  } catch (error) {
+    console.error('Failed to load floor collision data:', error);
+    floorCollisionReady = true; // Don't block server startup
+  }
+}
+
+function hasFloorCollision(x, y) {
+  if (!floorCollisionReady || !floorCollision || !serverMapSpec || 
+      x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) {
+    return false; // No collision data, no map spec, or out of bounds
+  }
+  
+  // Get the floor tile ID at this position
+  const tileId = (serverMapSpec.tiles && serverMapSpec.tiles[y] && 
+                  typeof serverMapSpec.tiles[y][x] !== 'undefined') 
+                  ? serverMapSpec.tiles[y][x] : 0;
+  
+  // If no tile (ID 0) or tile ID is out of range, no collision
+  if (tileId <= 0 || tileId > floorCollision.length) {
+    return false;
+  }
+  
+  // Look up collision for this tile ID (convert to 0-based index)
+  return floorCollision[tileId - 1] === true || floorCollision[tileId - 1] === "true";
+}
+
+function isPlayerAtPosition(x, y, excludePlayerId = null) {
+  for (const [ws, playerData] of clients.entries()) {
+    if (excludePlayerId && playerData.id === excludePlayerId) continue;
+    if (playerData.pos_x === x && playerData.pos_y === y) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Load item details on server startup
 async function loadItemDetails() {
   try {
     const fs = require('fs').promises;
     const path = require('path');
-    const itemDetailsPath = path.join(__dirname, 'itemdetails.json');
+    const itemDetailsPath = path.join(__dirname, 'assets', 'itemdetails.json');
     const data = await fs.readFile(itemDetailsPath, 'utf8');
     const parsed = JSON.parse(data);
     
@@ -285,6 +339,33 @@ function getAdjacentPosition(x, y, direction) {
   }
 }
 
+// Check if movement to position is allowed
+function canMoveTo(x, y, excludePlayerId = null) {
+  // Check map bounds
+  if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) {
+    return false;
+  }
+  
+  // Check floor collision
+  if (hasFloorCollision(x, y)) {
+    return false;
+  }
+  
+  // Check item collision
+  const targetItemId = getItemAtPosition(x, y, serverMapSpec);
+  const targetItemDetails = getItemDetails(targetItemId);
+  if (targetItemDetails && targetItemDetails.collision) {
+    return false;
+  }
+  
+  // Check player collision
+  if (isPlayerAtPosition(x, y, excludePlayerId)) {
+    return false;
+  }
+  
+  return true;
+}
+
 // Start attack animation for a player
 function startAttackAnimation(playerData, ws) {
   // Clear any existing attack timeout
@@ -404,6 +485,7 @@ async function initializeDatabase() {
 initializeDatabase();
 loadItemDetails();
 loadMapSpec();
+loadFloorCollision();
 
 wss.on('connection', (ws) => {
   let playerData = null;
@@ -531,16 +613,8 @@ wss.on('connection', (ws) => {
       const nx = playerData.pos_x + dx;
       const ny = playerData.pos_y + dy;
 
-      if (nx >= 0 && nx < MAP_WIDTH && ny >= 0 && ny < MAP_HEIGHT) {
-        // Server-side collision check
-        const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
-        const targetItemDetails = getItemDetails(targetItemId);
-        
-        if (targetItemDetails && targetItemDetails.collision) {
-          // Collision detected - don't allow movement
-          return;
-        }
-
+      // Use the new collision checking function
+      if (canMoveTo(nx, ny, playerData.id)) {
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
@@ -669,22 +743,6 @@ wss.on('connection', (ws) => {
       
       const { x, y, itemId } = msg;
       
-      console.log(`=== PICKUP DEBUG ===`);
-      console.log(`Position: (${x},${y}), Requested itemId: ${itemId}`);
-      console.log(`mapItems at this position:`, mapItems[`${x},${y}`]);
-      
-      // Check what the map originally has at this position
-      const originalMapItem = (serverMapSpec && serverMapSpec.items && 
-                              serverMapSpec.items[y] && 
-                              typeof serverMapSpec.items[y][x] !== 'undefined') 
-                              ? serverMapSpec.items[y][x] : 0;
-      console.log(`Original map item at position: ${originalMapItem}`);
-      
-      // Check what our getItemAtPosition function returns
-      const actualItemId = getItemAtPosition(x, y, serverMapSpec);
-      console.log(`getItemAtPosition returns: ${actualItemId}`);
-      console.log(`===================`);
-      
       // Special case: itemId=0 means player wants to drop their hands item
       if (itemId === 0) {
         const handsItem = playerData.hands || 0;
@@ -715,6 +773,7 @@ wss.on('connection', (ws) => {
       }
       
       // Verify item exists
+      const actualItemId = getItemAtPosition(x, y, serverMapSpec);
       if (actualItemId !== itemId) {
         console.log(`ERROR: Item mismatch! Expected ${itemId}, found ${actualItemId}`);
         return;
@@ -733,19 +792,15 @@ wss.on('connection', (ws) => {
         return;
       }
       
-      // SIMPLE TEST: Just remove the item completely for now
+      // Pick up the item
       const oldHands = playerData.hands || 0;
       playerData.hands = itemId;
       
       const key = `${x},${y}`;
       
-      console.log(`BEFORE pickup - mapItems["${key}"] =`, mapItems[key]);
-      
       // Mark as picked up with -1 (this should make it disappear)
       mapItems[key] = -1;
       saveItemToDatabase(x, y, -1);
-      
-      console.log(`AFTER pickup - mapItems["${key}"] =`, mapItems[key]);
       
       // Update player
       updateStatsInDb(playerData.id, { hands: playerData.hands })
@@ -764,8 +819,6 @@ wss.on('connection', (ws) => {
         id: playerData.id,
         hands: playerData.hands
       });
-      
-      console.log(`Pickup completed - should be invisible now`);
     }
 
     else if (msg.type === 'equip_weapon') {
