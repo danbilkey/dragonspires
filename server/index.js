@@ -75,14 +75,45 @@ async function loadFloorCollision() {
   try {
     const fs = require('fs').promises;
     const path = require('path');
-    const collisionPath = path.join(__dirname, 'assets', 'floorcollision.json');
-    const data = await fs.readFile(collisionPath, 'utf8');
+    
+    // Try multiple possible paths for floorcollision.json
+    const possiblePaths = [
+      path.join(__dirname, 'assets', 'floorcollision.json'),
+      path.join(__dirname, '..', 'assets', 'floorcollision.json'),
+      path.join(__dirname, '..', 'client', 'assets', 'floorcollision.json'),
+      path.join(__dirname, '..', '..', 'assets', 'floorcollision.json'),
+      path.join(__dirname, '..', '..', 'client', 'assets', 'floorcollision.json'),
+      path.join(process.cwd(), 'assets', 'floorcollision.json'),
+      path.join(process.cwd(), 'client', 'assets', 'floorcollision.json'),
+      path.join(process.cwd(), 'server', 'assets', 'floorcollision.json')
+    ];
+    
+    let data = null;
+    let usedPath = null;
+    
+    for (const collisionPath of possiblePaths) {
+      try {
+        data = await fs.readFile(collisionPath, 'utf8');
+        usedPath = collisionPath;
+        break;
+      } catch (err) {
+        // Try next path
+        continue;
+      }
+    }
+    
+    if (!data) {
+      console.error('Could not find floorcollision.json in any of the expected paths:', possiblePaths);
+      floorCollisionReady = true; // Don't block server startup
+      return;
+    }
+    
     const parsed = JSON.parse(data);
     
     if (parsed && Array.isArray(parsed.floor)) {
       floorCollision = parsed.floor;
       floorCollisionReady = true;
-      console.log(`Server loaded floor collision data: ${floorCollision.length} tiles`);
+      console.log(`Server loaded floor collision data: ${floorCollision.length} tiles from: ${usedPath}`);
     }
   } catch (error) {
     console.error('Failed to load floor collision data:', error);
@@ -125,8 +156,49 @@ async function loadItemDetails() {
   try {
     const fs = require('fs').promises;
     const path = require('path');
-    const itemDetailsPath = path.join(__dirname, 'assets', 'itemdetails.json');
-    const data = await fs.readFile(itemDetailsPath, 'utf8');
+    
+    // Try multiple possible paths for itemdetails.json
+    const possiblePaths = [
+      path.join(__dirname, 'assets', 'itemdetails.json'),
+      path.join(__dirname, '..', 'assets', 'itemdetails.json'),
+      path.join(__dirname, '..', 'client', 'assets', 'itemdetails.json'),
+      path.join(__dirname, '..', '..', 'assets', 'itemdetails.json'),
+      path.join(__dirname, '..', '..', 'client', 'assets', 'itemdetails.json'),
+      path.join(__dirname, '..', '..', 'server', 'assets', 'itemdetails.json'), // For Render structure
+      path.join(process.cwd(), 'assets', 'itemdetails.json'),
+      path.join(process.cwd(), 'client', 'assets', 'itemdetails.json'),
+      path.join(process.cwd(), 'server', 'assets', 'itemdetails.json'),
+      // Additional paths for potential Render deployment structure
+      path.join(process.cwd(), 'src', 'server', 'assets', 'itemdetails.json'),
+      path.join(process.cwd(), 'src', 'assets', 'itemdetails.json'),
+      path.join(process.cwd(), 'src', 'client', 'assets', 'itemdetails.json')
+    ];
+    
+    let data = null;
+    let usedPath = null;
+    
+    // Debug: log all paths being tried
+    console.log('Searching for itemdetails.json in these paths:');
+    for (const itemDetailsPath of possiblePaths) {
+      console.log(`  Trying: ${itemDetailsPath}`);
+      try {
+        data = await fs.readFile(itemDetailsPath, 'utf8');
+        usedPath = itemDetailsPath;
+        break;
+      } catch (err) {
+        // Try next path
+        continue;
+      }
+    }
+    
+    if (!data) {
+      console.error('Could not find itemdetails.json in any of the expected paths');
+      console.log('Current working directory:', process.cwd());
+      console.log('__dirname:', __dirname);
+      itemDetailsReady = true; // Don't block server startup
+      return;
+    }
+    
     const parsed = JSON.parse(data);
     
     if (parsed && Array.isArray(parsed.items)) {
@@ -140,7 +212,7 @@ async function loadItemDetails() {
         description: item[5]
       }));
       itemDetailsReady = true;
-      console.log(`Server loaded ${itemDetails.length} item details`);
+      console.log(`Server loaded ${itemDetails.length} item details from: ${usedPath}`);
     }
   } catch (error) {
     console.error('Failed to load server item details:', error);
@@ -686,6 +758,17 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'attack') {
       if (!playerData) return;
       
+      // Check stamina requirement (at least 10)
+      if ((playerData.stamina ?? 0) < 10) {
+        console.log(`Attack blocked for player ${playerData.username}: insufficient stamina (${playerData.stamina ?? 0}/10)`);
+        // Send stamina update to client to sync any discrepancy
+        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+        return;
+      }
+      
+      // Reduce stamina by 10
+      playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 10);
+      
       // Update direction if provided
       if (msg.direction) {
         playerData.direction = msg.direction;
@@ -693,6 +776,12 @@ wss.on('connection', (ws) => {
       
       // Start attack animation (this will handle alternating)
       startAttackAnimation(playerData, ws);
+      
+      // Update stamina in database and send to client
+      updateStatsInDb(playerData.id, { stamina: playerData.stamina })
+        .catch(err => console.error('Error updating stamina after attack:', err));
+      
+      send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
     }
 
     else if (msg.type === 'stop_attack') {
