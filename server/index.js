@@ -687,7 +687,7 @@ wss.on('connection', (ws) => {
         console.log(`Dropping item ${handsItem} to ground`);
         playerData.hands = 0;
         
-        // Place item on ground
+        // Place item on ground - always treated as placed item
         const key = `${x},${y}`;
         mapItems[key] = handsItem;
         saveItemToDatabase(x, y, handsItem);
@@ -742,27 +742,18 @@ wss.on('connection', (ws) => {
       // Handle item removal/placement
       const key = `${x},${y}`;
       
-      // Check if this was a map item (not placed item)
-      const isMapItem = (serverMapSpec && serverMapSpec.items && 
-                        serverMapSpec.items[y] && 
-                        typeof serverMapSpec.items[y][x] !== 'undefined' && 
-                        serverMapSpec.items[y][x] === itemId);
+      // NEW LOGIC: Check if this position has a placed item override
+      const hasPlacedOverride = mapItems.hasOwnProperty(key);
+      const originalMapItem = (serverMapSpec && serverMapSpec.items && 
+                              serverMapSpec.items[y] && 
+                              typeof serverMapSpec.items[y][x] !== 'undefined') 
+                              ? serverMapSpec.items[y][x] : 0;
       
-      console.log(`Is map item: ${isMapItem}, old hands: ${oldHands}`);
+      console.log(`hasPlacedOverride: ${hasPlacedOverride}, originalMapItem: ${originalMapItem}`);
       
-      if (isMapItem) {
-        // This was a map item - we need to "remove" it by placing hands item or removing override
-        if (oldHands > 0) {
-          mapItems[key] = oldHands; // Place hands item
-          saveItemToDatabase(x, y, oldHands);
-        } else {
-          // No hands item - delete the override to mark as "picked up"
-          delete mapItems[key];
-          // Save a special marker in database to indicate this map item was picked up
-          saveItemToDatabase(x, y, -1); // -1 indicates "picked up map item"
-        }
-      } else {
-        // This was a placed item
+      if (hasPlacedOverride) {
+        // This is a placed item (admin placed or dropped item)
+        console.log('Handling as placed item');
         if (oldHands > 0) {
           mapItems[key] = oldHands;
           saveItemToDatabase(x, y, oldHands);
@@ -771,20 +762,44 @@ wss.on('connection', (ws) => {
           pool.query('DELETE FROM map_items WHERE x=$1 AND y=$2', [x, y])
             .catch(err => console.error('Error removing item from database:', err));
         }
+        
+        // Broadcast the change
+        broadcast({
+          type: 'item_placed',
+          x: x,
+          y: y,
+          itemId: oldHands
+        });
+      } else {
+        // This is an original map item
+        console.log('Handling as original map item');
+        if (oldHands > 0) {
+          mapItems[key] = oldHands; // Place hands item
+          saveItemToDatabase(x, y, oldHands);
+          broadcast({
+            type: 'item_placed',
+            x: x,
+            y: y,
+            itemId: oldHands
+          });
+        } else {
+          // Mark map item as picked up with -1
+          mapItems[key] = -1;
+          saveItemToDatabase(x, y, -1);
+          broadcast({
+            type: 'item_placed',
+            x: x,
+            y: y,
+            itemId: -1
+          });
+        }
       }
       
       // Update player in database
       updateStatsInDb(playerData.id, { hands: playerData.hands })
         .catch(err => console.error('Error updating player hands:', err));
       
-      // Broadcast changes
-      broadcast({
-        type: 'item_placed',
-        x: x,
-        y: y,
-        itemId: oldHands
-      });
-      
+      // Broadcast equipment update
       broadcast({
         type: 'player_equipment_update',
         id: playerData.id,
