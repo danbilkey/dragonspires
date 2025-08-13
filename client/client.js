@@ -713,8 +713,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const itemDetails = getItemDetails(itemId);
       
+      console.log(`G key pressed: pos(${localPlayer.pos_x},${localPlayer.pos_y}), itemId=${itemId}, itemDetails=`, itemDetails);
+      console.log(`Player hands: ${localPlayer.hands}`);
+      
       // Case 1: There's a pickupable item on the ground
       if (itemDetails && isItemPickupable(itemDetails)) {
+        console.log('Sending pickup request for ground item');
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
@@ -724,12 +728,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       // Case 2: No item on ground but player has something in hands - drop it
       else if ((!itemDetails || !isItemPickupable(itemDetails)) && localPlayer.hands && localPlayer.hands > 0) {
+        console.log('Sending drop request for hands item');
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
           y: localPlayer.pos_y,
           itemId: 0 // 0 indicates dropping/no item on ground
         });
+      } else {
+        console.log('Nothing to pick up or drop');
       }
       
       return;
