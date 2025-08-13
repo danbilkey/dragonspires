@@ -102,14 +102,19 @@ function getItemDetails(itemId) {
 }
 
 function getItemAtPosition(x, y, mapSpec) {
-  // Check both map items and placed items, same logic as client
+  // Check both map items and placed items
   const mapItem = (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
     ? mapSpec.items[y][x] : 0;
   const placedItem = mapItems[`${x},${y}`];
   
-  // If there's a placed item entry (including 0), it overrides the map item
-  if (placedItem !== undefined) {
+  // If there's a placed item entry (but not -1 which means "picked up"), it overrides the map item
+  if (placedItem !== undefined && placedItem !== -1) {
     return placedItem;
+  }
+  
+  // If placedItem is -1, it means the map item was picked up, so return 0
+  if (placedItem === -1) {
+    return 0;
   }
   
   // Otherwise return the map item
@@ -230,6 +235,7 @@ async function loadItemsFromDatabase() {
     const result = await pool.query('SELECT x, y, item_id FROM map_items');
     const items = {};
     result.rows.forEach(row => {
+      // Include all entries, including -1 (picked up map items)
       items[`${row.x},${row.y}`] = row.item_id;
     });
     return items;
@@ -745,9 +751,16 @@ wss.on('connection', (ws) => {
       console.log(`Is map item: ${isMapItem}, old hands: ${oldHands}`);
       
       if (isMapItem) {
-        // This was a map item - we need to "remove" it by placing a 0 or hands item
-        mapItems[key] = oldHands; // Always set the override (0 for empty, or hands item)
-        saveItemToDatabase(x, y, oldHands);
+        // This was a map item - we need to "remove" it by placing hands item or removing override
+        if (oldHands > 0) {
+          mapItems[key] = oldHands; // Place hands item
+          saveItemToDatabase(x, y, oldHands);
+        } else {
+          // No hands item - delete the override to mark as "picked up"
+          delete mapItems[key];
+          // Save a special marker in database to indicate this map item was picked up
+          saveItemToDatabase(x, y, -1); // -1 indicates "picked up map item"
+        }
       } else {
         // This was a placed item
         if (oldHands > 0) {
