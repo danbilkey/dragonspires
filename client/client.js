@@ -758,6 +758,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- INPUT ----------
   window.addEventListener('keydown', (e) => {
+    console.log('Key pressed:', e.key, 'loggedIn:', loggedIn, 'connected:', connected, 'connectionPaused:', connectionPaused);
+    
     if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
 
     // Toggle / submit chat
@@ -785,9 +787,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Toggle inventory with 'i' key
     if (loggedIn && e.key === 'i') {
       e.preventDefault();
+      console.log('I key pressed - current inventoryOpen:', inventoryOpen);
       inventoryOpen = !inventoryOpen;
+      console.log('Toggled inventoryOpen to:', inventoryOpen);
       if (inventoryOpen) {
         selectedSlot = 1; // Reset to top-left when opening
+        console.log('Reset selectedSlot to:', selectedSlot);
       }
       return;
     }
