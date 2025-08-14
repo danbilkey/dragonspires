@@ -897,6 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
     if (chatMode) return;
 
+    // Handle login GUI clicks
     if (connected && showLoginGUI && !loggedIn) {
       const u = GUI.username, p = GUI.password, lb = GUI.loginBtn, sb = GUI.signupBtn;
       const uTop = FIELD_TOP(u.y), uBottom = uTop + u.h;
@@ -907,6 +908,82 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (mx >= lb.x && mx <= lb.x + lb.w && my >= lb.y && my <= lb.y + lb.h) { send({ type: 'login', username: usernameStr, password: passwordStr }); return; }
       else if (mx >= sb.x && mx <= sb.x + sb.w && my >= sb.y && my <= sb.y + sb.h) { send({ type: 'signup', username: usernameStr, password: passwordStr }); return; }
       activeField = null;
+      return;
+    }
+
+    // Handle movement quadrant clicks (only when logged in and playing)
+    if (connected && loggedIn && localPlayer) {
+      // Check if stamina is sufficient for movement
+      if ((localPlayer.stamina ?? 0) <= 0) return;
+      
+      // Prevent rapid clicks (same as keyboard movement)
+      const currentTime = Date.now();
+      if (currentTime - lastMoveTime < 100) return;
+
+      let dx = 0, dy = 0, newDirection = null;
+
+      // Movement quadrants
+      // Top-left quadrant (left): 617,277 to 809,406
+      if (mx >= 617 && mx <= 809 && my >= 277 && my <= 406) {
+        dx = -1; newDirection = 'left';
+      }
+      // Top-right quadrant (up): 809,277 to 1001,406  
+      else if (mx >= 809 && mx <= 1001 && my >= 277 && my <= 406) {
+        dy = -1; newDirection = 'up';
+      }
+      // Bottom-right quadrant (right): 809,406 to 1001,534
+      else if (mx >= 809 && mx <= 1001 && my >= 406 && my <= 534) {
+        dx = 1; newDirection = 'right';
+      }
+      // Bottom-left quadrant (down): 617,406 to 809,534
+      else if (mx >= 617 && mx <= 809 && my >= 406 && my <= 534) {
+        dy = 1; newDirection = 'down';
+      }
+
+      // Process movement if a valid quadrant was clicked
+      if (dx !== 0 || dy !== 0) {
+        const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
+        
+        // Use the same collision checking as keyboard movement
+        if (canMoveTo(nx, ny, localPlayer.id)) {
+          // Cancel attack animation on movement
+          if (localAttackTimeout) {
+            clearTimeout(localAttackTimeout);
+            localAttackTimeout = null;
+          }
+          isLocallyAttacking = false;
+          
+          // Update direction and animation state
+          playerDirection = newDirection;
+          movementAnimationState = (movementAnimationState + 1) % 3;
+          
+          // Update local player object immediately
+          localPlayer.direction = playerDirection;
+          localPlayer.pos_x = nx;
+          localPlayer.pos_y = ny;
+          localPlayer.isAttacking = false;
+          localPlayer.isMoving = true;
+          
+          // Update last move time
+          lastMoveTime = currentTime;
+          
+          // Send move command to server
+          send({ type: 'move', dx, dy, direction: playerDirection });
+          
+          // Reset to standing after movement
+          setTimeout(() => {
+            if (localPlayer) {
+              localPlayer.isMoving = false;
+              movementAnimationState = 0;
+            }
+          }, 200);
+        } else {
+          // Can't move but still update direction and animation for visual feedback
+          playerDirection = newDirection;
+          movementAnimationState = (movementAnimationState + 1) % 3;
+          lastMoveTime = currentTime;
+        }
+      }
     }
   });
 
