@@ -543,13 +543,93 @@ async function initializeDatabase() {
       )
     `);
 
-    console.log('Database animation columns and map_items table initialized');
+    // Create player_inventory table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS player_inventory (
+        player_id INTEGER REFERENCES players(id) ON DELETE CASCADE,
+        slot_number INTEGER CHECK (slot_number >= 1 AND slot_number <= 16),
+        item_id INTEGER DEFAULT 0,
+        PRIMARY KEY (player_id, slot_number)
+      )
+    `);
+
+    console.log('Database animation columns, map_items and player_inventory tables initialized');
+    
+    // Populate inventory for existing players
+    await populateExistingPlayerInventories();
     
     // Load existing items
     mapItems = await loadItemsFromDatabase();
     console.log(`Loaded ${Object.keys(mapItems).length} items from database`);
   } catch (error) {
     console.error('Error initializing database:', error);
+  }
+}
+
+// Populate inventory slots for existing players who don't have inventory records
+async function populateExistingPlayerInventories() {
+  try {
+    // Get all players
+    const playersResult = await pool.query('SELECT id FROM players');
+    
+    for (const player of playersResult.rows) {
+      // Check if player already has inventory
+      const inventoryResult = await pool.query(
+        'SELECT COUNT(*) FROM player_inventory WHERE player_id = $1',
+        [player.id]
+      );
+      
+      const inventoryCount = parseInt(inventoryResult.rows[0].count);
+      
+      // If player has no inventory slots, create all 16
+      if (inventoryCount === 0) {
+        const insertPromises = [];
+        for (let slot = 1; slot <= 16; slot++) {
+          insertPromises.push(
+            pool.query(
+              'INSERT INTO player_inventory (player_id, slot_number, item_id) VALUES ($1, $2, 0)',
+              [player.id, slot]
+            )
+          );
+        }
+        await Promise.all(insertPromises);
+        console.log(`Created inventory for player ${player.id}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error populating existing player inventories:', error);
+  }
+}
+
+// Load player inventory from database
+async function loadPlayerInventory(playerId) {
+  try {
+    const result = await pool.query(
+      'SELECT slot_number, item_id FROM player_inventory WHERE player_id = $1 ORDER BY slot_number',
+      [playerId]
+    );
+    
+    const inventory = {};
+    result.rows.forEach(row => {
+      inventory[row.slot_number] = row.item_id;
+    });
+    
+    return inventory;
+  } catch (error) {
+    console.error('Error loading player inventory:', error);
+    return {};
+  }
+}
+
+// Update player inventory slot in database
+async function updatePlayerInventorySlot(playerId, slotNumber, itemId) {
+  try {
+    await pool.query(
+      'UPDATE player_inventory SET item_id = $1 WHERE player_id = $2 AND slot_number = $3',
+      [itemId, playerId, slotNumber]
+    );
+  } catch (error) {
+    console.error('Error updating player inventory slot:', error);
   }
 }
 
@@ -581,6 +661,9 @@ wss.on('connection', (ws) => {
           try { prev.close(); } catch {}
         }
 
+        // Load player inventory
+        const inventory = await loadPlayerInventory(found.id);
+
         playerData = {
           id: found.id,
           username: found.username,
@@ -602,7 +685,8 @@ wss.on('connection', (ws) => {
           isAttacking: found.is_attacking ?? false,
           animationFrame: found.animation_frame ?? DIRECTION_IDLE.down,
           movementSequenceIndex: found.movement_sequence_index ?? 0,
-          role: found.role ?? 'player'
+          role: found.role ?? 'player',
+          inventory: inventory
         };
 
         clients.set(ws, playerData);
@@ -623,6 +707,21 @@ wss.on('connection', (ws) => {
         if (existing) return send(ws, { type: 'signup_error', message: 'Username taken' });
 
         const created = await createPlayer(msg.username, msg.password);
+
+        // Create inventory for new player
+        const insertPromises = [];
+        for (let slot = 1; slot <= 16; slot++) {
+          insertPromises.push(
+            pool.query(
+              'INSERT INTO player_inventory (player_id, slot_number, item_id) VALUES ($1, $2, 0)',
+              [created.id, slot]
+            )
+          );
+        }
+        await Promise.all(insertPromises);
+
+        // Load the newly created inventory
+        const inventory = await loadPlayerInventory(created.id);
 
         const prev = usernameToWs.get(created.username);
         if (prev && prev !== ws) {
@@ -651,7 +750,8 @@ wss.on('connection', (ws) => {
           isAttacking: created.is_attacking ?? false,
           animationFrame: created.animation_frame ?? DIRECTION_IDLE.down,
           movementSequenceIndex: created.movement_sequence_index ?? 0,
-          role: created.role ?? 'player'
+          role: created.role ?? 'player',
+          inventory: inventory
         };
 
         clients.set(ws, playerData);
@@ -994,7 +1094,48 @@ wss.on('connection', (ws) => {
       });
     }
 
-    else if (msg.type === 'chat') {
+    else if (msg.type === 'inventory_swap') {
+      if (!playerData) return;
+      
+      const { slotNumber } = msg;
+      
+      // Validate slot number
+      if (!slotNumber || slotNumber < 1 || slotNumber > 16) {
+        console.log(`Invalid slot number for inventory swap: ${slotNumber}`);
+        return;
+      }
+      
+      // Get current inventory item and hands item
+      const inventoryItem = playerData.inventory[slotNumber] || 0;
+      const handsItem = playerData.hands || 0;
+      
+      console.log(`Inventory swap: slot ${slotNumber} (${inventoryItem}) <-> hands (${handsItem})`);
+      
+      // Perform the swap
+      playerData.inventory[slotNumber] = handsItem;
+      playerData.hands = inventoryItem;
+      
+      // Update database
+      Promise.allSettled([
+        updatePlayerInventorySlot(playerData.id, slotNumber, handsItem),
+        updateStatsInDb(playerData.id, { hands: playerData.hands })
+      ]).catch(err => console.error('Error updating inventory swap in database:', err));
+      
+      // Send updated inventory and hands to client
+      send(ws, {
+        type: 'inventory_update',
+        inventory: playerData.inventory,
+        hands: playerData.hands
+      });
+      
+      // Also send equipment update for hands display
+      broadcast({
+        type: 'player_equipment_update',
+        id: playerData.id,
+        hands: playerData.hands
+      });
+    }
+      else if (msg.type === 'chat') {
       if (!playerData || typeof msg.text !== 'string') return;
       const t = msg.text.trim();
       if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
