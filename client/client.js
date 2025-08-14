@@ -1,6 +1,8 @@
 function drawInventory() {
     if (!inventoryOpen || !localPlayer) return;
     
+    console.log('Drawing inventory - open:', inventoryOpen, 'localPlayer:', !!localPlayer);
+    
     // Draw semi-transparent blue rectangle with black border
     const invX = 237, invY = 25, invW = 250, invH = 150;
     
@@ -12,6 +14,8 @@ function drawInventory() {
     ctx.strokeStyle = 'black';
     ctx.lineWidth = 2;
     ctx.strokeRect(invX, invY, invW, invH);
+    
+    console.log('Drew inventory background and border');
     
     // Draw inventory slots (4x4 grid, each slot 62x38)
     const slotWidth = 62, slotHeight = 38;
@@ -47,6 +51,8 @@ function drawInventory() {
         }
       }
     }
+    
+    console.log('Finished drawing inventory slots');
   }
 
   function drawInventoryItem(itemId, slotX, slotY, slotWidth, slotHeight) {
