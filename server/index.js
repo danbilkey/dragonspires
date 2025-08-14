@@ -758,6 +758,8 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'attack') {
       if (!playerData) return;
       
+      console.log(`Attack attempt by ${playerData.username}: stamina ${playerData.stamina ?? 0}/10`);
+      
       // Check stamina requirement (at least 10)
       if ((playerData.stamina ?? 0) < 10) {
         console.log(`Attack blocked for player ${playerData.username}: insufficient stamina (${playerData.stamina ?? 0}/10)`);
@@ -767,7 +769,9 @@ wss.on('connection', (ws) => {
       }
       
       // Reduce stamina by 10
-      playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 10);
+      const oldStamina = playerData.stamina ?? 0;
+      playerData.stamina = Math.max(0, oldStamina - 10);
+      console.log(`Attack stamina: ${oldStamina} -> ${playerData.stamina}`);
       
       // Update direction if provided
       if (msg.direction) {
@@ -779,9 +783,13 @@ wss.on('connection', (ws) => {
       
       // Update stamina in database and send to client
       updateStatsInDb(playerData.id, { stamina: playerData.stamina })
+        .then(() => {
+          console.log(`Stamina updated in database for ${playerData.username}: ${playerData.stamina}`);
+        })
         .catch(err => console.error('Error updating stamina after attack:', err));
       
       send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+      console.log(`Sent stamina update to client: ${playerData.stamina}`);
     }
 
     else if (msg.type === 'stop_attack') {
