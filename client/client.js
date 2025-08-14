@@ -922,21 +922,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let dx = 0, dy = 0, newDirection = null;
 
-      // Movement quadrants
-      // Top-left quadrant (left): 617,277 to 809,406
-      if (mx >= 617 && mx <= 809 && my >= 277 && my <= 406) {
+      // Game area: 232,20 to 621,276 (width=389, height=256)
+      // Center point: x=426.5, y=148
+      
+      // Movement quadrants within the game area:
+      // Top-left quadrant (left): 232,20 to 426,148
+      if (mx >= 232 && mx <= 426 && my >= 20 && my <= 148) {
         dx = -1; newDirection = 'left';
       }
-      // Top-right quadrant (up): 809,277 to 1001,406  
-      else if (mx >= 809 && mx <= 1001 && my >= 277 && my <= 406) {
+      // Top-right quadrant (up): 426,20 to 621,148
+      else if (mx >= 426 && mx <= 621 && my >= 20 && my <= 148) {
         dy = -1; newDirection = 'up';
       }
-      // Bottom-right quadrant (right): 809,406 to 1001,534
-      else if (mx >= 809 && mx <= 1001 && my >= 406 && my <= 534) {
+      // Bottom-right quadrant (right): 426,148 to 621,276
+      else if (mx >= 426 && mx <= 621 && my >= 148 && my <= 276) {
         dx = 1; newDirection = 'right';
       }
-      // Bottom-left quadrant (down): 617,406 to 809,534
-      else if (mx >= 617 && mx <= 809 && my >= 406 && my <= 534) {
+      // Bottom-left quadrant (down): 232,148 to 426,276
+      else if (mx >= 232 && mx <= 426 && my >= 148 && my <= 276) {
         dy = 1; newDirection = 'down';
       }
 
