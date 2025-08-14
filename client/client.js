@@ -1,5 +1,15 @@
 function drawInventory() {
-    if (!inventoryOpen || !localPlayer) return;
+    console.log('drawInventory called - inventoryOpen:', inventoryOpen, 'localPlayer:', !!localPlayer);
+    
+    if (!inventoryOpen) {
+      console.log('Inventory not open, returning early');
+      return;
+    }
+    
+    if (!localPlayer) {
+      console.log('No local player, returning early');
+      return;
+    }
     
     console.log('Drawing inventory - open:', inventoryOpen, 'localPlayer:', !!localPlayer);
     
