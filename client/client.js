@@ -1438,9 +1438,6 @@ document.addEventListener('DOMContentLoaded', () => {
     drawChatHistory();
     drawChatInput();
 
-    // Draw inventory on top of everything
-    drawInventory();
-
     if (localPlayer && itemDetailsReady) {
       const playerItemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const playerItemDetails = getItemDetails(playerItemId);
