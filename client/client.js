@@ -1397,6 +1397,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawGame() {
+    // Debug logging
+    if (inventoryOpen) {
+      console.log('drawGame() called - inventoryOpen:', inventoryOpen, 'localPlayer:', !!localPlayer);
+    }
+    
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
@@ -1477,7 +1482,13 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (connected && connectionPaused) drawConnecting();
     else if (connected && !showLoginGUI) drawConnecting();
     else if (connected && showLoginGUI && !loggedIn) drawLogin();
-    else if (connected && loggedIn) drawGame();
+    else if (connected && loggedIn) {
+      drawGame();
+      // Debug: log when drawGame is called
+      if (inventoryOpen) {
+        console.log('drawGame called with inventoryOpen:', inventoryOpen);
+      }
+    }
     requestAnimationFrame(loop);
   }
   loop();
