@@ -1086,23 +1086,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const meta = window.getItemMeta(itemId);
     if (!meta || !meta.img || !meta.img.complete) return;
 
-    const { img, w, h } = meta;
-    
-    // Apply dynamic offset for items smaller than tile dimensions
-    let drawX = x;
-    let drawY = y;
-    
-    if (w < 62) {
-      const offsetX = w - 62; // This will be negative (e.g., 40 - 62 = -22)
-      drawX += offsetX;
-    }
-    
-    if (h < 32) {
-      const offsetY = h - 32; // This will be negative (e.g., 20 - 32 = -12)
-      drawY += offsetY;
-    }
-
-    ctx.drawImage(img, drawX, drawY);
+    // Draw item on top of border at specified position
+    ctx.drawImage(meta.img, x, y);
   }
 
   // ---------- SCENES ----------
