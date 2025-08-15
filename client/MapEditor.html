@@ -42,6 +42,7 @@
         <p>1 - Switch to Floor Tile mode | 2 - Switch to Item mode</p>
         <p>R - Increase selected tile/item | E - Decrease selected tile/item</p>
         <p>Space - Place selected tile/item at current position</p>
+        <p>G - Pick up (copy) the floor tile or item at current position</p>
         <p>P - Save map as newmap.json</p>
     </div>
 
@@ -457,6 +458,14 @@
                 }
             }
 
+            function drawCoordinates() {
+                const { x1, y2 } = CHAT;
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#000';
+                ctx.textAlign = 'left';
+                ctx.fillText(`Position: (${playerX}, ${playerY})`, x1 + 8, y2 + 25);
+            }
+
             // ---------- INPUT ----------
             window.addEventListener('keydown', (e) => {
                 const k = e.key.toLowerCase();
@@ -530,6 +539,23 @@
                     e.preventDefault();
                 }
                 
+                // Pick up (copy existing tile/item to current selection)
+                else if (k === 'g') {
+                    if (!mapReady) return;
+                    
+                    if (editMode === 'floor') {
+                        const currentTile = (mapSpec.tiles && mapSpec.tiles[playerY] && typeof mapSpec.tiles[playerY][playerX] !== 'undefined') ? mapSpec.tiles[playerY][playerX] : 6;
+                        selectedFloorTile = Math.max(1, Math.min(MAX_FLOOR_TILES, currentTile));
+                        pushChat(`Picked up floor tile ${selectedFloorTile} from (${playerX}, ${playerY})`);
+                    } else {
+                        const currentItem = (mapSpec.items && mapSpec.items[playerY] && typeof mapSpec.items[playerY][playerX] !== 'undefined') ? mapSpec.items[playerY][playerX] : 0;
+                        selectedItem = Math.max(0, Math.min(MAX_ITEMS, currentItem));
+                        pushChat(`Picked up item ${selectedItem} from (${playerX}, ${playerY})`);
+                    }
+                    updateStatusMessage();
+                    e.preventDefault();
+                }
+                
                 // Save
                 else if (k === 'p') {
                     saveMap();
@@ -579,6 +605,9 @@
 
                 // Draw chat
                 drawChatHistory();
+                
+                // Draw coordinates
+                drawCoordinates();
                 
                 requestAnimationFrame(render);
             }
