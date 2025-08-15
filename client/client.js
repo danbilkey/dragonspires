@@ -1307,7 +1307,7 @@ function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
   
   // Position item so bottom-right of image aligns with bottom-right of slot at 62x32
   let drawX = (slotX + 62) - w;
-  let drawY = (slotY + 32) - h - 6; // tile_bottom - 6
+  let drawY = (slotY + 32) - h; // tile_bottom
   
   // Apply offsets for smaller items
   if (w < 62) {
