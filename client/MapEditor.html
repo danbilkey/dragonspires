@@ -275,11 +275,25 @@
                             items: m.items ? JSON.parse(JSON.stringify(m.items)) : []
                         };
                         
-                        // Ensure tiles array is properly initialized
+                        // Ensure tiles array is properly initialized with default tile 6
                         if (!mapSpec.tiles || mapSpec.tiles.length === 0) {
                             mapSpec.tiles = [];
                             for (let y = 0; y < mapSpec.height; y++) {
                                 mapSpec.tiles[y] = new Array(mapSpec.width).fill(6);
+                            }
+                        } else {
+                            // Fill any missing rows with default tile 6
+                            for (let y = 0; y < mapSpec.height; y++) {
+                                if (!mapSpec.tiles[y]) {
+                                    mapSpec.tiles[y] = new Array(mapSpec.width).fill(6);
+                                } else {
+                                    // Fill any missing columns with default tile 6
+                                    for (let x = 0; x < mapSpec.width; x++) {
+                                        if (typeof mapSpec.tiles[y][x] === 'undefined') {
+                                            mapSpec.tiles[y][x] = 6;
+                                        }
+                                    }
+                                }
                             }
                         }
                         
@@ -296,7 +310,7 @@
                 })
                 .catch((e) => {
                     console.error('Failed to load map:', e);
-                    // Create default map
+                    // Create default map with tile 6
                     mapSpec.tiles = [];
                     mapSpec.items = [];
                     for (let y = 0; y < mapSpec.height; y++) {
@@ -463,7 +477,7 @@
                 ctx.font = '14px sans-serif';
                 ctx.fillStyle = '#000';
                 ctx.textAlign = 'left';
-                ctx.fillText(`Position: (${playerX}, ${playerY})`, x1 + 8, y2 + 25);
+                ctx.fillText(`Position: (${playerX}, ${playerY})`, x1 + 8, y2 + 20);
             }
 
             // ---------- INPUT ----------
@@ -547,12 +561,13 @@
                         const currentTile = (mapSpec.tiles && mapSpec.tiles[playerY] && typeof mapSpec.tiles[playerY][playerX] !== 'undefined') ? mapSpec.tiles[playerY][playerX] : 6;
                         selectedFloorTile = Math.max(1, Math.min(MAX_FLOOR_TILES, currentTile));
                         pushChat(`Picked up floor tile ${selectedFloorTile} from (${playerX}, ${playerY})`);
+                        updateStatusMessage();
                     } else {
                         const currentItem = (mapSpec.items && mapSpec.items[playerY] && typeof mapSpec.items[playerY][playerX] !== 'undefined') ? mapSpec.items[playerY][playerX] : 0;
                         selectedItem = Math.max(0, Math.min(MAX_ITEMS, currentItem));
                         pushChat(`Picked up item ${selectedItem} from (${playerX}, ${playerY})`);
+                        updateStatusMessage();
                     }
-                    updateStatusMessage();
                     e.preventDefault();
                 }
                 
