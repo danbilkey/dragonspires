@@ -43,22 +43,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
   const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200, extraY: 2 };
 
-  // Inventory configuration
-  const INVENTORY = {
-    x: 241,
-    y: 28,
-    width: 250,
-    height: 150,
-    backgroundColor: 'rgb(0, 133, 182)',
-    borderColor: 'black',
-    slotWidth: 62,
-    slotHeight: 38,
-    cols: 4,
-    rows: 4,
-    selectionCircleColor: 'yellow',
-    selectionCircleDiameter: 32
-  };
-
   // Animation constants
   const ANIMATION_NAMES = [
     'down_walk_1', 'down', 'down_walk_2', 'down_attack_1', 'down_attack_2',
@@ -135,11 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Animation state - SIMPLIFIED ATTACK HANDLING
   let localAttackTimeout = null; // Track our own attack timeout
 
-  // Inventory state
-  let inventoryVisible = false;
-  let inventorySelectedSlot = 1; // Default to slot 1
-  let playerInventory = {}; // { slotNumber: itemId }
-// ---------- COLLISION HELPERS ----------
+  // ---------- COLLISION HELPERS ----------
   function hasFloorCollision(x, y) {
     if (!floorCollisionReady || !floorCollision || 
         x < 0 || y < 0 || x >= mapSpec.width || y >= mapSpec.height) {
@@ -205,49 +185,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     return true;
-  }
-
-  // ---------- INVENTORY HELPERS ----------
-  function getInventorySlotPosition(slotNumber) {
-    // Convert slot number (1-16) to row/col (0-based)
-    const index = slotNumber - 1;
-    const col = index % INVENTORY.cols;
-    const row = Math.floor(index / INVENTORY.cols);
-    
-    // Calculate position within inventory
-    const x = INVENTORY.x + col * INVENTORY.slotWidth;
-    const y = INVENTORY.y + row * INVENTORY.slotHeight;
-    
-    return { x, y };
-  }
-
-  function moveInventorySelection(direction) {
-    if (!inventoryVisible) return;
-    
-    const currentIndex = inventorySelectedSlot - 1; // Convert to 0-based
-    const currentRow = Math.floor(currentIndex / INVENTORY.cols);
-    const currentCol = currentIndex % INVENTORY.cols;
-    
-    let newRow = currentRow;
-    let newCol = currentCol;
-    
-    switch (direction) {
-      case 'up':
-        newRow = currentRow === 0 ? INVENTORY.rows - 1 : currentRow - 1;
-        break;
-      case 'down':
-        newRow = currentRow === INVENTORY.rows - 1 ? 0 : currentRow + 1;
-        break;
-      case 'left':
-        newCol = currentCol === 0 ? INVENTORY.cols - 1 : currentCol - 1;
-        break;
-      case 'right':
-        newCol = currentCol === INVENTORY.cols - 1 ? 0 : currentCol + 1;
-        break;
-    }
-    
-    // Convert back to slot number (1-based)
-    inventorySelectedSlot = (newRow * INVENTORY.cols) + newCol + 1;
   }
 
   // ---------- ASSETS ----------
@@ -507,7 +444,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
   }
-// ---------- WS ----------
+
+  // ---------- WS ----------
   function connectToServer() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     
@@ -539,8 +477,6 @@ document.addEventListener('DOMContentLoaded', () => {
       localPlayer = null;
       otherPlayers = {};
       mapItems = {};
-      playerInventory = {};
-      inventoryVisible = false;
       // Clear any pending attack timeout
       if (localAttackTimeout) {
         clearTimeout(localAttackTimeout);
@@ -601,10 +537,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (msg.items) {
           mapItems = { ...msg.items };
-        }
-
-        if (msg.inventory) {
-          playerInventory = { ...msg.inventory };
         }
 
         pushChat("Welcome to DragonSpires!");
@@ -691,12 +623,6 @@ document.addEventListener('DOMContentLoaded', () => {
           delete mapItems[key];
         } else {
           mapItems[key] = msg.itemId;
-        }
-        break;
-
-      case 'inventory_update':
-        if (msg.inventory) {
-          playerInventory = { ...msg.inventory };
         }
         break;
 
@@ -789,47 +715,8 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Toggle inventory with 'i' key
-    if (loggedIn && localPlayer && e.key === 'i') {
-      e.preventDefault();
-      inventoryVisible = !inventoryVisible;
-      return;
-    }
-
-    // Inventory swap with 'c' key
-    if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
-      e.preventDefault();
-      send({
-        type: 'inventory_swap',
-        slotNumber: inventorySelectedSlot
-      });
-      return;
-    }
-
-    // Inventory navigation when inventory is visible
-    if (loggedIn && localPlayer && inventoryVisible) {
-      const k = e.key.toLowerCase();
-      if (k === 'w' || k === 'arrowup') {
-        e.preventDefault();
-        moveInventorySelection('up');
-        return;
-      } else if (k === 's' || k === 'arrowdown') {
-        e.preventDefault();
-        moveInventorySelection('down');
-        return;
-      } else if (k === 'a' || k === 'arrowleft') {
-        e.preventDefault();
-        moveInventorySelection('left');
-        return;
-      } else if (k === 'd' || k === 'arrowright') {
-        e.preventDefault();
-        moveInventorySelection('right');
-        return;
-      }
-    }
-
     // Look command with 'l' key
-    if (loggedIn && localPlayer && e.key === 'l' && !inventoryVisible) {
+    if (loggedIn && localPlayer && e.key === 'l') {
       e.preventDefault();
       
       let lookX = localPlayer.pos_x;
@@ -859,7 +746,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Pick up item with 'g' key
-    if (loggedIn && localPlayer && e.key === 'g' && !inventoryVisible) {
+    if (loggedIn && localPlayer && e.key === 'g') {
       e.preventDefault();
       
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
@@ -892,21 +779,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Equip weapon with 't' key
-    if (loggedIn && localPlayer && e.key === 't' && !inventoryVisible) {
+    if (loggedIn && localPlayer && e.key === 't') {
       e.preventDefault();
       send({ type: 'equip_weapon' });
       return;
     }
 
     // Equip armor with 'y' key
-    if (loggedIn && localPlayer && e.key === 'y' && !inventoryVisible) {
+    if (loggedIn && localPlayer && e.key === 'y') {
       e.preventDefault();
       send({ type: 'equip_armor' });
       return;
     }
 
     // Rotation with '0' key
-    if (loggedIn && localPlayer && e.key === '0' && !inventoryVisible) {
+    if (loggedIn && localPlayer && e.key === '0') {
       e.preventDefault();
       
       if (localAttackTimeout) {
@@ -931,7 +818,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Attack input
-    if (loggedIn && localPlayer && e.key === 'Tab' && !inventoryVisible) {
+    if (loggedIn && localPlayer && e.key === 'Tab') {
       e.preventDefault();
       
       // Check stamina requirement (at least 10)
@@ -960,8 +847,8 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Movement (only if inventory is not visible)
-    if (loggedIn && localPlayer && !inventoryVisible) {
+    // Movement
+    if (loggedIn && localPlayer) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       
       const currentTime = Date.now();
@@ -1034,8 +921,8 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Handle movement quadrant clicks (only when logged in and playing and inventory not visible)
-    if (connected && loggedIn && localPlayer && !inventoryVisible) {
+    // Handle movement quadrant clicks (only when logged in and playing)
+    if (connected && loggedIn && localPlayer) {
       // Check if stamina is sufficient for movement
       if ((localPlayer.stamina ?? 0) <= 0) return;
       
@@ -1111,33 +998,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     }
-  });.down,
-              movementSequenceIndex: msg.movementSequenceIndex || 0
-            };
-          } else { 
-            otherPlayers[msg.id].pos_x = msg.x; 
-            otherPlayers[msg.id].pos_y = msg.y;
-            otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
-            otherPlayers[msg.id].isMoving = msg.isMoving || false;
-            otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
-            otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
-          }
-        }
-        break;
-        
-      case 'animation_update':
-        if (localPlayer && msg.id === localPlayer.id) {
-          localPlayer.direction = msg.direction || localPlayer.direction;
-          localPlayer.isMoving = msg.isMoving || false;
-          localPlayer.isAttacking = msg.isAttacking || false;
-          localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
-          localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
-        } else if (otherPlayers[msg.id]) {
-          otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
-          otherPlayers[msg.id].isMoving = msg.isMoving || false;
-          otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
-          otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
-// ---------- RENDER HELPERS ----------
+  });
+
+  // ---------- RENDER HELPERS ----------
   function isoBase(x, y) { return { x: (x - y) * (TILE_W/2), y: (x + y) * (TILE_H/2) }; }
   function isoScreen(x, y) {
     const base = isoBase(x, y);
@@ -1188,20 +1051,6 @@ document.addEventListener('DOMContentLoaded', () => {
       drawY += offsetY;
     }
 
-    ctx.drawImage(img, drawX, drawY);
-  }
-
-  function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
-    if (!window.getItemMeta || !window.itemsReady() || !itemId || itemId === 0) return;
-    const meta = window.getItemMeta(itemId);
-    if (!meta || !meta.img || !meta.img.complete) return;
-
-    const { img, w, h } = meta;
-    
-    // Position item so bottom-right of image aligns with bottom-right of slot
-    const drawX = (slotX + slotW) - w;
-    const drawY = (slotY + slotH) - h;
-    
     ctx.drawImage(img, drawX, drawY);
   }
 
@@ -1329,44 +1178,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Draw item on top of border at specified position
     ctx.drawImage(meta.img, x, y);
-  }
-
-  function drawInventory() {
-    if (!inventoryVisible) return;
-    
-    // Draw inventory background
-    ctx.fillStyle = INVENTORY.backgroundColor;
-    ctx.fillRect(INVENTORY.x, INVENTORY.y, INVENTORY.width, INVENTORY.height);
-    
-    // Draw inventory border
-    ctx.strokeStyle = INVENTORY.borderColor;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(INVENTORY.x, INVENTORY.y, INVENTORY.width, INVENTORY.height);
-    
-    // Draw inventory slots and items
-    for (let slot = 1; slot <= 16; slot++) {
-      const slotPos = getInventorySlotPosition(slot);
-      
-      // Draw item in slot if it exists
-      const itemId = playerInventory[slot] || 0;
-      if (itemId > 0) {
-        drawItemInInventorySlot(itemId, slotPos.x, slotPos.y, INVENTORY.slotWidth, INVENTORY.slotHeight);
-      }
-      
-      // Draw selection circle if this slot is selected
-      if (slot === inventorySelectedSlot) {
-        const centerX = slotPos.x + INVENTORY.slotWidth / 2;
-        const centerY = slotPos.y + INVENTORY.slotHeight / 2;
-        const radius = INVENTORY.selectionCircleDiameter / 2;
-        
-        ctx.strokeStyle = INVENTORY.selectionCircleColor;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.lineWidth = 1;
-      }
-    }
   }
 
   // ---------- SCENES ----------
@@ -1498,9 +1309,6 @@ document.addEventListener('DOMContentLoaded', () => {
         drawItemOnBorder(localPlayer.hands, 73, 296);
       }
     }
-
-    // Draw inventory last (on top of everything)
-    drawInventory();
   }
 
   // ---------- LOOP ----------
