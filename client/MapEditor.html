@@ -44,6 +44,7 @@
         <p>Space - Place selected tile/item at current position</p>
         <p>G - Pick up (copy) the floor tile or item at current position</p>
         <p>P - Save map as newmap.json</p>
+        <p>I - Import/Load a JSON map file</p>
     </div>
 
     <canvas id="gameCanvas"></canvas>
@@ -264,8 +265,13 @@
             })();
 
             // Load initial map
-            fetch('/client/map1.json')
-                .then(r => r.json())
+            fetch('./map1.json')
+                .then(r => {
+                    if (!r.ok) {
+                        throw new Error(`HTTP ${r.status}`);
+                    }
+                    return r.json();
+                })
                 .then(m => {
                     if (m && m.width && m.height) {
                         mapSpec = {
@@ -574,6 +580,12 @@
                 // Save
                 else if (k === 'p') {
                     saveMap();
+                    e.preventDefault();
+                }
+                
+                // Import/Load map file
+                else if (k === 'i') {
+                    loadMapFile();
                     e.preventDefault();
                 }
             });
