@@ -1,94 +1,4 @@
-function drawInventory() {
-    console.log('drawInventory called - inventoryOpen:', inventoryOpen, 'localPlayer:', !!localPlayer);
-    
-    if (!inventoryOpen) {
-      console.log('Inventory not open, returning early');
-      return;
-    }
-    
-    if (!localPlayer) {
-      console.log('No local player, returning early');
-      return;
-    }
-    
-    console.log('Drawing inventory - open:', inventoryOpen, 'localPlayer:', !!localPlayer);
-    
-    // Draw semi-transparent blue rectangle with black border
-    const invX = 237, invY = 25, invW = 250, invH = 150;
-    
-    // Semi-transparent blue background (RGB 0,133,182 with 50% opacity)
-    ctx.fillStyle = 'rgba(0, 133, 182, 0.5)';
-    ctx.fillRect(invX, invY, invW, invH);
-    
-    // Opaque black border
-    ctx.strokeStyle = 'black';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(invX, invY, invW, invH);
-    
-    console.log('Drew inventory background and border');
-    
-    // Draw inventory slots (4x4 grid, each slot 62x38)
-    const slotWidth = 62, slotHeight = 38;
-    const startX = invX + 5, startY = invY + 5; // Small padding from inventory border
-    
-    for (let row = 0; row < 4; row++) {
-      for (let col = 0; col < 4; col++) {
-        const slotNumber = (row * 4) + col + 1; // 1-16
-        const slotX = startX + (col * slotWidth);
-        const slotY = startY + (row * slotHeight);
-        
-        // Draw slot border (subtle)
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(slotX, slotY, slotWidth, slotHeight);
-        
-        // Draw item if slot has one
-        const itemId = playerInventory[slotNumber] || 0;
-        if (itemId > 0) {
-          drawInventoryItem(itemId, slotX, slotY, slotWidth, slotHeight);
-        }
-        
-        // Draw selection circle if this slot is selected
-        if (slotNumber === selectedSlot) {
-          const centerX = slotX + slotWidth / 2;
-          const centerY = slotY + slotHeight / 2;
-          
-          ctx.strokeStyle = 'yellow';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, 19, 0, Math.PI * 2); // 38px diameter = 19px radius
-          ctx.stroke();
-        }
-      }
-    }
-    
-    console.log('Finished drawing inventory slots');
-  }
-
-  function drawInventoryItem(itemId, slotX, slotY, slotWidth, slotHeight) {
-    if (!window.getItemMeta || !window.itemsReady()) return;
-    const meta = window.getItemMeta(itemId);
-    if (!meta || !meta.img || !meta.img.complete) return;
-
-    const { img, w, h } = meta;
-    
-    // Position item so bottom-right of image aligns with bottom-right of slot
-    let drawX = slotX + slotWidth - w;
-    let drawY = slotY + slotHeight - h;
-    
-    // Apply offset for smaller items (same as tile items)
-    if (w < slotWidth) {
-      const offsetX = w - slotWidth; // This will be negative
-      drawX += offsetX;
-    }
-    
-    if (h < slotHeight) {
-      const offsetY = h - slotHeight; // This will be negative  
-      drawY += offsetY;
-    }
-
-    ctx.drawImage(img, drawX, drawY);
-  }// client.js - Browser-side game client
+// client.js - Browser-side game client
 document.addEventListener('DOMContentLoaded', () => {
   // ---------- CONFIG ----------
   const PROD_WS = "wss://dragonspires.onrender.com";
@@ -194,11 +104,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Players
   let localPlayer = null;
   let otherPlayers = {};
-
-  // Inventory system
-  let inventoryOpen = false;
-  let selectedSlot = 1; // 1-16, starts at top-left
-  let playerInventory = {}; // { slotNumber: itemId }
 
   // NEW: Simplified direction and animation state system
   let playerDirection = 'down'; // Current facing direction
@@ -608,9 +513,6 @@ document.addEventListener('DOMContentLoaded', () => {
           hands: msg.player.hands || 0
         };
         
-        // Load player inventory
-        playerInventory = { ...msg.player.inventory } || {};
-        
         // Initialize local state variables
         playerDirection = localPlayer.direction;
         movementAnimationState = 0;
@@ -724,15 +626,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         break;
         
-      case 'inventory_update':
-        if (msg.inventory) {
-          playerInventory = { ...msg.inventory };
-        }
-        if ('hands' in msg) {
-          localPlayer.hands = msg.hands;
-        }
-        break;
-        
       case 'player_left':
         const p = otherPlayers[msg.id];
         const name = p?.username ?? msg.id;
@@ -768,8 +661,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- INPUT ----------
   window.addEventListener('keydown', (e) => {
-    console.log('Key pressed:', e.key, 'loggedIn:', loggedIn, 'connected:', connected, 'connectionPaused:', connectionPaused);
-    
     if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
 
     // Toggle / submit chat
@@ -791,77 +682,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (chatMode) {
       if (e.key === 'Backspace') { typingBuffer = typingBuffer.slice(0, -1); e.preventDefault(); }
       else if (e.key.length === 1 && typingBuffer.length < CHAT_INPUT.maxLen) typingBuffer += e.key;
-      return;
-    }
-
-    // Toggle inventory with 'i' key
-    if (loggedIn && e.key === 'i') {
-      e.preventDefault();
-      console.log('I key pressed - current inventoryOpen:', inventoryOpen);
-      inventoryOpen = !inventoryOpen;
-      console.log('Toggled inventoryOpen to:', inventoryOpen);
-      if (inventoryOpen) {
-        selectedSlot = 1; // Reset to top-left when opening
-        console.log('Reset selectedSlot to:', selectedSlot);
-      }
-      return;
-    }
-
-    // Inventory controls when inventory is open
-    if (loggedIn && inventoryOpen) {
-      // WASD navigation in inventory (with wrapping)
-      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        // Move up (wrap to bottom if at top)
-        if (selectedSlot <= 4) {
-          selectedSlot += 12; // Go to bottom row
-        } else {
-          selectedSlot -= 4; // Go up one row
-        }
-        return;
-      }
-      if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') {
-        e.preventDefault();
-        // Move down (wrap to top if at bottom)
-        if (selectedSlot > 12) {
-          selectedSlot -= 12; // Go to top row
-        } else {
-          selectedSlot += 4; // Go down one row
-        }
-        return;
-      }
-      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
-        e.preventDefault();
-        // Move left (wrap to right if at left edge)
-        if ((selectedSlot - 1) % 4 === 0) {
-          selectedSlot += 3; // Go to right edge of same row
-        } else {
-          selectedSlot -= 1; // Go left one column
-        }
-        return;
-      }
-      if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
-        e.preventDefault();
-        // Move right (wrap to left if at right edge)
-        if (selectedSlot % 4 === 0) {
-          selectedSlot -= 3; // Go to left edge of same row
-        } else {
-          selectedSlot += 1; // Go right one column
-        }
-        return;
-      }
-      
-      // Inventory swap with 'c' key
-      if (e.key === 'c' || e.key === 'C') {
-        e.preventDefault();
-        send({
-          type: 'inventory_swap',
-          slotNumber: selectedSlot
-        });
-        return;
-      }
-      
-      // All other controls disabled when inventory is open
       return;
     }
 
@@ -1407,11 +1227,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function drawGame() {
-    // Debug logging
-    if (inventoryOpen) {
-      console.log('drawGame() called - inventoryOpen:', inventoryOpen, 'localPlayer:', !!localPlayer);
-    }
-    
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
@@ -1492,13 +1307,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (connected && connectionPaused) drawConnecting();
     else if (connected && !showLoginGUI) drawConnecting();
     else if (connected && showLoginGUI && !loggedIn) drawLogin();
-    else if (connected && loggedIn) {
-      drawGame();
-      // Debug: log when drawGame is called
-      if (inventoryOpen) {
-        console.log('drawGame called with inventoryOpen:', inventoryOpen);
-      }
-    }
+    else if (connected && loggedIn) drawGame();
     requestAnimationFrame(loop);
   }
   loop();
