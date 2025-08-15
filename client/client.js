@@ -1305,9 +1305,9 @@ function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
 
   const { img, w, h } = meta;
   
-  // Position item so bottom-right of image aligns with bottom-right of slot
-  let drawX = (slotX + slotW) - w;
-  let drawY = (slotY + slotH) - h;
+  // Position item so bottom-right of image aligns with bottom-right of slot at 62x32
+  let drawX = (slotX + 62) - w;
+  let drawY = (slotY + 32) - h - 6; // tile_bottom - 6
   
   // Apply offsets for smaller items
   if (w < 62) {
@@ -1315,8 +1315,8 @@ function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
     drawX += xOffset;
   }
   
-  if (h < 44) {
-    const yOffset = h - 44; // This will be negative  
+  if (h < 32) {
+    const yOffset = (h - 32) / 2; // This will be negative, centers the item
     drawY += yOffset;
   }
   
