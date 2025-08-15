@@ -42,6 +42,21 @@ document.addEventListener('DOMContentLoaded', () => {
   // Chat areas
   const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
   const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200, extraY: 2 };
+  // Inventory configuration
+  const INVENTORY = {
+    x: 241,
+    y: 28,
+    width: 250,
+    height: 150,
+    backgroundColor: 'rgb(0, 133, 182)',
+    borderColor: 'black',
+    slotWidth: 62,
+    slotHeight: 38,
+    cols: 4,
+    rows: 4,
+    selectionCircleColor: 'yellow',
+    selectionCircleDiameter: 32
+  };
 
   // Animation constants
   const ANIMATION_NAMES = [
@@ -185,6 +200,49 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     return true;
+  }
+
+  // ---------- INVENTORY HELPERS ----------
+  function getInventorySlotPosition(slotNumber) {
+    // Convert slot number (1-16) to row/col (0-based)
+    const index = slotNumber - 1;
+    const col = index % INVENTORY.cols;
+    const row = Math.floor(index / INVENTORY.cols);
+    
+    // Calculate position within inventory
+    const x = INVENTORY.x + col * INVENTORY.slotWidth;
+    const y = INVENTORY.y + row * INVENTORY.slotHeight;
+    
+    return { x, y };
+  }
+  
+  function moveInventorySelection(direction) {
+    if (!inventoryVisible) return;
+    
+    const currentIndex = inventorySelectedSlot - 1; // Convert to 0-based
+    const currentRow = Math.floor(currentIndex / INVENTORY.cols);
+    const currentCol = currentIndex % INVENTORY.cols;
+    
+    let newRow = currentRow;
+    let newCol = currentCol;
+    
+    switch (direction) {
+      case 'up':
+        newRow = currentRow === 0 ? INVENTORY.rows - 1 : currentRow - 1;
+        break;
+      case 'down':
+        newRow = currentRow === INVENTORY.rows - 1 ? 0 : currentRow + 1;
+        break;
+      case 'left':
+        newCol = currentCol === 0 ? INVENTORY.cols - 1 : currentCol - 1;
+        break;
+      case 'right':
+        newCol = currentCol === INVENTORY.cols - 1 ? 0 : currentCol + 1;
+        break;
+    }
+    
+    // Convert back to slot number (1-based)
+    inventorySelectedSlot = (newRow * INVENTORY.cols) + newCol + 1;
   }
 
   // ---------- ASSETS ----------
@@ -482,7 +540,9 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(localAttackTimeout);
         localAttackTimeout = null;
       }
-      
+      playerInventory = {};
+      inventoryVisible = false;
+
       // Auto-reconnect after 3 seconds if not manually closed
       if (e.code !== 1000) { // 1000 = normal closure
         console.log('Attempting to reconnect in 3 seconds...');
@@ -499,6 +559,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function handleServerMessage(msg) {
     switch (msg.type) {
       case 'login_success':
+        if (msg.inventory) {
+          playerInventory = { ...msg.inventory };
+        }
       case 'signup_success':
         loggedIn = true;
         localPlayer = { 
@@ -518,6 +581,13 @@ document.addEventListener('DOMContentLoaded', () => {
         movementAnimationState = 0;
         isLocallyAttacking = false;
         localAttackState = 0;
+        // Inventory state
+        let inventoryVisible = false;
+        let inventorySelectedSlot = 1; // Default to slot 1
+        let playerInventory = {}; // { slotNumber: itemId }
+        if (msg.inventory) {
+          playerInventory = { ...msg.inventory };
+        }
         
         otherPlayers = {};
         if (Array.isArray(msg.players)) {
@@ -847,8 +917,47 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // Movement
-    if (loggedIn && localPlayer) {
+// Toggle inventory with 'i' key
+if (loggedIn && localPlayer && e.key === 'i') {
+  e.preventDefault();
+  inventoryVisible = !inventoryVisible;
+  return;
+}
+
+// Inventory swap with 'c' key
+if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
+  e.preventDefault();
+  send({
+    type: 'inventory_swap',
+    slotNumber: inventorySelectedSlot
+  });
+  return;
+}
+
+  // Inventory navigation when inventory is visible
+  if (loggedIn && localPlayer && inventoryVisible) {
+    const k = e.key.toLowerCase();
+    if (k === 'w' || k === 'arrowup') {
+      e.preventDefault();
+      moveInventorySelection('up');
+      return;
+    } else if (k === 's' || k === 'arrowdown') {
+      e.preventDefault();
+      moveInventorySelection('down');
+      return;
+    } else if (k === 'a' || k === 'arrowleft') {
+      e.preventDefault();
+      moveInventorySelection('left');
+      return;
+    } else if (k === 'd' || k === 'arrowright') {
+      e.preventDefault();
+      moveInventorySelection('right');
+      return;
+    }
+  }
+
+    // Movement (only if inventory is not visible)
+    if (loggedIn && localPlayer && !inventoryVisible) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
       
       const currentTime = Date.now();
@@ -1180,6 +1289,58 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.drawImage(meta.img, x, y);
   }
 
+function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
+  if (!window.getItemMeta || !window.itemsReady() || !itemId || itemId === 0) return;
+  const meta = window.getItemMeta(itemId);
+  if (!meta || !meta.img || !meta.img.complete) return;
+
+  const { img, w, h } = meta;
+  
+  // Position item so bottom-right of image aligns with bottom-right of slot
+  const drawX = (slotX + slotW) - w;
+  const drawY = (slotY + slotH) - h;
+  
+  ctx.drawImage(img, drawX, drawY);
+}
+
+function drawInventory() {
+  if (!inventoryVisible) return;
+  
+  // Draw inventory background
+  ctx.fillStyle = INVENTORY.backgroundColor;
+  ctx.fillRect(INVENTORY.x, INVENTORY.y, INVENTORY.width, INVENTORY.height);
+  
+  // Draw inventory border
+  ctx.strokeStyle = INVENTORY.borderColor;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(INVENTORY.x, INVENTORY.y, INVENTORY.width, INVENTORY.height);
+  
+  // Draw inventory slots and items
+  for (let slot = 1; slot <= 16; slot++) {
+    const slotPos = getInventorySlotPosition(slot);
+    
+    // Draw item in slot if it exists
+    const itemId = playerInventory[slot] || 0;
+    if (itemId > 0) {
+      drawItemInInventorySlot(itemId, slotPos.x, slotPos.y, INVENTORY.slotWidth, INVENTORY.slotHeight);
+    }
+    
+    // Draw selection circle if this slot is selected
+    if (slot === inventorySelectedSlot) {
+      const centerX = slotPos.x + INVENTORY.slotWidth / 2;
+      const centerY = slotPos.y + INVENTORY.slotHeight / 2;
+      const radius = INVENTORY.selectionCircleDiameter / 2;
+      
+      ctx.strokeStyle = INVENTORY.selectionCircleColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+  }
+}
+
   // ---------- SCENES ----------
   function drawConnecting() {
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
@@ -1309,6 +1470,9 @@ document.addEventListener('DOMContentLoaded', () => {
         drawItemOnBorder(localPlayer.hands, 73, 296);
       }
     }
+
+    // Draw inventory last (on top of everything)
+    drawInventory();
   }
 
   // ---------- LOOP ----------
