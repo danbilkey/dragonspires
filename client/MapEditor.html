@@ -348,6 +348,102 @@
                 }
             }
 
+            function loadMapFile() {
+                console.log('loadMapFile called'); // Debug log
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.style.display = 'none';
+                
+                input.onchange = (e) => {
+                    console.log('File selected'); // Debug log
+                    const file = e.target.files[0];
+                    if (!file) {
+                        console.log('No file selected');
+                        return;
+                    }
+                    
+                    console.log('Reading file:', file.name);
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            const loadedMap = JSON.parse(event.target.result);
+                            console.log('Map parsed successfully:', loadedMap);
+                            
+                            // Validate basic map structure
+                            if (!loadedMap.width || !loadedMap.height || !Array.isArray(loadedMap.tiles)) {
+                                pushChat('Error: Invalid map file format');
+                                return;
+                            }
+                            
+                            // Update map specification
+                            mapSpec.width = loadedMap.width;
+                            mapSpec.height = loadedMap.height;
+                            mapSpec.tiles = loadedMap.tiles ? JSON.parse(JSON.stringify(loadedMap.tiles)) : [];
+                            mapSpec.items = loadedMap.items ? JSON.parse(JSON.stringify(loadedMap.items)) : [];
+                            
+                            // Ensure tiles array is properly initialized with default tile 6
+                            for (let y = 0; y < mapSpec.height; y++) {
+                                if (!mapSpec.tiles[y]) {
+                                    mapSpec.tiles[y] = new Array(mapSpec.width).fill(6);
+                                } else {
+                                    for (let x = 0; x < mapSpec.width; x++) {
+                                        if (typeof mapSpec.tiles[y][x] === 'undefined') {
+                                            mapSpec.tiles[y][x] = 6;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Ensure items array is properly initialized
+                            for (let y = 0; y < mapSpec.height; y++) {
+                                if (!mapSpec.items[y]) {
+                                    mapSpec.items[y] = new Array(mapSpec.width).fill(0);
+                                } else {
+                                    for (let x = 0; x < mapSpec.width; x++) {
+                                        if (typeof mapSpec.items[y][x] === 'undefined') {
+                                            mapSpec.items[y][x] = 0;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Reset player position to center if outside new map bounds
+                            playerX = Math.min(playerX, mapSpec.width - 1);
+                            playerY = Math.min(playerY, mapSpec.height - 1);
+                            
+                            pushChat(`Map loaded: ${file.name} (${mapSpec.width}x${mapSpec.height})`);
+                            
+                        } catch (error) {
+                            pushChat('Error: Failed to parse JSON file');
+                            console.error('Map load error:', error);
+                        }
+                    };
+                    
+                    reader.onerror = () => {
+                        pushChat('Error: Failed to read file');
+                        console.error('File read error');
+                    };
+                    
+                    reader.readAsText(file);
+                };
+                
+                // Clean up function
+                input.oncancel = () => {
+                    document.body.removeChild(input);
+                };
+                
+                document.body.appendChild(input);
+                input.click();
+                
+                // Clean up after a delay in case the cancel event doesn't fire
+                setTimeout(() => {
+                    if (document.body.contains(input)) {
+                        document.body.removeChild(input);
+                    }
+                }, 1000);
+            }
+
             function saveMap() {
                 const mapData = {
                     width: mapSpec.width,
