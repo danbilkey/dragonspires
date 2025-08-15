@@ -625,6 +625,16 @@ document.addEventListener('DOMContentLoaded', () => {
           mapItems[key] = msg.itemId;
         }
         break;
+
+      case 'server_reset':
+        // Handle server reset - update items and show message
+        if (msg.items) {
+          mapItems = { ...msg.items };
+        }
+        if (msg.message) {
+          pushChat(`~ ${msg.message}`);
+        }
+        break;
         
       case 'player_left':
         const p = otherPlayers[msg.id];
