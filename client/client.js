@@ -134,6 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Animation state - SIMPLIFIED ATTACK HANDLING
   let localAttackTimeout = null; // Track our own attack timeout
 
+  // Inventory state - MOVED TO TOP LEVEL
+  let inventoryVisible = false;
+  let inventorySelectedSlot = 1; // Default to slot 1
+  let playerInventory = {}; // { slotNumber: itemId }
+
   // ---------- COLLISION HELPERS ----------
   function hasFloorCollision(x, y) {
     if (!floorCollisionReady || !floorCollision || 
@@ -581,10 +586,8 @@ document.addEventListener('DOMContentLoaded', () => {
         movementAnimationState = 0;
         isLocallyAttacking = false;
         localAttackState = 0;
-        // Inventory state
-        let inventoryVisible = false;
-        let inventorySelectedSlot = 1; // Default to slot 1
-        let playerInventory = {}; // { slotNumber: itemId }
+        
+        // Initialize inventory if not already set
         if (msg.inventory) {
           playerInventory = { ...msg.inventory };
         }
@@ -1360,7 +1363,6 @@ function drawInventory() {
   function drawLogin() {
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
-    else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
     else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
 
     if (activeField === null) {
