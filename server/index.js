@@ -371,6 +371,53 @@ async function loadItemsFromDatabase() {
   }
 }
 
+// Function to clear all map items from database and memory
+async function clearAllMapItems() {
+  try {
+    await pool.query('DELETE FROM map_items');
+    mapItems = {}; // Clear in-memory items
+    console.log('All map items cleared from database and memory');
+    return true;
+  } catch (error) {
+    console.error('Error clearing map items:', error);
+    return false;
+  }
+}
+
+// Function to reload map and item data
+async function reloadGameData() {
+  try {
+    // Reload map specification
+    await loadMapSpec();
+    
+    // Reload item details
+    await loadItemDetails();
+    
+    // Reload floor collision data
+    await loadFloorCollision();
+    
+    // Reload items from database (should be empty after reset)
+    mapItems = await loadItemsFromDatabase();
+    
+    console.log('Game data reloaded successfully');
+    return true;
+  } catch (error) {
+    console.error('Error reloading game data:', error);
+    return false;
+  }
+}
+
+// Function to get current online players
+function getOnlinePlayersList() {
+  const playerNames = [];
+  for (const [ws, playerData] of clients.entries()) {
+    if (playerData && playerData.username) {
+      playerNames.push(playerData.username);
+    }
+  }
+  return playerNames.sort(); // Sort alphabetically
+}
+
 function broadcast(obj) {
   const s = JSON.stringify(obj);
   for (const [ws] of clients.entries()) {
@@ -999,7 +1046,67 @@ wss.on('connection', (ws) => {
       const t = msg.text.trim();
       if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
 
-      // Check for admin commands
+      // Check for -resetserver admin command
+      if (t.toLowerCase() === '-resetserver') {
+        // Validate admin role
+        if (playerData.role !== 'admin') {
+          // Do nothing for non-admin users (silent ignore)
+          return;
+        }
+
+        send(ws, { type: 'chat', text: '~ Resetting server, clearing all items...' });
+        
+        try {
+          // Clear all map items
+          const itemsClearSuccess = await clearAllMapItems();
+          if (!itemsClearSuccess) {
+            send(ws, { type: 'chat', text: '~ Error: Failed to clear map items.' });
+            return;
+          }
+
+          // Reload all game data
+          const reloadSuccess = await reloadGameData();
+          if (!reloadSuccess) {
+            send(ws, { type: 'chat', text: '~ Error: Failed to reload game data.' });
+            return;
+          }
+
+          // Broadcast the reset to all players
+          broadcast({
+            type: 'server_reset',
+            items: mapItems, // Should be empty object after reset
+            message: 'Server has been reset by an administrator.'
+          });
+
+          // Send confirmation to admin
+          send(ws, { type: 'chat', text: '~ Server reset completed successfully.' });
+          
+        } catch (error) {
+          console.error('Error during server reset:', error);
+          send(ws, { type: 'chat', text: '~ Error: Server reset failed.' });
+        }
+        return;
+      }
+
+      // Check for -players command (available to all players)
+      if (t.toLowerCase() === '-players') {
+        const onlinePlayers = getOnlinePlayersList();
+        const playerCount = onlinePlayers.length;
+        
+        // Format the response
+        const playerListText = onlinePlayers.join(', ');
+        const response1 = '[*] DragonSpires - Players Currently Online [*]';
+        const response2 = playerListText;
+        const response3 = `Total Players: ${playerCount}`;
+        
+        // Send the formatted response to the requesting player
+        send(ws, { type: 'chat', text: response1 });
+        send(ws, { type: 'chat', text: response2 });
+        send(ws, { type: 'chat', text: response3 });
+        return;
+      }
+
+      // Check for existing admin placeitem command
       const placeItemMatch = t.match(/^-placeitem\s+(\d+)$/i);
       if (placeItemMatch) {
         // Validate admin role
@@ -1050,6 +1157,7 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // Regular chat message
       broadcast({ type: 'chat', text: `${playerData.username}: ${t}` });
     }
   });
