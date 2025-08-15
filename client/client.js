@@ -723,6 +723,12 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'chat_error':
         pushChat('~ The game has rejected your message due to bad language.');
         break;
+
+      case 'inventory_update':
+        if (msg.inventory) {
+          playerInventory = { ...msg.inventory };
+        }
+        break;
         
       case 'stats_update':
         const apply = (obj) => {
@@ -1300,8 +1306,19 @@ function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
   const { img, w, h } = meta;
   
   // Position item so bottom-right of image aligns with bottom-right of slot
-  const drawX = (slotX + slotW) - w;
-  const drawY = (slotY + slotH) - h;
+  let drawX = (slotX + slotW) - w;
+  let drawY = (slotY + slotH) - h;
+  
+  // Apply offsets for smaller items
+  if (w < 62) {
+    const xOffset = w - 62; // This will be negative
+    drawX += xOffset;
+  }
+  
+  if (h < 44) {
+    const yOffset = h - 44; // This will be negative  
+    drawY += yOffset;
+  }
   
   ctx.drawImage(img, drawX, drawY);
 }
