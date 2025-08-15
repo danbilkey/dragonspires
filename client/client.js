@@ -1327,7 +1327,7 @@ function drawInventory() {
   if (!inventoryVisible) return;
   
   // Draw inventory background
-  ctx.fillStyle = INVENTORY.backgroundColor;
+  ctx.fillStyle = 'rgba(0, 133, 182, 0.5)';
   ctx.fillRect(INVENTORY.x, INVENTORY.y, INVENTORY.width, INVENTORY.height);
   
   // Draw inventory border
