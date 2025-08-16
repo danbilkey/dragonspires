@@ -1141,12 +1141,13 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
   const { img, w, h, yOffset } = meta;
   if (!img || !img.complete) return;
 
-  // Top-left alignment with yOffset
+  // Top-left alignment with yOffset subtracted
   const drawX = sx;
-  const drawY = sy + (yOffset || 0);
+  const drawY = sy - (yOffset || 0);
 
   ctx.drawImage(img, drawX, drawY);
   }
+
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
     
@@ -1271,12 +1272,12 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
 
   const { img, yOffset } = meta;
   
-  // Top-left alignment with yOffset
+  // Top-left alignment with yOffset subtracted
   const drawX = x;
-  const drawY = y + (yOffset || 0);
+  const drawY = y - (yOffset || 0);
 
   ctx.drawImage(img, drawX, drawY);
-  }
+}
 
 function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
   if (!window.getItemMeta || !window.itemsReady() || !itemId || itemId === 0) return;
@@ -1285,12 +1286,12 @@ function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
 
   const { img, yOffset } = meta;
   
-  // Top-left alignment with yOffset
+  // Top-left alignment with yOffset subtracted
   const drawX = slotX;
-  const drawY = slotY + (yOffset || 0);
+  const drawY = slotY - (yOffset || 0);
   
   ctx.drawImage(img, drawX, drawY);
-  }
+}
 
 function drawInventory() {
   if (!inventoryVisible) return;
