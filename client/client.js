@@ -407,93 +407,78 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-// ---------- ITEMS (sheet + coords, true magenta keyed, formula-based anchoring) ----------
-(() => {
-  const imgItems = new Image();
-  imgItems.src = "/assets/item.gif";
-
-  const itemsJsonPromise = fetch("/assets/item.json")
-    .then(r => r.json())
-    .catch(() => null);
-
-  const itemSprites = []; // 1-based
-  const itemMeta = [];    // 1-based: { img, w, h, leftPad, anchorX }
-  let itemsReady = false;
-
-  function waitImage(img) {
-    return new Promise((resolve) => {
-      if (img.complete) return resolve();
-      img.onload = resolve;
-      img.onerror = resolve;
-    });
-  }
-
-  Promise.all([waitImage(imgItems), itemsJsonPromise]).then(([_, meta]) => {
-    if (!meta || !Array.isArray(meta.item_coords)) return;
-
-    const off = document.createElement("canvas");
-    const octx = off.getContext("2d");
-
-    meta.item_coords.forEach((quad, idx) => {
-      const [sx, sy, sw, sh] = quad;
-      off.width = sw; off.height = sh;
-      octx.clearRect(0, 0, sw, sh);
-      octx.drawImage(imgItems, sx, sy, sw, sh, 0, 0, sw, sh);
-
-      // Make true magenta transparent + compute leftPad (first opaque column)
-      let leftPad = 0;
-      try {
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = sw; tempCanvas.height = sh;
-        const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
-        tempCtx.drawImage(off, 0, 0);
-        
-        const data = tempCtx.getImageData(0, 0, sw, sh);
-        const d = data.data;
-
-        // magenta -> transparent
-        for (let i = 0; i < d.length; i += 4) {
-          if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
-        }
-
-        // find first opaque column from the left
-        leftPad = sw; // default "none found"
-        outer:
-        for (let x = 0; x < sw; x++) {
-          for (let y = 0; y < sh; y++) {
-            const a = d[((y * sw) + x) * 4 + 3];
-            if (a !== 0) { leftPad = x; break outer; }
-          }
-        }
-        if (leftPad === sw) leftPad = 0; // all transparent (safety)
-
-        tempCtx.putImageData(data, 0, 0);
+  // ---------- ITEMS (sheet + coords, true magenta keyed, top-left alignment with yOffset) ----------
+  (() => {
+    const imgItems = new Image();
+    imgItems.src = "/assets/item.gif";
+  
+    const itemsJsonPromise = fetch("/assets/item.json")
+      .then(r => r.json())
+      .catch(() => null);
+  
+    const itemSprites = []; // 1-based
+    const itemMeta = [];    // 1-based: { img, w, h, yOffset }
+    let itemsReady = false;
+  
+    function waitImage(img) {
+      return new Promise((resolve) => {
+        if (img.complete) return resolve();
+        img.onload = resolve;
+        img.onerror = resolve;
+      });
+    }
+  
+    Promise.all([waitImage(imgItems), itemsJsonPromise]).then(([_, meta]) => {
+      if (!meta || !Array.isArray(meta.item_coords)) return;
+  
+      const off = document.createElement("canvas");
+      const octx = off.getContext("2d");
+  
+      meta.item_coords.forEach((coords, idx) => {
+        const [sx, sy, sw, sh, yOffset] = coords;
+        off.width = sw; off.height = sh;
         octx.clearRect(0, 0, sw, sh);
-        octx.drawImage(tempCanvas, 0, 0);
-      } catch {
-        leftPad = 0; // fallback if canvas is tainted (shouldn't be here)
-      }
-
-      // Bottom-center anchor inside the sprite (relative to left edge)
-      const anchorX = (leftPad + (sw - 1)) / 2;
-
-      // Freeze the processed pixels into an <img>
-      const sprite = new Image();
-      sprite.src = off.toDataURL();
-
-      itemSprites[idx + 1] = sprite;
-      itemMeta[idx + 1] = { img: sprite, w: sw, h: sh, leftPad, anchorX };
+        octx.drawImage(imgItems, sx, sy, sw, sh, 0, 0, sw, sh);
+  
+        // Make true magenta transparent
+        try {
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = sw; tempCanvas.height = sh;
+          const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
+          tempCtx.drawImage(off, 0, 0);
+          
+          const data = tempCtx.getImageData(0, 0, sw, sh);
+          const d = data.data;
+  
+          // magenta -> transparent
+          for (let i = 0; i < d.length; i += 4) {
+            if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
+          }
+  
+          tempCtx.putImageData(data, 0, 0);
+          octx.clearRect(0, 0, sw, sh);
+          octx.drawImage(tempCanvas, 0, 0);
+        } catch {
+          // fallback if canvas is tainted (shouldn't be here)
+        }
+  
+        // Freeze the processed pixels into an <img>
+        const sprite = new Image();
+        sprite.src = off.toDataURL();
+  
+        itemSprites[idx + 1] = sprite;
+        itemMeta[idx + 1] = { img: sprite, w: sw, h: sh, yOffset: yOffset || 0 };
+      });
+  
+      itemsReady = true;
     });
-
-    itemsReady = true;
-  });
-
-  // accessors
-  window.getItemSprite = (i) => itemSprites[i] || null;
-  window.getItemMeta   = (i) => itemMeta[i] || null;
-  window.itemSpriteCount = () => itemSprites.length - 1;
-  window.itemsReady = () => itemsReady;
-})();
+  
+    // accessors
+    window.getItemSprite = (i) => itemSprites[i] || null;
+    window.getItemMeta   = (i) => itemMeta[i] || null;
+    window.itemSpriteCount = () => itemSprites.length - 1;
+    window.itemsReady = () => itemsReady;
+  })();
 
   // ---------- ANIMATION HELPERS ----------
   function getCurrentAnimationFrame(player, isLocal = false) {
@@ -1149,29 +1134,19 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
   }
 
   function drawItemAtTile(sx, sy, itemIndex) {
-    if (!window.getItemMeta || !window.itemsReady()) return;
-    const meta = window.getItemMeta(itemIndex);
-    if (!meta) return;
+  if (!window.getItemMeta || !window.itemsReady()) return;
+  const meta = window.getItemMeta(itemIndex);
+  if (!meta) return;
 
-    const { img, w, h } = meta;
-    if (!img || !img.complete) return;
+  const { img, w, h, yOffset } = meta;
+  if (!img || !img.complete) return;
 
-    let drawX = (sx + TILE_W) - w;
-    let drawY = (sy + TILE_H) - h;
-    
-    if (w < 62) {
-      const offsetX = w - 62;
-      drawX += offsetX;
-    }
-    
-    if (h < 32) {
-      const offsetY = h - 32;
-      drawY += offsetY;
-    }
+  // Top-left alignment with yOffset
+  const drawX = sx;
+  const drawY = sy + (yOffset || 0);
 
-    ctx.drawImage(img, drawX, drawY);
+  ctx.drawImage(img, drawX, drawY);
   }
-
   function drawPlayer(p, isLocal) {
     const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
     
@@ -1290,12 +1265,17 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
   }
 
   function drawItemOnBorder(itemId, x, y) {
-    if (!window.getItemMeta || !window.itemsReady()) return;
-    const meta = window.getItemMeta(itemId);
-    if (!meta || !meta.img || !meta.img.complete) return;
+  if (!window.getItemMeta || !window.itemsReady()) return;
+  const meta = window.getItemMeta(itemId);
+  if (!meta || !meta.img || !meta.img.complete) return;
 
-    // Draw item on top of border at specified position
-    ctx.drawImage(meta.img, x, y);
+  const { img, yOffset } = meta;
+  
+  // Top-left alignment with yOffset
+  const drawX = x;
+  const drawY = y + (yOffset || 0);
+
+  ctx.drawImage(img, drawX, drawY);
   }
 
 function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
@@ -1303,25 +1283,14 @@ function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
   const meta = window.getItemMeta(itemId);
   if (!meta || !meta.img || !meta.img.complete) return;
 
-  const { img, w, h } = meta;
+  const { img, yOffset } = meta;
   
-  // Position item so bottom-right of image aligns with bottom-right of slot at 62x32
-  let drawX = (slotX + 62) - w;
-  let drawY = (slotY + 32) - h; // tile_bottom
-  
-  // Apply offsets for smaller items
-  if (w < 62) {
-    const xOffset = w - 62; // This will be negative
-    drawX += xOffset;
-  }
-  
-  if (h < 32) {
-    const yOffset = (h - 32) / 2; // This will be negative, centers the item
-    drawY += yOffset;
-  }
+  // Top-left alignment with yOffset
+  const drawX = slotX;
+  const drawY = slotY + (yOffset || 0);
   
   ctx.drawImage(img, drawX, drawY);
-}
+  }
 
 function drawInventory() {
   if (!inventoryVisible) return;
