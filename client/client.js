@@ -1286,9 +1286,9 @@ function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
 
   const { img, yOffset } = meta;
   
-  // Top-left alignment with yOffset subtracted
+  // Top-left alignment with yOffset subtracted, plus additional 6 pixel offset
   const drawX = slotX;
-  const drawY = slotY - (yOffset || 0);
+  const drawY = slotY - (yOffset || 0) + 6;
   
   ctx.drawImage(img, drawX, drawY);
 }
