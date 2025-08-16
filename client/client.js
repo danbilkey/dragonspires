@@ -133,6 +133,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Animation state - SIMPLIFIED ATTACK HANDLING
   let localAttackTimeout = null; // Track our own attack timeout
+  let isLocallyPickingUp = false; // Local pickup state
+  let localPickupTimeout = null; // Track our own pickup timeout
 
   // Inventory state - MOVED TO TOP LEVEL
   let inventoryVisible = false;
@@ -482,16 +484,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- ANIMATION HELPERS ----------
   function getCurrentAnimationFrame(player, isLocal = false) {
-    if (player.isAttacking) {
-      return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
-    }
-
-    if (typeof player.animationFrame !== 'undefined') {
-      return player.animationFrame;
-    }
-
-    return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
+  if (player.isPickingUp) {
+    return player.animationFrame || 21; // 'sit' animation
   }
+  
+  if (player.isAttacking) {
+    return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
+  }
+
+  if (typeof player.animationFrame !== 'undefined') {
+    return player.animationFrame;
+  }
+
+  return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
+}
 
   // ---------- WS ----------
   function connectToServer() {
@@ -530,6 +536,11 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(localAttackTimeout);
         localAttackTimeout = null;
       }
+      if (localPickupTimeout) {
+        clearTimeout(localPickupTimeout);
+        localPickupTimeout = null;
+      }
+      isLocallyPickingUp = false;
       playerInventory = {};
       inventoryVisible = false;
 
@@ -559,6 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
           direction: msg.player.direction || 'down',
           isMoving: false,
           isAttacking: false,
+          isPickingUp: false,
           animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
           movementSequenceIndex: msg.player.movementSequenceIndex || 0,
           weapon: msg.player.weapon || 0,
@@ -586,6 +598,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 direction: p.direction || 'down',
                 isMoving: p.isMoving || false,
                 isAttacking: p.isAttacking || false,
+                isPickingUp: p.isPickingUp || false,
                 animationFrame: p.animationFrame || DIRECTION_IDLE.down,
                 movementSequenceIndex: p.movementSequenceIndex || 0
               };
@@ -648,20 +661,22 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
         
       case 'animation_update':
-        if (localPlayer && msg.id === localPlayer.id) {
-          localPlayer.direction = msg.direction || localPlayer.direction;
-          localPlayer.isMoving = msg.isMoving || false;
-          localPlayer.isAttacking = msg.isAttacking || false;
-          localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
-          localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
-        } else if (otherPlayers[msg.id]) {
-          otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
-          otherPlayers[msg.id].isMoving = msg.isMoving || false;
-          otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
-          otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
-          otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
-        }
-        break;
+      if (localPlayer && msg.id === localPlayer.id) {
+        localPlayer.direction = msg.direction || localPlayer.direction;
+        localPlayer.isMoving = msg.isMoving || false;
+        localPlayer.isAttacking = msg.isAttacking || false;
+        localPlayer.isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
+        localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
+        localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
+      } else if (otherPlayers[msg.id]) {
+        otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+        otherPlayers[msg.id].isMoving = msg.isMoving || false;
+        otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
+        otherPlayers[msg.id].isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
+        otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
+        otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
+      }
+      break;
         
       case 'player_equipment_update':
         if (localPlayer && msg.id === localPlayer.id) {
@@ -812,6 +827,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // Pick up item with 'g' key
     if (loggedIn && localPlayer && e.key === 'g') {
       e.preventDefault();
+      
+      // Start local pickup animation immediately
+      isLocallyPickingUp = true;
+      
+      if (localPickupTimeout) {
+        clearTimeout(localPickupTimeout);
+      }
+      
+      localPickupTimeout = setTimeout(() => {
+        isLocallyPickingUp = false;
+        localPickupTimeout = null;
+      }, 700); // Slightly longer than server animation
       
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const itemDetails = getItemDetails(itemId);
@@ -1162,7 +1189,9 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
     let animFrame;
     
     if (isLocal) {
-      if (isLocallyAttacking) {
+      if (isLocallyPickingUp) {
+        animFrame = 21; // 'sit' animation
+      } else if (isLocallyAttacking) {
         const attackSeq = ATTACK_SEQUENCES[playerDirection] || ATTACK_SEQUENCES.down;
         animFrame = attackSeq[localAttackState];
       } else {
