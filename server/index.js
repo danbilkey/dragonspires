@@ -681,21 +681,21 @@ function stopPickupAnimation(playerData, ws) {
     attackTimeouts.delete(playerData.id);
   }
 
-  // Set to 'stand' animation (index 20) and stay there
+  // Set to 'stand' animation (index 20) - this will be overridden if player moves
   playerData.isPickingUp = false;
   playerData.animationFrame = 20; // 'stand' animation
   
   // Update database
-  updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex, false)
+  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex, false)
     .catch(err => console.error('Pickup stop DB error:', err));
 
-  // Broadcast stand animation - stay in stand state
+  // Broadcast stand animation
   broadcast({
     type: 'animation_update',
     id: playerData.id,
     direction: playerData.direction,
-    isMoving: false,
-    isAttacking: false,
+    isMoving: playerData.isMoving,
+    isAttacking: playerData.isAttacking,
     isPickingUp: false,
     animationFrame: playerData.animationFrame,
     movementSequenceIndex: playerData.movementSequenceIndex
@@ -1049,8 +1049,8 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'pickup_item') {
       if (!playerData) return;
-
-      // Start pickup animation
+      
+      // Start pickup animation immediately for ALL pickup attempts
       startPickupAnimation(playerData, ws);
       
       const { x, y, itemId } = msg;
@@ -1058,7 +1058,7 @@ wss.on('connection', (ws) => {
       // Special case: itemId=0 means player wants to drop their hands item
       if (itemId === 0) {
         const handsItem = playerData.hands || 0;
-        if (handsItem === 0) return;
+        if (handsItem === 0) return; // Animation already started, just return
         
         playerData.hands = 0;
         const key = `${x},${y}`;
@@ -1084,27 +1084,27 @@ wss.on('connection', (ws) => {
         return;
       }
       
-      // Verify item exists
+      // Verify item exists (but animation already started)
       const actualItemId = getItemAtPosition(x, y, serverMapSpec);
       if (actualItemId !== itemId) {
         console.log(`ERROR: Item mismatch! Expected ${itemId}, found ${actualItemId}`);
-        return;
+        return; // Animation continues even if pickup fails
       }
       
-      // Verify item is pickupable
+      // Verify item is pickupable (but animation already started)
       const itemDetails = getItemDetails(itemId);
       if (!itemDetails) {
         console.log(`ERROR: No item details for item ${itemId}`);
-        return;
+        return; // Animation continues even if pickup fails
       }
       
       const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
       if (!pickupableTypes.includes(itemDetails.type)) {
         console.log(`ERROR: Item ${itemId} type '${itemDetails.type}' not pickupable`);
-        return;
+        return; // Animation continues even if pickup fails
       }
-
-      // Pick up the item
+      
+      // Pick up the item (animation already started above)
       const oldHands = playerData.hands || 0;
       playerData.hands = itemId;
       
