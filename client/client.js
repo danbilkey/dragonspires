@@ -492,6 +492,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
   }
 
+  // If player is in stand animation and not moving, keep them in stand
+  if (player.animationFrame === 20 && !player.isMoving) {
+    return 20; // 'stand' animation
+  }
+
   if (typeof player.animationFrame !== 'undefined') {
     return player.animationFrame;
   }
@@ -980,6 +985,15 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
     // Movement (only if inventory is not visible)
     if (loggedIn && localPlayer && !inventoryVisible) {
       if ((localPlayer.stamina ?? 0) <= 0) return;
+
+      // Cancel pickup animation when moving
+        if (isLocallyPickingUp) {
+          isLocallyPickingUp = false;
+          if (localPickupTimeout) {
+            clearTimeout(localPickupTimeout);
+            localPickupTimeout = null;
+          }
+        }
       
       const currentTime = Date.now();
       if (currentTime - lastMoveTime < 100) return;
@@ -1056,6 +1070,15 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
       // Check if stamina is sufficient for movement
       if ((localPlayer.stamina ?? 0) <= 0) return;
       
+      // Cancel pickup animation when moving
+      if (isLocallyPickingUp) {
+        isLocallyPickingUp = false;
+        if (localPickupTimeout) {
+          clearTimeout(localPickupTimeout);
+          localPickupTimeout = null;
+        }
+      }
+
       // Prevent rapid clicks (same as keyboard movement)
       const currentTime = Date.now();
       if (currentTime - lastMoveTime < 100) return;
@@ -1195,7 +1218,10 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
         const attackSeq = ATTACK_SEQUENCES[playerDirection] || ATTACK_SEQUENCES.down;
         animFrame = attackSeq[localAttackState];
       } else {
-        if (movementAnimationState === 0) {
+        // Check if we should stay in stand animation
+        if (localPlayer && localPlayer.animationFrame === 20 && !localPlayer.isMoving) {
+          animFrame = 20; // Stay in 'stand' animation
+        } else if (movementAnimationState === 0) {
           animFrame = DIRECTION_IDLE[playerDirection] || DIRECTION_IDLE.down;
         } else {
           const walkIndex = movementAnimationState === 1 ? 0 : 2;
