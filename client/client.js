@@ -903,6 +903,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loggedIn && localPlayer && e.key === '0') {
       e.preventDefault();
       
+      // Clear stand flag when rotating
+      shouldStayInStand = false;
+
       if (localAttackTimeout) {
         clearTimeout(localAttackTimeout);
         localAttackTimeout = null;
@@ -933,6 +936,9 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Not enough stamina to attack (need 10, have ' + (localPlayer.stamina ?? 0) + ')');
         return;
       }
+
+      // Clear stand flag when attacking
+      shouldStayInStand = false;
       
       // Reduce stamina by 10 locally for immediate feedback
       localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 10);
