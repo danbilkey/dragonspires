@@ -135,6 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let localAttackTimeout = null; // Track our own attack timeout
   let isLocallyPickingUp = false; // Local pickup state
   let localPickupTimeout = null; // Track our own pickup timeout
+  let shouldStayInStand = false;
 
   // Inventory state - MOVED TO TOP LEVEL
   let inventoryVisible = false;
@@ -492,7 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
   }
 
-  // If player is in stand animation and not moving, keep them in stand
+  // If player is in stand animation from server, respect it
   if (player.animationFrame === 20 && !player.isMoving) {
     return 20; // 'stand' animation
   }
@@ -546,6 +547,7 @@ document.addEventListener('DOMContentLoaded', () => {
         localPickupTimeout = null;
       }
       isLocallyPickingUp = false;
+      shouldStayInStand = false;
       playerInventory = {};
       inventoryVisible = false;
 
@@ -835,6 +837,7 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Start local pickup animation immediately
       isLocallyPickingUp = true;
+      shouldStayInStand = true; // Set flag to stay in stand after animation
       
       if (localPickupTimeout) {
         clearTimeout(localPickupTimeout);
@@ -843,6 +846,7 @@ document.addEventListener('DOMContentLoaded', () => {
       localPickupTimeout = setTimeout(() => {
         isLocallyPickingUp = false;
         localPickupTimeout = null;
+        // shouldStayInStand remains true until movement
       }, 700); // Slightly longer than server animation
       
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
@@ -869,6 +873,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       } else {
         console.log(`No action taken - no pickupable item and no hands item to drop`);
+        // Send pickup anyway to show animation
+        send({
+          type: 'pickup_item',
+          x: localPlayer.pos_x,
+          y: localPlayer.pos_y,
+          itemId: 0
+        });
       }
       
       return;
@@ -989,6 +1000,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
       // Cancel pickup animation when moving
         if (isLocallyPickingUp) {
           isLocallyPickingUp = false;
+          shouldStayInStand = false; // Don't stay in stand if we're moving
           if (localPickupTimeout) {
             clearTimeout(localPickupTimeout);
             localPickupTimeout = null;
@@ -1028,7 +1040,10 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           lastMoveTime = currentTime;
           
           send({ type: 'move', dx, dy, direction: playerDirection });
-          
+
+          // Reset stand flag when actually moving
+          shouldStayInStand = false;          
+
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
@@ -1073,6 +1088,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
       // Cancel pickup animation when moving
       if (isLocallyPickingUp) {
         isLocallyPickingUp = false;
+        shouldStayInStand = false; // Don't stay in stand if we're moving
         if (localPickupTimeout) {
           clearTimeout(localPickupTimeout);
           localPickupTimeout = null;
@@ -1136,6 +1152,9 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           // Send move command to server
           send({ type: 'move', dx, dy, direction: playerDirection });
           
+          // Reset stand flag when actually moving
+          shouldStayInStand = false;
+
           // Reset to standing after movement
           setTimeout(() => {
             if (localPlayer) {
@@ -1218,8 +1237,8 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
         const attackSeq = ATTACK_SEQUENCES[playerDirection] || ATTACK_SEQUENCES.down;
         animFrame = attackSeq[localAttackState];
       } else {
-        // Check if we should stay in stand animation
-        if (localPlayer && localPlayer.animationFrame === 20 && !localPlayer.isMoving) {
+        // Check if we should stay in stand animation (after pickup and not moving)
+        if (shouldStayInStand && !localPlayer.isMoving && movementAnimationState === 0) {
           animFrame = 20; // Stay in 'stand' animation
         } else if (movementAnimationState === 0) {
           animFrame = DIRECTION_IDLE[playerDirection] || DIRECTION_IDLE.down;
