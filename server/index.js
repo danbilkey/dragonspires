@@ -681,15 +681,15 @@ function stopPickupAnimation(playerData, ws) {
     attackTimeouts.delete(playerData.id);
   }
 
-  // Set to 'stand' animation (index 20) then back to idle
+  // Set to 'stand' animation (index 20) and stay there
   playerData.isPickingUp = false;
   playerData.animationFrame = 20; // 'stand' animation
   
   // Update database
-  updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
+  updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex, false)
     .catch(err => console.error('Pickup stop DB error:', err));
 
-  // Broadcast stand animation
+  // Broadcast stand animation - stay in stand state
   broadcast({
     type: 'animation_update',
     id: playerData.id,
@@ -700,27 +700,6 @@ function stopPickupAnimation(playerData, ws) {
     animationFrame: playerData.animationFrame,
     movementSequenceIndex: playerData.movementSequenceIndex
   });
-
-  // After a brief moment, return to idle direction animation
-  setTimeout(() => {
-    if (!playerData.isPickingUp && !playerData.isAttacking && !playerData.isMoving) {
-      playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
-      
-      updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
-        .catch(err => console.error('Return to idle DB error:', err));
-
-      broadcast({
-        type: 'animation_update',
-        id: playerData.id,
-        direction: playerData.direction,
-        isMoving: false,
-        isAttacking: false,
-        isPickingUp: false,
-        animationFrame: playerData.animationFrame,
-        movementSequenceIndex: playerData.movementSequenceIndex
-      });
-    }
-  }, 200);
 }
 
 // Initialize database with animation columns if they don't exist
@@ -891,7 +870,17 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'move') {
       if (!playerData) return;
-
+    
+      // Cancel any pickup animation when moving
+      if (playerData.isPickingUp) {
+        const existingTimeout = attackTimeouts.get(playerData.id);
+        if (existingTimeout) {
+          clearTimeout(existingTimeout);
+          attackTimeouts.delete(playerData.id);
+        }
+        playerData.isPickingUp = false;
+      }
+    
       // stamina gate
       if ((playerData.stamina ?? 0) <= 0) {
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
@@ -1060,6 +1049,9 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'pickup_item') {
       if (!playerData) return;
+
+      // Start pickup animation
+      startPickupAnimation(playerData, ws);
       
       const { x, y, itemId } = msg;
       
@@ -1111,9 +1103,6 @@ wss.on('connection', (ws) => {
         console.log(`ERROR: Item ${itemId} type '${itemDetails.type}' not pickupable`);
         return;
       }
-      
-      // Start pickup animation
-      startPickupAnimation(playerData, ws);
 
       // Pick up the item
       const oldHands = playerData.hands || 0;
