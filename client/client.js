@@ -1647,7 +1647,7 @@ function drawInventory() {
     if (localPlayer.weapon && localPlayer.weapon > 0) {
       const weaponDetails = getItemDetails(localPlayer.weapon);
       if (weaponDetails) {
-        weaponStats = `${weaponDetails.statMin} - ${weaponDetails.statMax}`;
+        weaponStats = `${weaponDetails.statMin}-${weaponDetails.statMax} damage`;
       }
     }
     
@@ -1656,7 +1656,7 @@ function drawInventory() {
     if (localPlayer.armor && localPlayer.armor > 0) {
       const armorDetails = getItemDetails(localPlayer.armor);
       if (armorDetails) {
-        armorStats = `${armorDetails.statMin} - ${armorDetails.statMax}`;
+        armorStats = `${armorDetails.statMin}-${armorDetails.statMax} defense`;
       }
     }
     
