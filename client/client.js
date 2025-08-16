@@ -774,6 +774,8 @@ document.addEventListener('DOMContentLoaded', () => {
           pushChat(`~ ${localPlayer.username} is currently on Map ${localPlayer.map_id ?? 1} at location x:${localPlayer.pos_x}, y:${localPlayer.pos_y}.`);
         } else if (toSend === '-help') {
           showHelpControls();
+        } else if (toSend === '-cls') {
+          clearChatMessages();
         } else if (toSend.length > 0) {
           send({ type: 'chat', text: toSend.slice(0, CHAT_INPUT.maxLen) });
         }
@@ -1100,6 +1102,11 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
     // Handle help area click (114,241 to 150,254)
     if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 241 && my <= 254) {
       showHelpControls();
+      return;
+    }
+    // Handle clear chat area click (114,211 to 150,224)
+    if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 211 && my <= 224) {
+      clearChatMessages();
       return;
     }
 
@@ -1617,6 +1624,10 @@ function drawInventory() {
     pushChat("- 'T' key to equip a weapon in your hand, 'Y' for armor");
     pushChat("- 'I' key to open / close your inventory");
     pushChat("- 'C' key to swap an item from your inventory to your hand");
+  }
+
+  function clearChatMessages() {
+    messages = [];
   }
 
   window.connectToServer = connectToServer;
