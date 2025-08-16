@@ -946,7 +946,10 @@ document.addEventListener('DOMContentLoaded', () => {
       
       localAttackTimeout = setTimeout(() => {
         isLocallyAttacking = false;
-        movementAnimationState = 0;
+        // Don't reset movementAnimationState to 0 if we should stay in stand
+        if (!shouldStayInStand) {
+          movementAnimationState = 0;
+        }
         localAttackTimeout = null;
       }, 1000);
       
