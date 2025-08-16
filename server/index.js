@@ -314,9 +314,9 @@ async function loadPlayer(username) {
 async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
   const r = await pool.query(
-    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, animation_frame, movement_sequence_index)
-     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7) RETURNING *`,
-    [username, hashed, 'down', false, false, DIRECTION_IDLE.down, 0]
+    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, is_picking_up, animation_frame, movement_sequence_index)
+     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [username, hashed, 'down', false, false, false, DIRECTION_IDLE.down, 0]
   );
   
   // Initialize empty inventory for new player
@@ -330,10 +330,10 @@ async function updatePosition(playerId, x, y) {
   await pool.query('UPDATE players SET pos_x=$1, pos_y=$2 WHERE id=$3', [x, y, playerId]);
 }
 
-async function updateAnimationState(playerId, direction, isMoving, isAttacking, animationFrame, movementSequenceIndex) {
+async function updateAnimationState(playerId, direction, isMoving, isAttacking, animationFrame, movementSequenceIndex, isPickingUp = false) {
   await pool.query(
-    'UPDATE players SET direction=$1, is_moving=$2, is_attacking=$3, animation_frame=$4, movement_sequence_index=$5 WHERE id=$6',
-    [direction, isMoving, isAttacking, animationFrame, movementSequenceIndex, playerId]
+    'UPDATE players SET direction=$1, is_moving=$2, is_attacking=$3, is_picking_up=$4, animation_frame=$5, movement_sequence_index=$6 WHERE id=$7',
+    [direction, isMoving, isAttacking, isPickingUp, animationFrame, movementSequenceIndex, playerId]
   );
 }
 
@@ -630,6 +630,99 @@ function stopAttackAnimation(playerData, ws) {
   });
 }
 
+// Start pickup animation for a player
+function startPickupAnimation(playerData, ws) {
+  // Clear any existing attack timeout
+  const existingTimeout = attackTimeouts.get(playerData.id);
+  if (existingTimeout) {
+    clearTimeout(existingTimeout);
+    attackTimeouts.delete(playerData.id);
+  }
+
+  // Set pickup state - using 'sit' animation (index 21)
+  playerData.isPickingUp = true;
+  playerData.isAttacking = false;
+  playerData.isMoving = false;
+  playerData.animationFrame = 21; // 'sit' animation
+
+  // Update database
+  updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
+    .catch(err => console.error('Pickup start DB error:', err));
+
+  // Broadcast pickup animation start
+  broadcast({
+    type: 'animation_update',
+    id: playerData.id,
+    direction: playerData.direction,
+    isMoving: false,
+    isAttacking: false,
+    isPickingUp: true,
+    animationFrame: playerData.animationFrame,
+    movementSequenceIndex: playerData.movementSequenceIndex
+  });
+
+  // Set timeout to stop pickup after 0.5 seconds
+  const timeoutId = setTimeout(() => {
+    stopPickupAnimation(playerData, ws);
+    attackTimeouts.delete(playerData.id);
+  }, 500);
+  
+  attackTimeouts.set(playerData.id, timeoutId);
+}
+
+// Stop pickup animation for a player
+function stopPickupAnimation(playerData, ws) {
+  if (!playerData.isPickingUp) return;
+  
+  // Clear timeout if it exists
+  const existingTimeout = attackTimeouts.get(playerData.id);
+  if (existingTimeout) {
+    clearTimeout(existingTimeout);
+    attackTimeouts.delete(playerData.id);
+  }
+
+  // Set to 'stand' animation (index 20) then back to idle
+  playerData.isPickingUp = false;
+  playerData.animationFrame = 20; // 'stand' animation
+  
+  // Update database
+  updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
+    .catch(err => console.error('Pickup stop DB error:', err));
+
+  // Broadcast stand animation
+  broadcast({
+    type: 'animation_update',
+    id: playerData.id,
+    direction: playerData.direction,
+    isMoving: false,
+    isAttacking: false,
+    isPickingUp: false,
+    animationFrame: playerData.animationFrame,
+    movementSequenceIndex: playerData.movementSequenceIndex
+  });
+
+  // After a brief moment, return to idle direction animation
+  setTimeout(() => {
+    if (!playerData.isPickingUp && !playerData.isAttacking && !playerData.isMoving) {
+      playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
+      
+      updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
+        .catch(err => console.error('Return to idle DB error:', err));
+
+      broadcast({
+        type: 'animation_update',
+        id: playerData.id,
+        direction: playerData.direction,
+        isMoving: false,
+        isAttacking: false,
+        isPickingUp: false,
+        animationFrame: playerData.animationFrame,
+        movementSequenceIndex: playerData.movementSequenceIndex
+      });
+    }
+  }, 200);
+}
+
 // Initialize database with animation columns if they don't exist
 async function initializeDatabase() {
   try {
@@ -641,7 +734,8 @@ async function initializeDatabase() {
       ADD COLUMN IF NOT EXISTS is_attacking BOOLEAN DEFAULT false,
       ADD COLUMN IF NOT EXISTS animation_frame INTEGER DEFAULT 1,
       ADD COLUMN IF NOT EXISTS movement_sequence_index INTEGER DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'player'
+      ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'player',
+      ADD COLUMN IF NOT EXISTS is_picking_up BOOLEAN DEFAULT false
     `);
 
     // Create map_items table if it doesn't exist
@@ -1018,6 +1112,9 @@ wss.on('connection', (ws) => {
         return;
       }
       
+      // Start pickup animation
+      startPickupAnimation(playerData, ws);
+
       // Pick up the item
       const oldHands = playerData.hands || 0;
       playerData.hands = itemId;
