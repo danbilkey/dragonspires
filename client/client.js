@@ -757,6 +757,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- INPUT ----------
   window.addEventListener('keydown', (e) => {
+    // Help controls with Ctrl+Z
+    if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      showHelpControls();
+      return;
+    }
     if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
 
     // Toggle / submit chat
@@ -766,6 +772,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const toSend = typingBuffer.trim();
         if (toSend === '-pos' && localPlayer) {
           pushChat(`~ ${localPlayer.username} is currently on Map ${localPlayer.map_id ?? 1} at location x:${localPlayer.pos_x}, y:${localPlayer.pos_y}.`);
+        } else if (toSend === '-help') {
+          showHelpControls();
         } else if (toSend.length > 0) {
           send({ type: 'chat', text: toSend.slice(0, CHAT_INPUT.maxLen) });
         }
@@ -1086,6 +1094,12 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
       else if (mx >= lb.x && mx <= lb.x + lb.w && my >= lb.y && my <= lb.y + lb.h) { send({ type: 'login', username: usernameStr, password: passwordStr }); return; }
       else if (mx >= sb.x && mx <= sb.x + sb.w && my >= sb.y && my <= sb.y + sb.h) { send({ type: 'signup', username: usernameStr, password: passwordStr }); return; }
       activeField = null;
+      return;
+    }
+
+    // Handle help area click (114,241 to 150,254)
+    if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 241 && my <= 254) {
+      showHelpControls();
       return;
     }
 
@@ -1593,6 +1607,17 @@ function drawInventory() {
     if (!itemDetails) return false;
     const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
     return pickupableTypes.includes(itemDetails.type);
+  }
+
+  function showHelpControls() {
+    pushChat("[*] DragonSpires - Controls [*]");
+    pushChat("- WASD or Arrow Keys to Move");
+    pushChat("- TAB key to Attack");
+    pushChat("- 'G' key to pick-up / drop an item");
+    pushChat("- 'T' key to equip a weapon in your hand");
+    pushChat("- 'Y' key to equip armor in your hand");
+    pushChat("- 'I' key to open / close your inventory");
+    pushChat("- 'C' key to swap an item from your inventory to your hand");
   }
 
   window.connectToServer = connectToServer;
