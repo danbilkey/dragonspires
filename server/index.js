@@ -315,7 +315,7 @@ async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
   const r = await pool.query(
     `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, animation_frame, movement_sequence_index)
-     VALUES ($1, $2, 1, 5, 5, $3, $4, $5, $6, $7) RETURNING *`,
+     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7) RETURNING *`,
     [username, hashed, 'down', false, false, DIRECTION_IDLE.down, 0]
   );
   
