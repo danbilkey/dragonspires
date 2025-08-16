@@ -770,12 +770,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!chatMode) { chatMode = true; typingBuffer = ""; }
       else {
         const toSend = typingBuffer.trim();
-        if (toSend === '-pos' && localPlayer) {
+       if (toSend === '-pos' && localPlayer) {
           pushChat(`~ ${localPlayer.username} is currently on Map ${localPlayer.map_id ?? 1} at location x:${localPlayer.pos_x}, y:${localPlayer.pos_y}.`);
         } else if (toSend === '-help') {
           showHelpControls();
         } else if (toSend === '-cls') {
           clearChatMessages();
+        } else if (toSend === '-stats') {
+          showPlayerStats();
         } else if (toSend.length > 0) {
           send({ type: 'chat', text: toSend.slice(0, CHAT_INPUT.maxLen) });
         }
@@ -1107,6 +1109,11 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
     // Handle clear chat area click (114,211 to 150,224)
     if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 211 && my <= 224) {
       clearChatMessages();
+      return;
+    }
+    // Handle stats area click (74,196 to 110,209)
+    if (connected && loggedIn && mx >= 74 && mx <= 110 && my >= 196 && my <= 209) {
+      showPlayerStats();
       return;
     }
 
@@ -1628,6 +1635,36 @@ function drawInventory() {
 
   function clearChatMessages() {
     messages = [];
+  }
+
+  function showPlayerStats() {
+    if (!localPlayer) return;
+    
+    pushChat("[*] Player Stats [*]");
+    
+    // Get weapon stats
+    let weaponStats = "None";
+    if (localPlayer.weapon && localPlayer.weapon > 0) {
+      const weaponDetails = getItemDetails(localPlayer.weapon);
+      if (weaponDetails) {
+        weaponStats = `${weaponDetails.statMin} - ${weaponDetails.statMax}`;
+      }
+    }
+    
+    // Get armor stats
+    let armorStats = "None";
+    if (localPlayer.armor && localPlayer.armor > 0) {
+      const armorDetails = getItemDetails(localPlayer.armor);
+      if (armorDetails) {
+        armorStats = `${armorDetails.statMin} - ${armorDetails.statMax}`;
+      }
+    }
+    
+    pushChat(`Weapon: ${weaponStats}`);
+    pushChat(`Armor: ${armorStats}`);
+    pushChat(`Life: ${localPlayer.life || 0} / ${localPlayer.max_life || 0}`);
+    pushChat(`Stamina: ${localPlayer.stamina || 0} / ${localPlayer.max_stamina || 0}`);
+    pushChat(`Magic: ${localPlayer.magic || 0} / ${localPlayer.max_magic || 0}`);
   }
 
   window.connectToServer = connectToServer;
