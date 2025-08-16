@@ -162,9 +162,10 @@
   ["Steel Mace","false","weapon",1,2,"A steel mace."],
   ["Spiked Mace","false","weapon"1,3,"A spiky mace for poking holes in your enemies."],
   ["Stick","false","nothing",0,0,"It's a wooden stick, neat!"],
-  ["Shovel","false","weapon",0,2,"A metal shovel."],  ["","","",0,0,""],
+  ["Shovel","false","weapon",0,2,"A metal shovel."],
   ["Red Potion","true","interactable",0,0,"A mysterious red potion."],
   ["Blue Potion","true","interactable",0,0,"A mysterious blue potion."], 
+  ["","","",0,0,""],
   ["","","",0,0,""],
   ["","","",0,0,""],
   ["","","",0,0,""],
@@ -361,3 +362,4 @@
   ["","","",0,0,""]
   ]
 }
+
