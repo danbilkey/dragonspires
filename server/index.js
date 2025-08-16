@@ -610,9 +610,18 @@ function stopAttackAnimation(playerData, ws) {
     attackTimeouts.delete(playerData.id);
   }
 
-  // Set back to idle animation for current direction
+  // Set back to appropriate animation based on current state
   playerData.isAttacking = false;
-  playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
+  
+  // If player is in stand state (from pickup), keep them in stand
+  // Otherwise return to directional idle
+  if (playerData.animationFrame === 20 && !playerData.isMoving) {
+    // Keep stand animation
+    playerData.animationFrame = 20;
+  } else {
+    // Return to directional idle
+    playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
+  }
   
   // Update database
   updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, false, playerData.animationFrame, playerData.movementSequenceIndex)
