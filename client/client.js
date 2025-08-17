@@ -704,6 +704,7 @@ document.addEventListener('DOMContentLoaded', () => {
         localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
       } else if (otherPlayers[msg.id]) {
         otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+        if (typeof msg.step !== 'undefined') otherPlayers[msg.id].step = msg.step;
         otherPlayers[msg.id].isMoving = msg.isMoving || false;
         otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
         otherPlayers[msg.id].isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
