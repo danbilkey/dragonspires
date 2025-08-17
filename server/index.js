@@ -685,6 +685,9 @@ function stopAttackAnimation(playerData, ws) {
   // Set back to appropriate animation based on current state
   playerData.isAttacking = false;
   
+  // Reset step to 2 after attack concludes
+  playerData.step = 2;
+  
   // If player is in stand state (from pickup), keep them in stand
   // Otherwise return to directional idle
   if (playerData.animationFrame === 20 && !playerData.isMoving) {
@@ -696,14 +699,17 @@ function stopAttackAnimation(playerData, ws) {
   }
   
   // Update database
-  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, false, playerData.animationFrame, playerData.movementSequenceIndex)
-    .catch(err => console.error('Attack stop DB error:', err));
+  Promise.allSettled([
+    updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, false, playerData.animationFrame, playerData.movementSequenceIndex),
+    updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
+  ]).catch(err => console.error('Attack stop DB error:', err));
 
   // Broadcast attack stop
   broadcast({
     type: 'animation_update',
     id: playerData.id,
     direction: playerData.direction,
+    step: playerData.step,
     isMoving: playerData.isMoving,
     isAttacking: false,
     animationFrame: playerData.animationFrame,
@@ -764,17 +770,21 @@ function stopPickupAnimation(playerData, ws) {
 
   // Set to 'stand' animation (index 20) - this will be overridden if player moves
   playerData.isPickingUp = false;
+  playerData.step = 2; // Reset step to 2 after pickup
   playerData.animationFrame = 20; // 'stand' animation
   
   // Update database
-  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex, false)
-    .catch(err => console.error('Pickup stop DB error:', err));
+  Promise.allSettled([
+    updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex, false),
+    updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
+  ]).catch(err => console.error('Pickup stop DB error:', err));
 
   // Broadcast stand animation
   broadcast({
     type: 'animation_update',
     id: playerData.id,
     direction: playerData.direction,
+    step: playerData.step,
     isMoving: playerData.isMoving,
     isAttacking: playerData.isAttacking,
     isPickingUp: false,
@@ -1173,19 +1183,23 @@ wss.on('connection', (ws) => {
       // Update direction without moving
       if (msg.direction) {
         playerData.direction = msg.direction;
+        playerData.step = 2; // Set step to 2 when rotating
         playerData.isAttacking = false;
         playerData.isMoving = false;
         playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
         
         // Update database
-        updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
-          .catch(err => console.error('Rotation DB error:', err));
+        Promise.allSettled([
+          updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex),
+          updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
+        ]).catch(err => console.error('Rotation DB error:', err));
         
         // Broadcast rotation to all clients
         broadcast({
           type: 'animation_update',
           id: playerData.id,
           direction: playerData.direction,
+          step: playerData.step,
           isMoving: false,
           isAttacking: false,
           animationFrame: playerData.animationFrame,
