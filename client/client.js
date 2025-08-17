@@ -1370,19 +1370,46 @@ if (shouldTeleport) {
   
   lastMoveTime = currentTime;
   
-  // Send telepo
-        
-          setTimeout(() => {
-            if (localPlayer) {
-              localPlayer.isMoving = false;
-              movementAnimationState = 0;
-            }
-          }, 200);
-        } else {
-          playerDirection = newDirection;
-          movementAnimationState = 1; // Always use walk_1 for consistency
-          lastMoveTime = currentTime;
-        }
+  // Send teleport move to server
+send({ type: 'move', dx: dx, dy: dy, direction: playerDirection, teleport: true, finalX: currentX, finalY: currentY });
+
+// Reset stand flag when teleporting
+shouldStayInStand = false;
+} else if (canMoveTo(nx, ny, localPlayer.id)) {
+  // Normal movement logic
+  if (localAttackTimeout) {
+    clearTimeout(localAttackTimeout);
+    localAttackTimeout = null;
+  }
+  isLocallyAttacking = false;
+  
+  playerDirection = newDirection;
+  movementAnimationState = 1; // Always use walk_1 for consistency
+  
+  localPlayer.direction = playerDirection;
+  localPlayer.pos_x = nx;
+  localPlayer.pos_y = ny;
+  localPlayer.isAttacking = false;
+  localPlayer.isMoving = true;
+  
+  lastMoveTime = currentTime;
+  
+  send({ type: 'move', dx, dy, direction: playerDirection });
+
+  // Reset stand flag when actually moving
+  shouldStayInStand = false;
+  
+  setTimeout(() => {
+    if (localPlayer) {
+      localPlayer.isMoving = false;
+      movementAnimationState = 0;
+    }
+  }, 200);
+} else {
+  playerDirection = newDirection;
+  movementAnimationState = 1; // Always use walk_1 for consistency
+  lastMoveTime = currentTime;
+}
       }
     }
   });
