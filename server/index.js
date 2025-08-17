@@ -576,6 +576,44 @@ function checkTeleportDestination(x, y, itemId) {
   return destX >= 0 && destY >= 0 && destX < MAP_WIDTH && destY < MAP_HEIGHT;
 }
 
+function calculateChainTeleportation(startX, startY, mapSpec) {
+  let currentX = startX;
+  let currentY = startY;
+  let teleportCount = 0;
+  const maxTeleports = 10;
+  
+  // Keep teleporting until we land on a non-teleport tile or hit max teleports
+  while (teleportCount < maxTeleports) {
+    const currentItemId = getItemAtPosition(currentX, currentY, mapSpec);
+    if (currentItemId !== 42 && currentItemId !== 338) {
+      break; // Not a teleport tile, stop here
+    }
+    
+    let nextX, nextY;
+    if (currentItemId === 42) {
+      // 2 left, 1 up from the teleport tile
+      nextX = currentX - 2;
+      nextY = currentY - 1;
+    } else if (currentItemId === 338) {
+      // 2 up, 1 left from the teleport tile  
+      nextX = currentX - 1;
+      nextY = currentY - 2;
+    }
+    
+    // Check if teleport destination is within bounds
+    if (nextX >= 0 && nextY >= 0 && nextX < MAP_WIDTH && nextY < MAP_HEIGHT) {
+      currentX = nextX;
+      currentY = nextY;
+      teleportCount++;
+    } else {
+      // Can't teleport out of bounds, stop on current teleport tile
+      break;
+    }
+  }
+  
+  return { x: currentX, y: currentY, teleportCount };
+}
+
 // Start attack animation for a player
 function startAttackAnimation(playerData, ws) {
   // Clear any existing attack timeout
@@ -931,6 +969,18 @@ wss.on('connection', (ws) => {
 
       // Clear temporary sprite when moving
       playerData.temporarySprite = 0;
+
+      // Clear fountain effect when moving (broadcast to all players)
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'clear_fountain_effect',
+              playerId: playerData.id
+            }));
+          }
+        }
+      }
     
       // Clear BRB state when player moves
       if (playerData.isBRB) {
@@ -978,64 +1028,58 @@ wss.on('connection', (ws) => {
       const ny = playerData.pos_y + dy;
 
      // Check for teleportation items first
-    const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
-    if (targetItemId === 42 || targetItemId === 338) {
-      // Handle teleportation immediately
-      let teleX, teleY;
-      if (targetItemId === 42) {
-        teleX = nx - 2;
-        teleY = ny - 1;
-      } else if (targetItemId === 338) {
-        teleX = nx - 1;
-        teleY = ny - 2;
-      }
-      
-      // Check if teleport destination is within bounds
-      if (teleX < 0 || teleY < 0 || teleX >= MAP_WIDTH || teleY >= MAP_HEIGHT) {
-        // Don't allow movement onto teleport tile if destination is out of bounds
+      const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
+      if (targetItemId === 42 || targetItemId === 338) {
+        // Handle chain teleportation
+        const finalDestination = calculateChainTeleportation(nx, ny, serverMapSpec);
+        
+        // Check if final destination is within bounds (should be, but double-check)
+        if (finalDestination.x < 0 || finalDestination.y < 0 || 
+            finalDestination.x >= MAP_WIDTH || finalDestination.y >= MAP_HEIGHT) {
+          // Don't allow movement if final destination is out of bounds
+          return;
+        }
+        
+        // Decrement stamina for the movement attempt (only once)
+        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
+        
+        // Set position to final teleport destination
+        playerData.pos_x = finalDestination.x;
+        playerData.pos_y = finalDestination.y;
+        
+        // Update direction
+        if (msg.direction) {
+          playerData.direction = msg.direction;
+        }
+        
+        // Keep movement sequence at 0 for teleport (no walking animation)
+        playerData.movementSequenceIndex = 0;
+        playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
+        playerData.isMoving = false;
+        playerData.isAttacking = false;
+        
+        // Save to database
+        Promise.allSettled([
+          updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
+          updatePosition(playerData.id, finalDestination.x, finalDestination.y),
+          updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, 0)
+        ]).catch(()=>{});
+        
+        // Broadcast the final teleported position
+        broadcast({ 
+          type: 'player_moved', 
+          id: playerData.id, 
+          x: finalDestination.x, 
+          y: finalDestination.y, 
+          direction: playerData.direction,
+          isMoving: false,
+          isAttacking: false,
+          animationFrame: playerData.animationFrame,
+          movementSequenceIndex: 0
+        });
+        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
         return;
       }
-      
-      // Decrement stamina for the movement attempt
-      playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
-      
-      // Set position to teleport destination, not the teleport tile
-      playerData.pos_x = teleX;
-      playerData.pos_y = teleY;
-      
-      // Update direction
-      if (msg.direction) {
-        playerData.direction = msg.direction;
-      }
-      
-      // Keep movement sequence at 0 for teleport (no walking animation)
-      playerData.movementSequenceIndex = 0;
-      playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
-      playerData.isMoving = false;
-      playerData.isAttacking = false;
-      
-      // Save to database
-      Promise.allSettled([
-        updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
-        updatePosition(playerData.id, teleX, teleY),
-        updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, 0)
-      ]).catch(()=>{});
-      
-      // Broadcast the teleported position
-      broadcast({ 
-        type: 'player_moved', 
-        id: playerData.id, 
-        x: teleX, 
-        y: teleY, 
-        direction: playerData.direction,
-        isMoving: false,
-        isAttacking: false,
-        animationFrame: playerData.animationFrame,
-        movementSequenceIndex: 0
-      });
-      send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-      return;
-    }
       
       if (canMoveTo(nx, ny, playerData.id)) {
         // Decrement stamina by **1**
@@ -1426,6 +1470,19 @@ wss.on('connection', (ws) => {
       
       // Clear temporary sprite when toggling BRB
       playerData.temporarySprite = 0;
+
+      // Clear fountain effect when moving (broadcast to all players)
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'clear_fountain_effect',
+              playerId: playerData.id
+            }));
+          }
+        }
+      }
+
       // Broadcast temporary sprite clear
       for (const [otherWs, otherPlayer] of clients.entries()) {
         if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
@@ -1496,6 +1553,18 @@ wss.on('connection', (ws) => {
       
       // Clear temporary sprite
       playerData.temporarySprite = 0;
+
+      // Clear fountain effect when rotating (broadcast to all players)
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'clear_fountain_effect',
+              playerId: playerData.id
+            }));
+          }
+        }
+      }
       
       // Reduce magic
       playerData.magic = Math.max(0, (playerData.magic || 0) - magicCost);
