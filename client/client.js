@@ -141,7 +141,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Inventory state - MOVED TO TOP LEVEL
   let inventoryVisible = false;
+  let temporarySprite = 0; // For temporary sprite rendering
   let inventorySelectedSlot = 1; // Default to slot 1
+  let chatScrollOffset = 0; // For scrolling through chat messages
   let playerInventory = {}; // { slotNumber: itemId }
 
   // ---------- COLLISION HELPERS ----------
@@ -539,6 +541,10 @@ document.addEventListener('DOMContentLoaded', () => {
       localPlayer = null;
       otherPlayers = {};
       mapItems = {};
+      
+      // Add disconnection message to chat
+      pushChat("~ You have been disconnected from the server.");
+      
       // Clear any pending attack timeout
       if (localAttackTimeout) {
         clearTimeout(localAttackTimeout);
@@ -553,13 +559,13 @@ document.addEventListener('DOMContentLoaded', () => {
       isBRB = false;
       playerInventory = {};
       inventoryVisible = false;
-
+    
       // Auto-reconnect after 3 seconds if not manually closed
       if (e.code !== 1000) { // 1000 = normal closure
         console.log('Attempting to reconnect in 3 seconds...');
         setTimeout(connectToServer, 3000);
       }
-    };
+    };;
   }
   connectToServer();
 
@@ -704,6 +710,14 @@ document.addEventListener('DOMContentLoaded', () => {
             isBRB = msg.brb || false;
           } else if (otherPlayers[msg.id]) {
             otherPlayers[msg.id].isBRB = msg.brb || false;
+          }
+          break;
+        case 'temporary_sprite_update':
+          if (localPlayer && msg.id === localPlayer.id) {
+            localPlayer.temporarySprite = msg.temporarySprite || 0;
+            temporarySprite = localPlayer.temporarySprite;
+          } else if (otherPlayers[msg.id]) {
+            otherPlayers[msg.id].temporarySprite = msg.temporarySprite || 0;
           }
           break;
       case 'item_placed':
@@ -858,6 +872,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loggedIn && localPlayer && e.key === 'g') {
       e.preventDefault();
       
+      // Clear temporary sprite when picking up
+      clearTemporarySprite();
+
       // Start local pickup animation immediately
       isLocallyPickingUp = true;
       shouldStayInStand = true; // Set flag to stay in stand after animation
@@ -972,6 +989,8 @@ document.addEventListener('DOMContentLoaded', () => {
       // Reduce stamina by 10 locally for immediate feedback
       localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 10);
       
+      // Clear temporary sprite when attacking
+      clearTemporarySprite();
       isLocallyAttacking = true;
       localAttackState = (localAttackState + 1) % 2;
       
@@ -1057,6 +1076,8 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
       else if (k === 'arrowright' || k === 'd') { dx = 1; newDirection = 'right'; }
       
       if (dx || dy) {
+        // Clear temporary sprite when moving
+        clearTemporarySprite();
         // Clear BRB state when moving
         if (isBRB) {
           isBRB = false;
@@ -1141,6 +1162,19 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
     // Handle BRB area click (114,196 to 150,209)
     if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 196 && my <= 209) {
       toggleBRB();
+      return;
+    }
+
+    // Handle chat scroll up click (135,382 to 151,390)
+    if (connected && loggedIn && mx >= 135 && mx <= 151 && my >= 382 && my <= 390) {
+      const maxVisibleLines = Math.floor((CHAT.y2 - CHAT.y1 - CHAT.pad * 2) / 16);
+      const maxScrollUp = Math.max(0, messages.length - maxVisibleLines);
+      chatScrollOffset = Math.min(chatScrollOffset + 1, maxScrollUp);
+      return;
+    }
+    // Handle chat scroll down click (135,394 to 151,402)
+    if (connected && loggedIn && mx >= 135 && mx <= 151 && my >= 394 && my <= 402) {
+      chatScrollOffset = Math.max(chatScrollOffset - 1, 0);
       return;
     }
 
@@ -1325,7 +1359,16 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
       animFrame = getCurrentAnimationFrame(p, false);
     }
     
-    if (playerSpritesReady && playerSprites[animFrame] && playerSprites[animFrame].complete) {
+    // Check for temporary sprite first
+    if (p.temporarySprite && p.temporarySprite > 0 && window.itemsReady()) {
+      const meta = window.getItemMeta(p.temporarySprite);
+      if (meta && meta.img && meta.img.complete) {
+        const { img, yOffset } = meta;
+        const drawX = screenX;
+        const drawY = screenY - (yOffset || 0);
+        ctx.drawImage(img, drawX, drawY);
+      }
+    } else if (playerSpritesReady && playerSprites[animFrame] && playerSprites[animFrame].complete) {
       const sprite = playerSprites[animFrame];
       const meta = playerSpriteMeta[animFrame];
       
@@ -1385,12 +1428,40 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
     ctx.font = '12px monospace'; ctx.fillStyle = '#000'; ctx.textAlign = 'left';
     const lineH = 16;
     let y = y2 - pad;
-    for (let i = messages.length - 1; i >= 0; i--) {
+    
+    // Calculate visible messages based on scroll offset
+    const maxVisibleLines = Math.floor((y2 - y1 - pad * 2) / lineH);
+    const startIndex = Math.max(0, messages.length - maxVisibleLines - chatScrollOffset);
+    const endIndex = Math.max(0, messages.length - chatScrollOffset);
+    
+    for (let i = endIndex - 1; i >= startIndex; i--) {
       let line = messages[i];
       while (ctx.measureText(line).width > w - pad*2 && line.length > 1) line = line.slice(0, -1);
       ctx.fillText(line, x1 + pad, y);
       y -= lineH;
       if (y < y1 + pad) break;
+    }
+    
+    // Draw scroll indicator if there are more messages than can be displayed
+    const totalLines = messages.length;
+    if (totalLines > maxVisibleLines) {
+      const scrollBarX = x2 - 8;
+      const scrollBarY = y1 + 5;
+      const scrollBarH = (y2 - y1) - 10;
+      
+      // Draw scroll track
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(scrollBarX, scrollBarY, 6, scrollBarH);
+      
+      // Calculate scroll thumb position and size
+      const thumbHeight = Math.max(10, (maxVisibleLines / totalLines) * scrollBarH);
+      const maxScrollOffset = totalLines - maxVisibleLines;
+      const thumbY = scrollBarY + ((maxScrollOffset - chatScrollOffset) / maxScrollOffset) * (scrollBarH - thumbHeight);
+      
+      // Draw scroll thumb
+      ctx.fillStyle = '#999';
+      ctx.fillRect(scrollBarX + 1, thumbY, 4, thumbHeight);
     }
   }
   
@@ -1486,7 +1557,8 @@ function drawInventory() {
       else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
       if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
-      else ctx.fillText('Connecting to server...', 47, 347);
+      else if (connected) ctx.fillText('Connecting to server...', 47, 347);
+      else ctx.fillText('Disconnected - press any key to reconnect', 47, 347);
     } else {
       ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
@@ -1498,6 +1570,11 @@ function drawInventory() {
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
+
+    // Draw stand sprite at position 13,198 after login border
+    if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
+      ctx.drawImage(playerSprites[20], 13, 198);
+    }
 
     if (activeField === null) {
       activeField = 'username';
@@ -1703,7 +1780,20 @@ function drawInventory() {
     pushChat(`Magic: ${localPlayer.magic || 0} / ${localPlayer.max_magic || 0}`);
   }
 
+  function clearTemporarySprite() {
+    if (temporarySprite !== 0) {
+      temporarySprite = 0;
+      if (localPlayer) {
+        localPlayer.temporarySprite = 0;
+        send({ type: 'temporary_sprite_update', temporarySprite: 0 });
+      }
+    }
+  }
+
   function toggleBRB() {
+    // Clear temporary sprite when toggling BRB
+    clearTemporarySprite();
+
     isBRB = !isBRB;
     if (isBRB) {
       // Clear any ongoing animations when going BRB
