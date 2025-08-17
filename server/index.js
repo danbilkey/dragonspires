@@ -1741,8 +1741,7 @@ wss.on('connection', (ws) => {
         pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetMap, playerData.id])
       ]).catch(err => console.error('Error updating player after teleport:', err));
       
-      // Update the player's map_id in the clients Map immediately
-      clients.set(ws, playerData);
+
       
       // No need to broadcast "player left" for teleports since player_joined will handle the update
       
@@ -1778,13 +1777,9 @@ wss.on('connection', (ws) => {
       send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
       
       // Broadcast position update to all players on target map (works for both same-map and different-map teleports)
-      console.log(`Teleport: ${playerData.username} teleported to (${targetX}, ${targetY}) on map ${targetMap}`);
-      console.log(`Players on target map ${targetMap}:`);
       for (const [otherWs, otherPlayer] of clients.entries()) {
-        console.log(`  - ${otherPlayer?.username || 'Unknown'} (ID: ${otherPlayer?.id}) on map ${otherPlayer?.map_id}`);
         if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
           if (otherWs.readyState === WebSocket.OPEN) {
-            console.log(`Sending player_moved to ${otherPlayer.username} for ${playerData.username} teleport`);
             otherWs.send(JSON.stringify({
               type: 'player_moved',
               id: playerData.id,
