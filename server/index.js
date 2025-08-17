@@ -227,6 +227,16 @@ function getItemDetails(itemId) {
   return itemDetails[itemId - 1];
 }
 
+function getRandomItemByTypes(types) {
+  if (!itemDetailsReady || !itemDetails) return 0;
+  
+  const matchingItems = itemDetails.filter(item => types.includes(item.type));
+  if (matchingItems.length === 0) return 0;
+  
+  const randomItem = matchingItems[Math.floor(Math.random() * matchingItems.length)];
+  return randomItem.id;
+}
+
 function getItemAtPosition(x, y, mapSpec) {
   // Check both map items and placed items
   const mapItem = (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
@@ -547,6 +557,23 @@ function canMoveTo(x, y, excludePlayerId = null) {
   }
   
   return true;
+}
+
+function checkTeleportDestination(x, y, itemId) {
+  let destX = x, destY = y;
+  
+  if (itemId === 42) {
+    // 2 left, 1 up
+    destX = x - 2;
+    destY = y - 1;
+  } else if (itemId === 338) {
+    // 2 up, 1 left
+    destX = x - 1;
+    destY = y - 2;
+  }
+  
+  // Check if destination is within map bounds
+  return destX >= 0 && destY >= 0 && destX < MAP_WIDTH && destY < MAP_HEIGHT;
 }
 
 // Start attack animation for a player
@@ -950,12 +977,36 @@ wss.on('connection', (ws) => {
       const nx = playerData.pos_x + dx;
       const ny = playerData.pos_y + dy;
 
-      // Use the new collision checking function
+      // Check for teleportation items and validate destination
+      const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
+      if ((targetItemId === 42 || targetItemId === 338) && !checkTeleportDestination(nx, ny, targetItemId)) {
+        // Don't allow movement onto teleport item if destination is out of bounds
+        return;
+      }
+      
       if (canMoveTo(nx, ny, playerData.id)) {
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
         playerData.pos_y = ny;
+        
+        // Handle teleportation items
+        const itemAtNewPos = getItemAtPosition(nx, ny, serverMapSpec);
+        if (itemAtNewPos === 42) {
+          // Teleport 2 left, 1 up
+          const teleX = nx - 2;
+          const teleY = ny - 1;
+          playerData.pos_x = teleX;
+          playerData.pos_y = teleY;
+          updatePosition(playerData.id, teleX, teleY).catch(()=>{});
+        } else if (itemAtNewPos === 338) {
+          // Teleport 2 up, 1 left
+          const teleX = nx - 1;
+          const teleY = ny - 2;
+          playerData.pos_x = teleX;
+          playerData.pos_y = teleY;
+          updatePosition(playerData.id, teleX, teleY).catch(()=>{});
+        }
 
         // IMMEDIATELY update direction for consistent state
         if (msg.direction) {
@@ -1390,7 +1441,94 @@ wss.on('connection', (ws) => {
           }
         }
       }
+    else if (msg.type === 'use_transformation_item') {
+  if (!playerData) return;
+  
+  const { itemId, magicCost, resultItem } = msg;
+  
+  // Verify player has the item in hands
+  if (playerData.hands !== itemId) return;
+  
+  // Verify player has enough magic
+  if ((playerData.magic || 0) < magicCost) {
+    send(ws, {
+      type: 'transformation_result',
+      success: false,
+      message: '~ You do not have enough magic to use that item!'
+    });
+    return;
+  }
+  
+  // Clear temporary sprite
+  playerData.temporarySprite = 0;
+  
+  // Reduce magic
+  playerData.magic = Math.max(0, (playerData.magic || 0) - magicCost);
+  
+  let finalResultItem = resultItem;
+  
+  // Special case for item 283 - random transformation
+  if (itemId === 283) {
+    const validTypes = ['nothing', 'sign', 'portal', 'interactable'];
+    finalResultItem = getRandomItemByTypes(validTypes);
+  }
+  
+  // Set temporary sprite
+  playerData.temporarySprite = finalResultItem;
+  
+  // Update database
+  updateStatsInDb(playerData.id, { magic: playerData.magic })
+    .catch(err => console.error('Error updating magic after transformation:', err));
+  
+  // Send success response to player
+  send(ws, {
+    type: 'transformation_result',
+    success: true,
+    id: playerData.id,
+    newMagic: playerData.magic,
+    temporarySprite: playerData.temporarySprite
+  });
+  
+  // Broadcast magic update
+  send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
+  
+  // Broadcast temporary sprite update to all players on same map
+  for (const [otherWs, otherPlayer] of clients.entries()) {
+    if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+      if (otherWs.readyState === WebSocket.OPEN) {
+        otherWs.send(JSON.stringify({
+          type: 'temporary_sprite_update',
+          id: playerData.id,
+          temporarySprite: playerData.temporarySprite
+        }));
+      }
+    }
+  }
+}
 
+    else if (msg.type === 'teleport') {
+      if (!playerData) return;
+      
+      // Update position to teleported location
+      playerData.pos_x = msg.x;
+      playerData.pos_y = msg.y;
+      
+      // Update database
+      updatePosition(playerData.id, msg.x, msg.y).catch(()=>{});
+      
+      // Broadcast teleportation
+      broadcast({ 
+        type: 'player_moved', 
+        id: playerData.id, 
+        x: msg.x, 
+        y: msg.y, 
+        direction: playerData.direction,
+        isMoving: playerData.isMoving,
+        isAttacking: playerData.isAttacking,
+        animationFrame: playerData.animationFrame,
+        movementSequenceIndex: playerData.movementSequenceIndex
+      });
+    }
     else if (msg.type === 'chat') {
       if (!playerData || typeof msg.text !== 'string') return;
       const t = msg.text.trim();
