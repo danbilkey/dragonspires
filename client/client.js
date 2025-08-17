@@ -640,7 +640,6 @@
               animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
               movementSequenceIndex: msg.player.movementSequenceIndex || 0
             };
-            pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
           }
           break;
           
@@ -661,20 +660,18 @@
                 pos_x: msg.x, 
                 pos_y: msg.y,
                 direction: msg.direction || 'down',
-                step: msg.step || 2,
                 isMoving: msg.isMoving || false,
-                isAttacking: msg.isAttacking || false,
-                isPickingUp: false,
-                isBRB: false,
-                temporarySprite: 0
+                isAttacking: false,
+                animationFrame: msg.animationFrame || DIRECTION_IDLE.down,
+                movementSequenceIndex: msg.movementSequenceIndex || 0
               };
             } else { 
               otherPlayers[msg.id].pos_x = msg.x; 
               otherPlayers[msg.id].pos_y = msg.y;
               otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
-              otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
               otherPlayers[msg.id].isMoving = msg.isMoving || false;
-              otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
+              otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
+              otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
             }
           }
           break;
@@ -813,9 +810,6 @@
           break;
           
         case 'player_left':
-          const p = otherPlayers[msg.id];
-          const name = p?.username ?? msg.id;
-          if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
           delete otherPlayers[msg.id];
           break;
           
