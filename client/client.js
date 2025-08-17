@@ -720,6 +720,15 @@ document.addEventListener('DOMContentLoaded', () => {
             otherPlayers[msg.id].temporarySprite = msg.temporarySprite || 0;
           }
           break;
+        case 'transformation_result':
+          if (msg.success && localPlayer && msg.id === localPlayer.id) {
+            localPlayer.magic = msg.newMagic;
+            temporarySprite = msg.temporarySprite;
+            localPlayer.temporarySprite = msg.temporarySprite;
+          } else if (!msg.success && msg.message) {
+            pushChat(msg.message);
+          }
+          break;
       case 'item_placed':
         const key = `${msg.x},${msg.y}`;
         if (msg.itemId === 0) {
@@ -863,6 +872,45 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } else {
         pushChat("~ You see nothing.");
+      }
+      
+      return;
+    }
+
+    // Transformation with 'U' key
+    if (loggedIn && localPlayer && e.key === 'u' || e.key === 'U') {
+      e.preventDefault();
+      
+      const handsItem = localPlayer.hands || 0;
+      const playerMagic = localPlayer.magic || 0;
+      
+      // Define transformation mappings
+      const transformations = {
+        57: { cost: 10, result: 14 },   // Item 57 -> Item 14
+        101: { cost: 10, result: 87 },  // Item 101 -> Item 87
+        59: { cost: 10, result: 61 },   // Item 59 -> Item 61
+        98: { cost: 10, result: 117 },  // Item 98 -> Item 117
+        285: { cost: 10, result: 323 }, // Item 285 -> Item 323
+        283: { cost: 10, result: -1 }   // Item 283 -> Random (special case)
+      };
+      
+      if (handsItem > 0 && transformations[handsItem]) {
+        const transformation = transformations[handsItem];
+        
+        if (playerMagic >= transformation.cost) {
+          // Clear any existing temporary sprite first
+          clearTemporarySprite();
+          
+          // Send transformation request to server
+          send({ 
+            type: 'use_transformation_item', 
+            itemId: handsItem,
+            magicCost: transformation.cost,
+            resultItem: transformation.result
+          });
+        } else {
+          pushChat("~ You do not have enough magic to use that item!");
+        }
       }
       
       return;
@@ -1098,6 +1146,29 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           localPlayer.direction = playerDirection;
           localPlayer.pos_x = nx;
           localPlayer.pos_y = ny;
+          
+          // Check for teleportation items after moving
+          const itemAtNewPos = getItemAtPosition(nx, ny);
+          if (itemAtNewPos === 42) {
+            // Teleport 2 left, 1 up
+            const teleX = nx - 2;
+            const teleY = ny - 1;
+            if (teleX >= 0 && teleY >= 0 && teleX < mapSpec.width && teleY < mapSpec.height) {
+              localPlayer.pos_x = teleX;
+              localPlayer.pos_y = teleY;
+              send({ type: 'teleport', x: teleX, y: teleY });
+            }
+          } else if (itemAtNewPos === 338) {
+            // Teleport 2 up, 1 left
+            const teleX = nx - 1;
+            const teleY = ny - 2;
+            if (teleX >= 0 && teleY >= 0 && teleX < mapSpec.width && teleY < mapSpec.height) {
+              localPlayer.pos_x = teleX;
+              localPlayer.pos_y = teleY;
+              send({ type: 'teleport', x: teleX, y: teleY });
+            }
+          }
+          
           localPlayer.isAttacking = false;
           localPlayer.isMoving = true;
           
@@ -1558,7 +1629,7 @@ function drawInventory() {
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
       if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
       else if (connected) ctx.fillText('Connecting to server...', 47, 347);
-      else ctx.fillText('Disconnected - press any key to reconnect', 47, 347);
+      else ctx.fillText('Press any key to reconnect.', 47, 347);
     } else {
       ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
