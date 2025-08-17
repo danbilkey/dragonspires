@@ -324,9 +324,9 @@ async function loadPlayer(username) {
 async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
   const r = await pool.query(
-    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, step, is_moving, is_attacking, is_picking_up, animation_frame, movement_sequence_index)
-     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-    [username, hashed, 'down', 2, false, false, false, DIRECTION_IDLE.down, 0]
+    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, is_picking_up, animation_frame, movement_sequence_index)
+     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [username, hashed, 'down', false, false, false, DIRECTION_IDLE.down, 0]
   );
   
   // Initialize empty inventory for new player
@@ -344,13 +344,6 @@ async function updateAnimationState(playerId, direction, isMoving, isAttacking, 
   await pool.query(
     'UPDATE players SET direction=$1, is_moving=$2, is_attacking=$3, is_picking_up=$4, animation_frame=$5, movement_sequence_index=$6 WHERE id=$7',
     [direction, isMoving, isAttacking, isPickingUp, animationFrame, movementSequenceIndex, playerId]
-  );
-}
-
-async function updateDirectionAndStep(playerId, direction, step) {
-  await pool.query(
-    'UPDATE players SET direction=$1, step=$2 WHERE id=$3',
-    [direction, step, playerId]
   );
 }
 
@@ -685,9 +678,6 @@ function stopAttackAnimation(playerData, ws) {
   // Set back to appropriate animation based on current state
   playerData.isAttacking = false;
   
-  // Reset step to 2 after attack concludes
-  playerData.step = 2;
-  
   // If player is in stand state (from pickup), keep them in stand
   // Otherwise return to directional idle
   if (playerData.animationFrame === 20 && !playerData.isMoving) {
@@ -699,17 +689,14 @@ function stopAttackAnimation(playerData, ws) {
   }
   
   // Update database
-  Promise.allSettled([
-    updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, false, playerData.animationFrame, playerData.movementSequenceIndex),
-    updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
-  ]).catch(err => console.error('Attack stop DB error:', err));
+  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, false, playerData.animationFrame, playerData.movementSequenceIndex)
+    .catch(err => console.error('Attack stop DB error:', err));
 
   // Broadcast attack stop
   broadcast({
     type: 'animation_update',
     id: playerData.id,
     direction: playerData.direction,
-    step: playerData.step,
     isMoving: playerData.isMoving,
     isAttacking: false,
     animationFrame: playerData.animationFrame,
@@ -770,21 +757,17 @@ function stopPickupAnimation(playerData, ws) {
 
   // Set to 'stand' animation (index 20) - this will be overridden if player moves
   playerData.isPickingUp = false;
-  playerData.step = 2; // Reset step to 2 after pickup
   playerData.animationFrame = 20; // 'stand' animation
   
   // Update database
-  Promise.allSettled([
-    updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex, false),
-    updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
-  ]).catch(err => console.error('Pickup stop DB error:', err));
+  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex, false)
+    .catch(err => console.error('Pickup stop DB error:', err));
 
   // Broadcast stand animation
   broadcast({
     type: 'animation_update',
     id: playerData.id,
     direction: playerData.direction,
-    step: playerData.step,
     isMoving: playerData.isMoving,
     isAttacking: playerData.isAttacking,
     isPickingUp: false,
@@ -800,7 +783,6 @@ async function initializeDatabase() {
     await pool.query(`
       ALTER TABLE players 
       ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'down',
-      ADD COLUMN IF NOT EXISTS step INTEGER DEFAULT 2,
       ADD COLUMN IF NOT EXISTS is_moving BOOLEAN DEFAULT false,
       ADD COLUMN IF NOT EXISTS is_attacking BOOLEAN DEFAULT false,
       ADD COLUMN IF NOT EXISTS animation_frame INTEGER DEFAULT 1,
@@ -888,7 +870,6 @@ wss.on('connection', (ws) => {
           armor: found.armor ?? 0,
           hands: found.hands ?? 0,
           direction: found.direction ?? 'down',
-          step: found.step ?? 2,
           isMoving: found.is_moving ?? false,
           isAttacking: found.is_attacking ?? false,
           animationFrame: found.animation_frame ?? DIRECTION_IDLE.down,
@@ -906,33 +887,9 @@ wss.on('connection', (ws) => {
 
         const others = Array.from(clients.values())
           .filter(p => p.id !== playerData.id)
-          .map(p => ({ 
-            ...p, 
-            isBRB: p.isBRB || false,
-            temporarySprite: p.temporarySprite || 0,
-            step: p.step || 2,
-            direction: p.direction || 'down'
-          }));
-        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others, items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: { 
-          ...playerData, 
-          isBRB: playerData.isBRB || false,
-          temporarySprite: playerData.temporarySprite || 0,
-          step: playerData.step || 2,
-          direction: playerData.direction || 'down'
-        } });
-        
-        // Global chat message for login (exclude the player themselves)
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.id !== playerData.id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'chat',
-                text: `${playerData.username} has entered DragonSpires!`
-              }));
-            }
-          }
-        }
+          .map(p => ({ ...p, isBRB: p.isBRB || false }));
+        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: mapItems, inventory: inventory });
+        broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false } });
       } catch (e) {
         console.error('Login error', e);
         send(ws, { type: 'login_error', message: 'Server error' });
@@ -969,7 +926,6 @@ wss.on('connection', (ws) => {
           armor: created.armor ?? 0,
           hands: created.hands ?? 0,
           direction: created.direction ?? 'down',
-          step: created.step ?? 2,
           isMoving: created.is_moving ?? false,
           isAttacking: created.is_attacking ?? false,
           animationFrame: created.animation_frame ?? DIRECTION_IDLE.down,
@@ -985,34 +941,9 @@ wss.on('connection', (ws) => {
         // Load player inventory
         const inventory = await loadPlayerInventory(playerData.id);
 
-        const others = Array.from(clients.values())
-          .filter(p => p.id !== playerData.id)
-          .map(p => ({ 
-            ...p, 
-            isBRB: p.isBRB || false,
-            temporarySprite: p.temporarySprite || 0,
-            step: p.step || 2,
-            direction: p.direction || 'down'
-          }));
+        const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
         send(ws, { type: 'signup_success', player: playerData, players: others, items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: { 
-          ...playerData, 
-          temporarySprite: playerData.temporarySprite || 0,
-          step: playerData.step || 2,
-          direction: playerData.direction || 'down'
-        } });
-        
-        // Global chat message for signup (exclude the player themselves)  
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.id !== playerData.id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'chat',
-                text: `${playerData.username} has entered DragonSpires!`
-              }));
-            }
-          }
-        }
+        broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0 } });
       } catch (e) {
         console.error('Signup error', e);
         send(ws, { type: 'signup_error', message: 'Server error' });
@@ -1162,9 +1093,11 @@ wss.on('connection', (ws) => {
           playerData.direction = msg.direction;
         }
 
-        // Increment step: 1 -> 2 -> 3 -> 1
-        playerData.step = playerData.step === 3 ? 1 : (playerData.step || 2) + 1;
-        
+        // Advance movement sequence index
+        playerData.movementSequenceIndex = (playerData.movementSequenceIndex + 1) % MOVEMENT_SEQUENCE.length;
+
+        // Calculate animation frame based on movement sequence
+        playerData.animationFrame = getMovementAnimationFrame(playerData.direction, playerData.movementSequenceIndex);
         playerData.isMoving = true;
         playerData.isAttacking = false; // Ensure attack state is cleared
 
@@ -1172,7 +1105,7 @@ wss.on('connection', (ws) => {
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
           updatePosition(playerData.id, nx, ny),
-          updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
+          updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex)
         ]).catch(()=>{});
 
         // Broadcast the updated state immediately
@@ -1182,32 +1115,12 @@ wss.on('connection', (ws) => {
           x: nx, 
           y: ny, 
           direction: playerData.direction,
-          step: playerData.step,
           isMoving: playerData.isMoving,
-          isAttacking: playerData.isAttacking
+          isAttacking: playerData.isAttacking,
+          animationFrame: playerData.animationFrame,
+          movementSequenceIndex: playerData.movementSequenceIndex
         });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-      } else {
-        // Movement blocked but still increment step for visual feedback
-        if (msg.direction) {
-          playerData.direction = msg.direction;
-        }
-        
-        // Increment step even when movement is blocked
-        playerData.step = playerData.step === 3 ? 1 : (playerData.step || 2) + 1;
-        
-        // Save direction and step to database
-        updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
-        
-        // Broadcast the direction and step change
-        broadcast({ 
-          type: 'player_animation_update', 
-          id: playerData.id, 
-          direction: playerData.direction,
-          step: playerData.step,
-          isMoving: false,
-          isAttacking: false
-        });
       }
     }
 
@@ -1232,23 +1145,19 @@ wss.on('connection', (ws) => {
       // Update direction without moving
       if (msg.direction) {
         playerData.direction = msg.direction;
-        playerData.step = 2; // Set step to 2 when rotating
         playerData.isAttacking = false;
         playerData.isMoving = false;
         playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
         
         // Update database
-        Promise.allSettled([
-          updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex),
-          updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
-        ]).catch(err => console.error('Rotation DB error:', err));
+        updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
+          .catch(err => console.error('Rotation DB error:', err));
         
         // Broadcast rotation to all clients
         broadcast({
           type: 'animation_update',
           id: playerData.id,
           direction: playerData.direction,
-          step: playerData.step,
           isMoving: false,
           isAttacking: false,
           animationFrame: playerData.animationFrame,
@@ -1741,21 +1650,22 @@ wss.on('connection', (ws) => {
         pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetMap, playerData.id])
       ]).catch(err => console.error('Error updating player after teleport:', err));
       
-
-      
-      // No need to broadcast "player left" for teleports since player_joined will handle the update
+      // Broadcast player left to old map
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === oldMapId && otherPlayer.id !== playerData.id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'player_left',
+              id: playerData.id
+            }));
+          }
+        }
+      }
       
       // Get players on target map
       const playersOnTargetMap = Array.from(clients.values())
         .filter(p => p.map_id === targetMap && p.id !== playerData.id)
-        .map(p => ({ 
-          ...p, 
-          username: p.username, // Ensure username is included
-          isBRB: p.isBRB || false, 
-          temporarySprite: p.temporarySprite || 0,
-          step: p.step || 2,
-          direction: p.direction || 'down'
-        }));
+        .map(p => ({ ...p, isBRB: p.isBRB || false, temporarySprite: p.temporarySprite || 0 }));
       
       // Get items for target map (you may need to implement per-map items if needed)
       // For now, using the same mapItems for all maps
@@ -1776,20 +1686,13 @@ wss.on('connection', (ws) => {
       // Broadcast magic update to teleporting player
       send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
       
-      // Broadcast position update to all players on target map (works for both same-map and different-map teleports)
+      // Broadcast player joined to target map
       for (const [otherWs, otherPlayer] of clients.entries()) {
         if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
           if (otherWs.readyState === WebSocket.OPEN) {
             otherWs.send(JSON.stringify({
-              type: 'player_moved',
-              id: playerData.id,
-              username: playerData.username,
-              x: targetX,
-              y: targetY,
-              direction: playerData.direction,
-              step: playerData.step,
-              isMoving: false,
-              isAttacking: false
+              type: 'player_joined',
+              player: { ...playerData, isBRB: playerData.isBRB || false, temporarySprite: playerData.temporarySprite || 0 }
             }));
           }
         }
@@ -2039,23 +1942,10 @@ wss.on('connection', (ws) => {
         attackTimeouts.delete(playerData.id);
       }
       
-      // Reset direction and step to defaults before disconnecting
-      playerData.direction = 'down';
-      playerData.step = 2;
-      playerData.animationFrame = DIRECTION_IDLE.down; // Set to "down" sprite
-      
-      // Update database with logout defaults
-      Promise.allSettled([
-        updateDirectionAndStep(playerData.id, 'down', 2),
-        updateAnimationState(playerData.id, 'down', false, false, DIRECTION_IDLE.down, 0)
-      ]).catch(()=>{});
-      
-      // Global chat message for logout
-      broadcast({ type: 'chat', text: `${playerData.username} leaves DragonSpires.` });
       
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
-      broadcast({ type: 'player_left', id: playerData.id, username: playerData.username });
+      broadcast({ type: 'player_left', id: playerData.id });
     }
   });
 
