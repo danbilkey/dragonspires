@@ -1776,7 +1776,9 @@ wss.on('connection', (ws) => {
       
       // Broadcast position update to all players on target map (works for both same-map and different-map teleports)
       console.log(`Teleport: ${playerData.username} teleported to (${targetX}, ${targetY}) on map ${targetMap}`);
+      console.log(`Players on target map ${targetMap}:`);
       for (const [otherWs, otherPlayer] of clients.entries()) {
+        console.log(`  - ${otherPlayer?.username || 'Unknown'} (ID: ${otherPlayer?.id}) on map ${otherPlayer?.map_id}`);
         if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
           if (otherWs.readyState === WebSocket.OPEN) {
             console.log(`Sending player_moved to ${otherPlayer.username} for ${playerData.username} teleport`);
