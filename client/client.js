@@ -503,6 +503,11 @@
       return 20; // 'stand' animation
     }
 
+    // Use the new direction and step system for other players
+    if (!isLocal && player.direction && typeof player.step !== 'undefined') {
+      return getAnimationFrameFromDirectionAndStep(player.direction, player.step);
+    }
+
     if (typeof player.animationFrame !== 'undefined') {
       return player.animationFrame;
     }
@@ -585,11 +590,10 @@
           localPlayer = { 
             ...msg.player,
             direction: msg.player.direction || 'down',
+            step: msg.player.step || 2,
             isMoving: false,
             isAttacking: false,
             isPickingUp: false,
-            animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
-            movementSequenceIndex: msg.player.movementSequenceIndex || 0,
             weapon: msg.player.weapon || 0,
             armor: msg.player.armor || 0,
             hands: msg.player.hands || 0
@@ -597,7 +601,7 @@
           
           // Initialize local state variables
           playerDirection = localPlayer.direction;
-          movementAnimationState = 0;
+          playerStep = localPlayer.step || 2;
           isLocallyAttacking = false;
           localAttackState = 0;
           
@@ -613,11 +617,12 @@
                 otherPlayers[p.id] = {
                   ...p,
                   direction: p.direction || 'down',
+                  step: p.step || 2,
                   isMoving: p.isMoving || false,
                   isAttacking: p.isAttacking || false,
                   isPickingUp: p.isPickingUp || false,
-                  animationFrame: p.animationFrame || DIRECTION_IDLE.down,
-                  movementSequenceIndex: p.movementSequenceIndex || 0
+                  isBRB: p.isBRB || false,
+                  temporarySprite: p.temporarySprite || 0
                 };
               }
             });
@@ -635,11 +640,14 @@
             otherPlayers[msg.player.id] = {
               ...msg.player,
               direction: msg.player.direction || 'down',
+              step: msg.player.step || 2,
               isMoving: msg.player.isMoving || false,
               isAttacking: msg.player.isAttacking || false,
-              animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
-              movementSequenceIndex: msg.player.movementSequenceIndex || 0
+              isPickingUp: msg.player.isPickingUp || false,
+              isBRB: msg.player.isBRB || false,
+              temporarySprite: msg.player.temporarySprite || 0
             };
+            pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
           }
           break;
           
@@ -660,18 +668,20 @@
                 pos_x: msg.x, 
                 pos_y: msg.y,
                 direction: msg.direction || 'down',
+                step: msg.step || 2,
                 isMoving: msg.isMoving || false,
-                isAttacking: false,
-                animationFrame: msg.animationFrame || DIRECTION_IDLE.down,
-                movementSequenceIndex: msg.movementSequenceIndex || 0
+                isAttacking: msg.isAttacking || false,
+                isPickingUp: false,
+                isBRB: false,
+                temporarySprite: 0
               };
             } else { 
               otherPlayers[msg.id].pos_x = msg.x; 
               otherPlayers[msg.id].pos_y = msg.y;
               otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+              otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
               otherPlayers[msg.id].isMoving = msg.isMoving || false;
-              otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
-              otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
+              otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
             }
           }
           break;
@@ -679,18 +689,16 @@
         case 'animation_update':
         if (localPlayer && msg.id === localPlayer.id) {
           localPlayer.direction = msg.direction || localPlayer.direction;
+          localPlayer.step = msg.step || localPlayer.step;
           localPlayer.isMoving = msg.isMoving || false;
           localPlayer.isAttacking = msg.isAttacking || false;
-          localPlayer.isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
-          localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
-          localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
+          localPlayer.isPickingUp = msg.isPickingUp || false;
         } else if (otherPlayers[msg.id]) {
           otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+          otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
           otherPlayers[msg.id].isMoving = msg.isMoving || false;
           otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
-          otherPlayers[msg.id].isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
-          otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
-          otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
+          otherPlayers[msg.id].isPickingUp = msg.isPickingUp || false;
         }
         break;
           
@@ -810,6 +818,9 @@
           break;
           
         case 'player_left':
+          const p = otherPlayers[msg.id];
+          const name = msg.username || p?.username || msg.id;
+          if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
           delete otherPlayers[msg.id];
           break;
           
