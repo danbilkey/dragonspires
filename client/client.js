@@ -677,7 +677,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!otherPlayers[msg.id]) {
             otherPlayers[msg.id] = { 
               id: msg.id, 
-              username: `#${msg.id}`, 
+              username: msg.username || `#${msg.id}`, 
               pos_x: msg.x, 
               pos_y: msg.y,
               direction: msg.direction || 'down',
