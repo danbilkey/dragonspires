@@ -748,6 +748,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             break;
 
+      case 'clear_fountain_effect':
+          if (msg.playerId !== undefined) {
+            fountainEffects = fountainEffects.filter(effect => effect.playerId !== msg.playerId);
+          }
+          break;
+
       case 'item_placed':
         const key = `${msg.x},${msg.y}`;
         if (msg.itemId === 0) {
@@ -1256,7 +1262,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           isLocallyAttacking = false;
           
           playerDirection = newDirection;
-          movementAnimationState = (movementAnimationState + 1) % 3;
+          movementAnimationState = 1; // Always use walk_1 for consistency
           
           localPlayer.direction = playerDirection;
           localPlayer.pos_x = nx;
@@ -1279,7 +1285,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           }, 200);
         } else {
           playerDirection = newDirection;
-          movementAnimationState = (movementAnimationState + 1) % 3;
+          movementAnimationState = 1; // Always use walk_1 for consistency
           lastMoveTime = currentTime;
         }
       }
