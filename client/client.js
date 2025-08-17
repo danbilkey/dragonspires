@@ -40,8 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // Chat areas
-  const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
-  const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200, extraY: 2 };
+  const CHAT = { x1: 156, y1: 289, x2: 618, y2: 423, pad: 8 };
+  const CHAT_INPUT = { x1: 156, y1: 427, x2: 618, y2: 469, pad: 8, maxLen: 200, extraY: 2 };
   // Inventory configuration
   const INVENTORY = {
     x: 241,
