@@ -1748,6 +1748,7 @@ wss.on('connection', (ws) => {
         .filter(p => p.map_id === targetMap && p.id !== playerData.id)
         .map(p => ({ 
           ...p, 
+          username: p.username, // Ensure username is included
           isBRB: p.isBRB || false, 
           temporarySprite: p.temporarySprite || 0,
           step: p.step || 2,
@@ -1773,7 +1774,7 @@ wss.on('connection', (ws) => {
       // Broadcast magic update to teleporting player
       send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
       
-      // Broadcast to all players on target map that a new player joined
+      // Broadcast to all players on target map that player joined/moved (including same-map teleports)
       for (const [otherWs, otherPlayer] of clients.entries()) {
         if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
           if (otherWs.readyState === WebSocket.OPEN) {
@@ -1781,6 +1782,7 @@ wss.on('connection', (ws) => {
               type: 'player_joined',
               player: { 
                 ...playerData, 
+                username: playerData.username, // Ensure username is included
                 isBRB: playerData.isBRB || false, 
                 temporarySprite: playerData.temporarySprite || 0,
                 step: playerData.step || 2,
