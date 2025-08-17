@@ -1614,14 +1614,13 @@ wss.on('connection', (ws) => {
           magic: playerData.magic
         });
         
-        // Broadcast fountain effect to all players on same map
+        // Broadcast fountain effect to all players on same map (show on the healed player)
         for (const [otherWs, otherPlayer] of clients.entries()) {
           if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
             if (otherWs.readyState === WebSocket.OPEN) {
               otherWs.send(JSON.stringify({
                 type: 'fountain_effect',
-                x: msg.x,
-                y: msg.y
+                playerId: playerData.id
               }));
             }
           }
