@@ -977,36 +977,71 @@ wss.on('connection', (ws) => {
       const nx = playerData.pos_x + dx;
       const ny = playerData.pos_y + dy;
 
-      // Check for teleportation items and validate destination
-      const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
-      if ((targetItemId === 42 || targetItemId === 338) && !checkTeleportDestination(nx, ny, targetItemId)) {
-        // Don't allow movement onto teleport item if destination is out of bounds
+     // Check for teleportation items first
+    const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
+    if (targetItemId === 42 || targetItemId === 338) {
+      // Handle teleportation immediately
+      let teleX, teleY;
+      if (targetItemId === 42) {
+        teleX = nx - 2;
+        teleY = ny - 1;
+      } else if (targetItemId === 338) {
+        teleX = nx - 1;
+        teleY = ny - 2;
+      }
+      
+      // Check if teleport destination is within bounds
+      if (teleX < 0 || teleY < 0 || teleX >= MAP_WIDTH || teleY >= MAP_HEIGHT) {
+        // Don't allow movement onto teleport tile if destination is out of bounds
         return;
       }
+      
+      // Decrement stamina for the movement attempt
+      playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
+      
+      // Set position to teleport destination, not the teleport tile
+      playerData.pos_x = teleX;
+      playerData.pos_y = teleY;
+      
+      // Update direction
+      if (msg.direction) {
+        playerData.direction = msg.direction;
+      }
+      
+      // Keep movement sequence at 0 for teleport (no walking animation)
+      playerData.movementSequenceIndex = 0;
+      playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
+      playerData.isMoving = false;
+      playerData.isAttacking = false;
+      
+      // Save to database
+      Promise.allSettled([
+        updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
+        updatePosition(playerData.id, teleX, teleY),
+        updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, 0)
+      ]).catch(()=>{});
+      
+      // Broadcast the teleported position
+      broadcast({ 
+        type: 'player_moved', 
+        id: playerData.id, 
+        x: teleX, 
+        y: teleY, 
+        direction: playerData.direction,
+        isMoving: false,
+        isAttacking: false,
+        animationFrame: playerData.animationFrame,
+        movementSequenceIndex: 0
+      });
+      send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+      return;
+    }
       
       if (canMoveTo(nx, ny, playerData.id)) {
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
         playerData.pos_y = ny;
-        
-        // Handle teleportation items
-        const itemAtNewPos = getItemAtPosition(nx, ny, serverMapSpec);
-        if (itemAtNewPos === 42) {
-          // Teleport 2 left, 1 up
-          const teleX = nx - 2;
-          const teleY = ny - 1;
-          playerData.pos_x = teleX;
-          playerData.pos_y = teleY;
-          updatePosition(playerData.id, teleX, teleY).catch(()=>{});
-        } else if (itemAtNewPos === 338) {
-          // Teleport 2 up, 1 left
-          const teleX = nx - 1;
-          const teleY = ny - 2;
-          playerData.pos_x = teleX;
-          playerData.pos_y = teleY;
-          updatePosition(playerData.id, teleX, teleY).catch(()=>{});
-        }
 
         // IMMEDIATELY update direction for consistent state
         if (msg.direction) {
@@ -1506,29 +1541,6 @@ wss.on('connection', (ws) => {
   }
 }
 
-    else if (msg.type === 'teleport') {
-      if (!playerData) return;
-      
-      // Update position to teleported location
-      playerData.pos_x = msg.x;
-      playerData.pos_y = msg.y;
-      
-      // Update database
-      updatePosition(playerData.id, msg.x, msg.y).catch(()=>{});
-      
-      // Broadcast teleportation
-      broadcast({ 
-        type: 'player_moved', 
-        id: playerData.id, 
-        x: msg.x, 
-        y: msg.y, 
-        direction: playerData.direction,
-        isMoving: playerData.isMoving,
-        isAttacking: playerData.isAttacking,
-        animationFrame: playerData.animationFrame,
-        movementSequenceIndex: playerData.movementSequenceIndex
-      });
-    }
     else if (msg.type === 'chat') {
       if (!playerData || typeof msg.text !== 'string') return;
       const t = msg.text.trim();
