@@ -1139,14 +1139,14 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           // Calculate teleport destination
           let teleX, teleY;
           if (targetItemId === 42) {
-            // 2 left, 1 up from the teleport tile
-            teleX = nx - 2;
-            teleY = nx - 1;
-          } else if (targetItemId === 338) {
-            // 2 up, 1 left from the teleport tile  
-            teleX = nx - 1;
-            teleY = ny - 2;
-          }
+              // 2 left, 1 up from the teleport tile
+              teleX = nx - 2;
+              teleY = ny - 1;  // Fixed: changed from nx - 1 to ny - 1
+            } else if (targetItemId === 338) {
+              // 2 up, 1 left from the teleport tile  
+              teleX = nx - 1;
+              teleY = ny - 2;
+            }
           
           // Check if teleport destination is within bounds
           if (teleX >= 0 && teleY >= 0 && teleX < mapSpec.width && teleY < mapSpec.height) {
