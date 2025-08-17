@@ -922,8 +922,17 @@ wss.on('connection', (ws) => {
           direction: playerData.direction || 'down'
         } });
         
-        // Global chat message for login
-        broadcast({ type: 'chat', text: `${playerData.username} enters DragonSpires.` });
+        // Global chat message for login (exclude the player themselves)
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.id !== playerData.id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'chat',
+                text: `${playerData.username} has entered DragonSpires!`
+              }));
+            }
+          }
+        }
       } catch (e) {
         console.error('Login error', e);
         send(ws, { type: 'login_error', message: 'Server error' });
@@ -993,8 +1002,17 @@ wss.on('connection', (ws) => {
           direction: playerData.direction || 'down'
         } });
         
-        // Global chat message for signup
-        broadcast({ type: 'chat', text: `${playerData.username} enters DragonSpires.` });
+        // Global chat message for signup (exclude the player themselves)  
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.id !== playerData.id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'chat',
+                text: `${playerData.username} has entered DragonSpires!`
+              }));
+            }
+          }
+        }
       } catch (e) {
         console.error('Signup error', e);
         send(ws, { type: 'signup_error', message: 'Server error' });
@@ -1765,7 +1783,7 @@ wss.on('connection', (ws) => {
       // Broadcast magic update to teleporting player
       send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
       
-      // Broadcast player joined to target map
+      // Broadcast to all players on target map that a new player joined
       for (const [otherWs, otherPlayer] of clients.entries()) {
         if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
           if (otherWs.readyState === WebSocket.OPEN) {
@@ -1778,28 +1796,6 @@ wss.on('connection', (ws) => {
                 step: playerData.step || 2,
                 direction: playerData.direction || 'down'
               }
-            }));
-          }
-        }
-      }
-      
-      // Send complete player list refresh to all players on target map (including teleporting player)
-      const allPlayersOnTargetMap = Array.from(clients.values())
-        .filter(p => p.map_id === targetMap)
-        .map(p => ({ 
-          ...p, 
-          isBRB: p.isBRB || false, 
-          temporarySprite: p.temporarySprite || 0,
-          step: p.step || 2,
-          direction: p.direction || 'down'
-        }));
-      
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === targetMap) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'players_refresh',
-              players: allPlayersOnTargetMap.filter(p => p.id !== otherPlayer.id)
             }));
           }
         }
