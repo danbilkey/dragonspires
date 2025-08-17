@@ -1562,7 +1562,6 @@ shouldStayInStand = false;
         }
       }
     }
-      }
     }
   });
 
