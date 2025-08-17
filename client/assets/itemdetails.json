@@ -41,7 +41,7 @@
   ["Big Mech","false","consumable",0,0,"It's a Big Mech sandwich!"],
   ["Hamburger","false","consumable",0,0,"It's a hamburger - weird."],
   ["Flower","false","garbage",0,0,"It's a pretty white flower, possibly a daisy."],
-  ["Stairs","false","portal",0,0,"You see a large staircase."],
+  ["Stairs","true","portal",0,0,"You see a large staircase."],
   ["Bones","false","nothing",0,0,"A pile of bones.. gross."],
   ["Blood Chalice","false","garbage",0,0,"A chalice full of blood.. I don't want to drink this.."],
   ["Hot Sauce","false","garbage",0,0,"A bottle of hot sauce."],
@@ -337,7 +337,7 @@
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
-  ["","false","nothing",0,0,""],
+  ["Stairs Up","true","portal",0,0,"You see a large staircase."],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
@@ -363,4 +363,5 @@
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""]
   ]
+
 }
