@@ -142,6 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Inventory state - MOVED TO TOP LEVEL
   let inventoryVisible = false;
   let temporarySprite = 0; // For temporary sprite rendering
+  let fountainEffects = []; // Track fountain healing effects { x, y, startTime }
   let inventorySelectedSlot = 1; // Default to slot 1
   let chatScrollOffset = 0; // For scrolling through chat messages
   let playerInventory = {}; // { slotNumber: itemId }
@@ -729,6 +730,24 @@ document.addEventListener('DOMContentLoaded', () => {
             pushChat(msg.message);
           }
           break;
+      case 'fountain_heal':
+          if (localPlayer && msg.id === localPlayer.id) {
+            localPlayer.stamina = msg.stamina;
+            localPlayer.life = msg.life;
+            localPlayer.magic = msg.magic;
+            pushChat("~ You are refreshed by the fountains healing waters!");
+          }
+          break;
+        
+        case 'fountain_effect':
+            if (msg.x !== undefined && msg.y !== undefined) {
+              fountainEffects.push({
+                x: msg.x,
+                y: msg.y,
+                startTime: Date.now()
+              });
+            }
+            break;
       case 'item_placed':
         const key = `${msg.x},${msg.y}`;
         if (msg.itemId === 0) {
@@ -1055,7 +1074,26 @@ document.addEventListener('DOMContentLoaded', () => {
         localAttackTimeout = null;
       }, 1000);
       
-      send({ type: 'attack', direction: playerDirection });
+      // Check for healing fountain in attack direction
+      let attackX = localPlayer.pos_x;
+      let attackY = localPlayer.pos_y;
+      
+      switch (playerDirection) {
+        case 'up': attackY -= 1; break;
+        case 'down': attackY += 1; break;
+        case 'left': attackX -= 1; break;
+        case 'right': attackX += 1; break;
+      }
+      
+      const targetItemId = getItemAtPosition(attackX, attackY);
+      if (targetItemId === 60) {
+        // Send fountain attack to server
+        send({ type: 'attack_fountain', direction: playerDirection, x: attackX, y: attackY });
+      } else {
+        // Normal attack
+        send({ type: 'attack', direction: playerDirection });
+      }
+
       return;
     }
 
@@ -1737,6 +1775,26 @@ function drawInventory() {
           if (effectiveItemId > 0) {
             drawItemAtTile(screenX, screenY, effectiveItemId);
           }
+
+      // Draw fountain healing effects
+      if (window.itemsReady()) {
+        const currentTime = Date.now();
+        fountainEffects = fountainEffects.filter(effect => {
+          const elapsed = currentTime - effect.startTime;
+          if (elapsed < 1000) { // Show for 1 second
+            const { screenX, screenY } = isoScreen(effect.x, effect.y);
+            const meta = window.getItemMeta(309);
+            if (meta && meta.img && meta.img.complete) {
+              const { img, yOffset } = meta;
+              const drawX = screenX;
+              const drawY = screenY - (yOffset || 0);
+              ctx.drawImage(img, drawX, drawY);
+            }
+            return true; // Keep effect
+          }
+          return false; // Remove effect
+        });
+      }
 
           const k = `${x},${y}`;
           const arr = playersByTile[k];
