@@ -1547,18 +1547,6 @@ shouldStayInStand = false;
           // Reset stand flag when actually moving
           shouldStayInStand = false;
 
-          setTimeout(() => {
-          if (localPlayer) {
-            localPlayer.isMoving = false;
-            movementAnimationState = 0;
-          }
-        }, 200);
-        } else {
-          playerDirection = newDirection;
-          movementAnimationState = 1; // Always use walk_1 for consistency
-          lastMoveTime = currentTime;
-        }
-
           // Reset to standing after movement
           setTimeout(() => {
             if (localPlayer) {
@@ -1572,6 +1560,8 @@ shouldStayInStand = false;
           movementAnimationState = (movementAnimationState + 1) % 3;
           lastMoveTime = currentTime;
         }
+      }
+    }
       }
     }
   });
