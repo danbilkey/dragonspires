@@ -1477,69 +1477,170 @@ wss.on('connection', (ws) => {
         }
       }
     else if (msg.type === 'use_transformation_item') {
-  if (!playerData) return;
-  
-  const { itemId, magicCost, resultItem } = msg;
-  
-  // Verify player has the item in hands
-  if (playerData.hands !== itemId) return;
-  
-  // Verify player has enough magic
-  if ((playerData.magic || 0) < magicCost) {
-    send(ws, {
-      type: 'transformation_result',
-      success: false,
-      message: '~ You do not have enough magic to use that item!'
-    });
-    return;
-  }
-  
-  // Clear temporary sprite
-  playerData.temporarySprite = 0;
-  
-  // Reduce magic
-  playerData.magic = Math.max(0, (playerData.magic || 0) - magicCost);
-  
-  let finalResultItem = resultItem;
-  
-  // Special case for item 283 - random transformation
-  if (itemId === 283) {
-    const validTypes = ['nothing', 'sign', 'portal', 'interactable'];
-    finalResultItem = getRandomItemByTypes(validTypes);
-  }
-  
-  // Set temporary sprite
-  playerData.temporarySprite = finalResultItem;
-  
-  // Update database
-  updateStatsInDb(playerData.id, { magic: playerData.magic })
-    .catch(err => console.error('Error updating magic after transformation:', err));
-  
-  // Send success response to player
-  send(ws, {
-    type: 'transformation_result',
-    success: true,
-    id: playerData.id,
-    newMagic: playerData.magic,
-    temporarySprite: playerData.temporarySprite
-  });
-  
-  // Broadcast magic update
-  send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
-  
-  // Broadcast temporary sprite update to all players on same map
-  for (const [otherWs, otherPlayer] of clients.entries()) {
-    if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-      if (otherWs.readyState === WebSocket.OPEN) {
-        otherWs.send(JSON.stringify({
-          type: 'temporary_sprite_update',
-          id: playerData.id,
-          temporarySprite: playerData.temporarySprite
-        }));
+      if (!playerData) return;
+      
+      const { itemId, magicCost, resultItem } = msg;
+      
+      // Verify player has the item in hands
+      if (playerData.hands !== itemId) return;
+      
+      // Verify player has enough magic
+      if ((playerData.magic || 0) < magicCost) {
+        send(ws, {
+          type: 'transformation_result',
+          success: false,
+          message: '~ You do not have enough magic to use that item!'
+        });
+        return;
+      }
+      
+      // Clear temporary sprite
+      playerData.temporarySprite = 0;
+      
+      // Reduce magic
+      playerData.magic = Math.max(0, (playerData.magic || 0) - magicCost);
+      
+      let finalResultItem = resultItem;
+      
+      // Special case for item 283 - random transformation
+      if (itemId === 283) {
+        const validTypes = ['nothing', 'sign', 'portal', 'interactable'];
+        finalResultItem = getRandomItemByTypes(validTypes);
+      }
+      
+      // Set temporary sprite
+      playerData.temporarySprite = finalResultItem;
+      
+      // Update database
+      updateStatsInDb(playerData.id, { magic: playerData.magic })
+        .catch(err => console.error('Error updating magic after transformation:', err));
+      
+      // Send success response to player
+      send(ws, {
+        type: 'transformation_result',
+        success: true,
+        id: playerData.id,
+        newMagic: playerData.magic,
+        temporarySprite: playerData.temporarySprite
+      });
+      
+      // Broadcast magic update
+      send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
+      
+      // Broadcast temporary sprite update to all players on same map
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'temporary_sprite_update',
+              id: playerData.id,
+              temporarySprite: playerData.temporarySprite
+            }));
+          }
+        }
       }
     }
-  }
-}
+
+    else if (msg.type === 'attack_fountain') {
+      if (!playerData) return;
+
+      // Clear temporary sprite when attacking fountain
+      playerData.temporarySprite = 0;
+      
+      // Broadcast temporary sprite clear
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'temporary_sprite_update',
+              id: playerData.id,
+              temporarySprite: 0
+            }));
+          }
+        }
+      }
+      
+      // Clear BRB state when player attacks fountain
+      if (playerData.isBRB) {
+        playerData.isBRB = false;
+        
+        const brbUpdate = {
+          type: 'player_brb_update',
+          id: playerData.id,
+          brb: false
+        };
+        
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify(brbUpdate));
+            }
+          }
+        }
+      }
+      
+      // Check stamina requirement (at least 10)
+      if ((playerData.stamina ?? 0) < 10) {
+        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+        return;
+      }
+      
+      // Reduce stamina by 10
+      const oldStamina = playerData.stamina ?? 0;
+      playerData.stamina = Math.max(0, oldStamina - 10);
+      
+      // Update direction if provided
+      if (msg.direction) {
+        playerData.direction = msg.direction;
+      }
+      
+      // Start attack animation
+      startAttackAnimation(playerData, ws);
+      
+      // Verify the fountain item is still there
+      const targetItemId = getItemAtPosition(msg.x, msg.y, serverMapSpec);
+      if (targetItemId === 60) {
+        // Heal the player
+        playerData.stamina = playerData.max_stamina ?? 10;
+        playerData.life = playerData.max_life ?? 20;
+        playerData.magic = playerData.max_magic ?? 0;
+        
+        // Send healing response
+        send(ws, {
+          type: 'fountain_heal',
+          id: playerData.id,
+          stamina: playerData.stamina,
+          life: playerData.life,
+          magic: playerData.magic
+        });
+        
+        // Broadcast fountain effect to all players on same map
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'fountain_effect',
+                x: msg.x,
+                y: msg.y
+              }));
+            }
+          }
+        }
+        
+        // Update database
+        updateStatsInDb(playerData.id, { 
+          stamina: playerData.stamina, 
+          life: playerData.life, 
+          magic: playerData.magic 
+        }).catch(err => console.error('Error updating stats after fountain heal:', err));
+      } else {
+        // Update stamina in database and send to client (fountain not found)
+        updateStatsInDb(playerData.id, { stamina: playerData.stamina })
+          .catch(err => console.error('Error updating stamina after fountain attack:', err));
+      }
+      
+      send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+    }
 
     else if (msg.type === 'chat') {
       if (!playerData || typeof msg.text !== 'string') return;
