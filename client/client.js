@@ -1133,7 +1133,50 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
         }
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         
-        if (canMoveTo(nx, ny, localPlayer.id)) {
+        // Check for teleportation items first
+        const targetItemId = getItemAtPosition(nx, ny);
+        if (targetItemId === 42 || targetItemId === 338) {
+          // Calculate teleport destination
+          let teleX, teleY;
+          if (targetItemId === 42) {
+            // 2 left, 1 up from the teleport tile
+            teleX = nx - 2;
+            teleY = nx - 1;
+          } else if (targetItemId === 338) {
+            // 2 up, 1 left from the teleport tile  
+            teleX = nx - 1;
+            teleY = ny - 2;
+          }
+          
+          // Check if teleport destination is within bounds
+          if (teleX >= 0 && teleY >= 0 && teleX < mapSpec.width && teleY < mapSpec.height) {
+            // Clear any ongoing animations
+            if (localAttackTimeout) {
+              clearTimeout(localAttackTimeout);
+              localAttackTimeout = null;
+            }
+            isLocallyAttacking = false;
+            
+            // Update direction and position directly to teleport destination
+            playerDirection = newDirection;
+            movementAnimationState = 0;
+            
+            localPlayer.direction = playerDirection;
+            localPlayer.pos_x = teleX;
+            localPlayer.pos_y = teleY;
+            localPlayer.isAttacking = false;
+            localPlayer.isMoving = false;
+            
+            lastMoveTime = currentTime;
+            
+            // Send teleport move to server
+            send({ type: 'move', dx: teleX - localPlayer.pos_x, dy: teleY - localPlayer.pos_y, direction: playerDirection, teleport: true });
+            
+            // Reset stand flag when teleporting
+            shouldStayInStand = false;
+          }
+        } else if (canMoveTo(nx, ny, localPlayer.id)) {
+          // Normal movement logic
           if (localAttackTimeout) {
             clearTimeout(localAttackTimeout);
             localAttackTimeout = null;
@@ -1146,45 +1189,23 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           localPlayer.direction = playerDirection;
           localPlayer.pos_x = nx;
           localPlayer.pos_y = ny;
-          
-          // Check for teleportation items after moving
-          const itemAtNewPos = getItemAtPosition(nx, ny);
-          if (itemAtNewPos === 42) {
-            // Teleport 2 left, 1 up
-            const teleX = nx - 2;
-            const teleY = ny - 1;
-            if (teleX >= 0 && teleY >= 0 && teleX < mapSpec.width && teleY < mapSpec.height) {
-              localPlayer.pos_x = teleX;
-              localPlayer.pos_y = teleY;
-              send({ type: 'teleport', x: teleX, y: teleY });
-            }
-          } else if (itemAtNewPos === 338) {
-            // Teleport 2 up, 1 left
-            const teleX = nx - 1;
-            const teleY = ny - 2;
-            if (teleX >= 0 && teleY >= 0 && teleX < mapSpec.width && teleY < mapSpec.height) {
-              localPlayer.pos_x = teleX;
-              localPlayer.pos_y = teleY;
-              send({ type: 'teleport', x: teleX, y: teleY });
-            }
-          }
-          
           localPlayer.isAttacking = false;
           localPlayer.isMoving = true;
           
           lastMoveTime = currentTime;
           
           send({ type: 'move', dx, dy, direction: playerDirection });
-
+        
           // Reset stand flag when actually moving
           shouldStayInStand = false;          
-
+        
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
               movementAnimationState = 0;
             }
           }, 200);
+        }
         } else {
           playerDirection = newDirection;
           movementAnimationState = (movementAnimationState + 1) % 3;
