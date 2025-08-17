@@ -730,6 +730,43 @@ document.addEventListener('DOMContentLoaded', () => {
             pushChat(msg.message);
           }
           break;
+      case 'teleport_result':
+          if (msg.success && localPlayer && msg.id === localPlayer.id) {
+            localPlayer.magic = msg.newMagic;
+            localPlayer.pos_x = msg.x;
+            localPlayer.pos_y = msg.y;
+            localPlayer.map_id = msg.mapId;
+            
+            // Clear other players since we're on a new map
+            otherPlayers = {};
+            
+            // Update other players on new map
+            if (msg.players) {
+              msg.players.forEach(p => {
+                if (p.id !== localPlayer.id) {
+                  otherPlayers[p.id] = {
+                    ...p,
+                    direction: p.direction || 'down',
+                    isMoving: p.isMoving || false,
+                    isAttacking: p.isAttacking || false,
+                    isPickingUp: p.isPickingUp || false,
+                    animationFrame: p.animationFrame || DIRECTION_IDLE.down,
+                    movementSequenceIndex: p.movementSequenceIndex || 0
+                  };
+                }
+              });
+            }
+            
+            // Update map items
+            if (msg.items) {
+              mapItems = { ...msg.items };
+            }
+            
+            pushChat("~ You have been teleported!");
+          } else if (!msg.success && msg.message) {
+            pushChat(msg.message);
+          }
+          break;
       case 'fountain_heal':
           if (localPlayer && msg.id === localPlayer.id) {
             localPlayer.stamina = msg.stamina;
@@ -916,7 +953,8 @@ document.addEventListener('DOMContentLoaded', () => {
         59: { cost: 10, result: 61 },   // Item 59 -> Item 61
         98: { cost: 10, result: 117 },  // Item 98 -> Item 117
         285: { cost: 10, result: 323 }, // Item 285 -> Item 323
-        283: { cost: 10, result: -1 }   // Item 283 -> Random (special case)
+        283: { cost: 10, result: -1 },  // Item 283 -> Random (special case)
+        58: { cost: 20, result: -2 }    // Item 58 -> Teleport to map 1 (special case)
       };
       
       if (handsItem > 0 && transformations[handsItem]) {
@@ -927,12 +965,24 @@ document.addEventListener('DOMContentLoaded', () => {
           clearTemporarySprite();
           
           // Send transformation request to server
-          send({ 
-            type: 'use_transformation_item', 
-            itemId: handsItem,
-            magicCost: transformation.cost,
-            resultItem: transformation.result
-          });
+          if (handsItem === 58) {
+            // Special teleport item
+            send({ 
+              type: 'use_teleport_item', 
+              itemId: handsItem,
+              magicCost: transformation.cost,
+              targetMap: 1,
+              targetX: 33,
+              targetY: 27
+            });
+          } else {
+            send({ 
+              type: 'use_transformation_item', 
+              itemId: handsItem,
+              magicCost: transformation.cost,
+              resultItem: transformation.result
+            });
+          }
         } else {
           pushChat("~ You do not have enough magic to use that item!");
         }
