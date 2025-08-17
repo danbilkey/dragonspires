@@ -809,6 +809,7 @@ wss.on('connection', (ws) => {
           animationFrame: found.animation_frame ?? DIRECTION_IDLE.down,
           movementSequenceIndex: found.movement_sequence_index ?? 0,
           role: found.role ?? 'player',
+          temporarySprite: 0,
           isBRB: false
         };
 
@@ -821,7 +822,7 @@ wss.on('connection', (ws) => {
         const others = Array.from(clients.values())
           .filter(p => p.id !== playerData.id)
           .map(p => ({ ...p, isBRB: p.isBRB || false }));
-        send(ws, { type: 'login_success', player: playerData, players: others, items: mapItems, inventory: inventory });
+        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: mapItems, inventory: inventory });
         broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false } });
       } catch (e) {
         console.error('Login error', e);
@@ -864,6 +865,7 @@ wss.on('connection', (ws) => {
           animationFrame: created.animation_frame ?? DIRECTION_IDLE.down,
           movementSequenceIndex: created.movement_sequence_index ?? 0,
           role: created.role ?? 'player',
+          temporarySprite: 0,
           isBRB: false
         };
 
@@ -875,7 +877,7 @@ wss.on('connection', (ws) => {
 
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
         send(ws, { type: 'signup_success', player: playerData, players: others, items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: playerData });
+        broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0 } });
       } catch (e) {
         console.error('Signup error', e);
         send(ws, { type: 'signup_error', message: 'Server error' });
@@ -884,6 +886,24 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'move') {
       if (!playerData) return;
+      
+      // Clear temporary sprite when attacking
+      playerData.temporarySprite = 0;
+      // Broadcast temporary sprite clear
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'temporary_sprite_update',
+              id: playerData.id,
+              temporarySprite: 0
+            }));
+          }
+        }
+      }
+
+      // Clear temporary sprite when moving
+      playerData.temporarySprite = 0;
     
       // Clear BRB state when player moves
       if (playerData.isBRB) {
@@ -975,6 +995,21 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'rotate') {
       if (!playerData) return;
+
+      // Clear temporary sprite when picking up
+      playerData.temporarySprite = 0;
+      // Broadcast temporary sprite clear
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'temporary_sprite_update',
+              id: playerData.id,
+              temporarySprite: 0
+            }));
+          }
+        }
+      }
       
       // Update direction without moving
       if (msg.direction) {
@@ -1303,6 +1338,21 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'set_brb') {
       if (!playerData || typeof msg.brb !== 'boolean') return;
       
+      // Clear temporary sprite when toggling BRB
+      playerData.temporarySprite = 0;
+      // Broadcast temporary sprite clear
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'temporary_sprite_update',
+              id: playerData.id,
+              temporarySprite: 0
+            }));
+          }
+        }
+      }
+
       playerData.isBRB = msg.brb;
       
       // Broadcast BRB state update to all players on the same map
@@ -1322,6 +1372,25 @@ wss.on('connection', (ws) => {
       }
     }
     
+      else if (msg.type === 'temporary_sprite_update') {
+        if (!playerData) return;
+        
+        playerData.temporarySprite = msg.temporarySprite || 0;
+        
+        // Broadcast to all players on the same map
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'temporary_sprite_update',
+                id: playerData.id,
+                temporarySprite: playerData.temporarySprite
+              }));
+            }
+          }
+        }
+      }
+
     else if (msg.type === 'chat') {
       if (!playerData || typeof msg.text !== 'string') return;
       const t = msg.text.trim();
