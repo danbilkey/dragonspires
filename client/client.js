@@ -1018,7 +1018,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const itemDetails = getItemDetails(itemId);
       
+      console.log(`Pickup attempt: position (${localPlayer.pos_x},${localPlayer.pos_y}), itemId: ${itemId}, itemDetails:`, itemDetails);
+      
       if (itemDetails && isItemPickupable(itemDetails)) {
+        console.log(`Sending pickup request for item ${itemId}`);
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
@@ -1027,6 +1030,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
       else if ((!itemDetails || !isItemPickupable(itemDetails)) && localPlayer.hands && localPlayer.hands > 0) {
+        console.log(`Dropping item from hands: ${localPlayer.hands}`);
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
@@ -1034,6 +1038,7 @@ document.addEventListener('DOMContentLoaded', () => {
           itemId: 0
         });
       } else {
+        console.log(`No action taken - no pickupable item and no hands item to drop`);
         // Send pickup anyway to show animation
         send({
           type: 'pickup_item',
@@ -1096,6 +1101,7 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Check stamina requirement (at least 10)
       if ((localPlayer.stamina ?? 0) < 10) {
+        console.log('Not enough stamina to attack (need 10, have ' + (localPlayer.stamina ?? 0) + ')');
         return;
       }
 
@@ -1232,178 +1238,106 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
         }
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         
-        // Check for teleportation items first - with directional logic
-const targetItemId = getItemAtPosition(nx, ny);
-let shouldTeleport = false;
-let teleportStartX = nx;
-let teleportStartY = ny;
-
-// Check for indirect teleportation first (takes precedence)
-if (!shouldTeleport) {
-  if (newDirection === 'down') {
-    // Check if item 2 down + 1 right is item #338
-    const indirectX = localPlayer.pos_x + 1;
-    const indirectY = localPlayer.pos_y + 2;
-    if (indirectX >= 0 && indirectX < mapSpec.width && indirectY >= 0 && indirectY < mapSpec.height) {
-      const indirectItemId = getItemAtPosition(indirectX, indirectY);
-      if (indirectItemId === 338) {
-        // Teleport to 3 down + 1 right
-        teleportStartX = localPlayer.pos_x + 1;
-        teleportStartY = localPlayer.pos_y + 3;
-        shouldTeleport = true;
-      }
-    }
-  } else if (newDirection === 'right') {
-    // Check if item 2 right + 1 down is item #42
-    const indirectX = localPlayer.pos_x + 2;
-    const indirectY = localPlayer.pos_y + 1;
-    if (indirectX >= 0 && indirectX < mapSpec.width && indirectY >= 0 && indirectY < mapSpec.height) {
-      const indirectItemId = getItemAtPosition(indirectX, indirectY);
-      if (indirectItemId === 42) {
-        // Teleport to 3 right + 1 down
-        teleportStartX = localPlayer.pos_x + 3;
-        teleportStartY = localPlayer.pos_y + 1;
-        shouldTeleport = true;
-      }
-    }
-  }
-}
-
-// Check for direct teleportation (moving onto teleport tile)
-if (!shouldTeleport) {
-  if ((targetItemId === 338 && newDirection === 'up') || 
-      (targetItemId === 42 && newDirection === 'left')) {
-    shouldTeleport = true;
-    teleportStartX = nx;
-    teleportStartY = ny;
-  } else if ((targetItemId === 338 && (newDirection === 'left' || newDirection === 'right')) ||
-             (targetItemId === 42 && (newDirection === 'up' || newDirection === 'down'))) {
-    // Blocked movement - animate but don't move
-    playerDirection = newDirection;
-    movementAnimationState = 1;
-    lastMoveTime = currentTime;
-    return;
-  }
-}
-
-if (shouldTeleport) {
-  // Clear fountain effect when teleporting
-  fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
-  
-  // Calculate chain teleportation with directional logic
-  let currentX = teleportStartX;
-  let currentY = teleportStartY;
-  let teleportCount = 0;
-  const maxTeleports = 10;
-  let currentDirection = newDirection;
-  
-  // Keep teleporting until we land on a non-teleport tile or hit max teleports
-  while (teleportCount < maxTeleports) {
-    const currentItemId = getItemAtPosition(currentX, currentY);
-    if (currentItemId !== 42 && currentItemId !== 338) {
-      break; // Not a teleport tile, stop here
-    }
-    
-    let nextX, nextY;
-    if (currentItemId === 42) {
-      if (currentDirection === 'left') {
-        // Standard teleport: 2 left, 1 up
-        nextX = currentX - 2;
-        nextY = currentY - 1;
-      } else if (currentDirection === 'right') {
-        // Indirect teleport result: 3 right, 1 down from original position
-        nextX = currentX + 3;
-        nextY = currentY + 1;
-      } else {
-        // Invalid direction for item 42
-        break;
-      }
-    } else if (currentItemId === 338) {
-      if (currentDirection === 'up') {
-        // Standard teleport: 2 up, 1 left
-        nextX = currentX - 1;
-        nextY = currentY - 2;
-      } else if (currentDirection === 'down') {
-        // Indirect teleport result: 3 down, 1 right from original position
-        nextX = currentX + 1;
-        nextY = currentY + 3;
-      } else {
-        // Invalid direction for item 338
-        break;
-      }
-    }
-    
-    // Check if teleport destination is within bounds
-    if (nextX >= 0 && nextY >= 0 && nextX < mapSpec.width && nextY < mapSpec.height) {
-      currentX = nextX;
-      currentY = nextY;
-      teleportCount++;
-      // Direction stays the same for chain teleportation
-    } else {
-      // Can't teleport out of bounds, stop on current teleport tile
-      break;
-    }
-  }
-  
-  // Clear any ongoing animations
-  if (localAttackTimeout) {
-    clearTimeout(localAttackTimeout);
-    localAttackTimeout = null;
-  }
-  isLocallyAttacking = false;
-  
-  // Update direction and position directly to final teleport destination
-  playerDirection = newDirection;
-  movementAnimationState = 0;
-  
-  localPlayer.direction = playerDirection;
-  localPlayer.pos_x = currentX;
-  localPlayer.pos_y = currentY;
-  localPlayer.isAttacking = false;
-  localPlayer.isMoving = false;
-  
-  lastMoveTime = currentTime;
-  
-  // Send teleport move to server
-send({ type: 'move', dx: dx, dy: dy, direction: playerDirection, teleport: true, finalX: currentX, finalY: currentY });
-
-// Reset stand flag when teleporting
-shouldStayInStand = false;
-} else if (canMoveTo(nx, ny, localPlayer.id)) {
-  // Normal movement logic
-  if (localAttackTimeout) {
-    clearTimeout(localAttackTimeout);
-    localAttackTimeout = null;
-  }
-  isLocallyAttacking = false;
-  
-  playerDirection = newDirection;
-  movementAnimationState = 1; // Always use walk_1 for consistency
-  
-  localPlayer.direction = playerDirection;
-  localPlayer.pos_x = nx;
-  localPlayer.pos_y = ny;
-  localPlayer.isAttacking = false;
-  localPlayer.isMoving = true;
-  
-  lastMoveTime = currentTime;
-  
-  send({ type: 'move', dx, dy, direction: playerDirection });
-
-  // Reset stand flag when actually moving
-  shouldStayInStand = false;
-  
-  setTimeout(() => {
-    if (localPlayer) {
-      localPlayer.isMoving = false;
-      movementAnimationState = 0;
-    }
-  }, 200);
-} else {
-  playerDirection = newDirection;
-  movementAnimationState = 1; // Always use walk_1 for consistency
-  lastMoveTime = currentTime;
-}
+        // Check for teleportation items first
+        const targetItemId = getItemAtPosition(nx, ny);
+        if (targetItemId === 42 || targetItemId === 338) {
+          // Clear fountain effect when teleporting
+          fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+          
+          // Calculate chain teleportation
+          let currentX = nx;
+          let currentY = ny;
+          let teleportCount = 0;
+          const maxTeleports = 10;
+          
+          // Keep teleporting until we land on a non-teleport tile or hit max teleports
+          while (teleportCount < maxTeleports) {
+            const currentItemId = getItemAtPosition(currentX, currentY);
+            if (currentItemId !== 42 && currentItemId !== 338) {
+              break; // Not a teleport tile, stop here
+            }
+            
+            let nextX, nextY;
+            if (currentItemId === 42) {
+              // 2 left, 1 up from the teleport tile
+              nextX = currentX - 2;
+              nextY = currentY - 1;
+            } else if (currentItemId === 338) {
+              // 2 up, 1 left from the teleport tile  
+              nextX = currentX - 1;
+              nextY = currentY - 2;
+            }
+            
+            // Check if teleport destination is within bounds
+            if (nextX >= 0 && nextY >= 0 && nextX < mapSpec.width && nextY < mapSpec.height) {
+              currentX = nextX;
+              currentY = nextY;
+              teleportCount++;
+            } else {
+              // Can't teleport out of bounds, stop on current teleport tile
+              break;
+            }
+          }
+          
+          // Clear any ongoing animations
+          if (localAttackTimeout) {
+            clearTimeout(localAttackTimeout);
+            localAttackTimeout = null;
+          }
+          isLocallyAttacking = false;
+          
+          // Update direction and position directly to final teleport destination
+          playerDirection = newDirection;
+          movementAnimationState = 0;
+          
+          localPlayer.direction = playerDirection;
+          localPlayer.pos_x = currentX;
+          localPlayer.pos_y = currentY;
+          localPlayer.isAttacking = false;
+          localPlayer.isMoving = false;
+          
+          lastMoveTime = currentTime;
+          
+          // Send teleport move to server
+          send({ type: 'move', dx: dx, dy: dy, direction: playerDirection, teleport: true, finalX: currentX, finalY: currentY });
+          
+          // Reset stand flag when teleporting
+          shouldStayInStand = false;
+        } else if (canMoveTo(nx, ny, localPlayer.id)) {
+          // Normal movement logic
+          if (localAttackTimeout) {
+            clearTimeout(localAttackTimeout);
+            localAttackTimeout = null;
+          }
+          isLocallyAttacking = false;
+          
+          playerDirection = newDirection;
+          movementAnimationState = 1; // Always use walk_1 for consistency
+          
+          localPlayer.direction = playerDirection;
+          localPlayer.pos_x = nx;
+          localPlayer.pos_y = ny;
+          localPlayer.isAttacking = false;
+          localPlayer.isMoving = true;
+          
+          lastMoveTime = currentTime;
+          
+          send({ type: 'move', dx, dy, direction: playerDirection });
+        
+          // Reset stand flag when actually moving
+          shouldStayInStand = false;          
+        
+          setTimeout(() => {
+            if (localPlayer) {
+              localPlayer.isMoving = false;
+              movementAnimationState = 0;
+            }
+          }, 200);
+        } else {
+          playerDirection = newDirection;
+          movementAnimationState = 1; // Always use walk_1 for consistency
+          lastMoveTime = currentTime;
+        }
       }
     }
   });
@@ -1452,7 +1386,7 @@ shouldStayInStand = false;
 
     // Handle chat scroll up click (135,382 to 151,390)
     if (connected && loggedIn && mx >= 135 && mx <= 151 && my >= 382 && my <= 390) {
-      const maxVisibleLines = 7; // Fixed to show exactly 7 lines
+      const maxVisibleLines = Math.floor((CHAT.y2 - CHAT.y1 - CHAT.pad * 2) / 16);
       const maxScrollUp = Math.max(0, messages.length - maxVisibleLines);
       chatScrollOffset = Math.min(chatScrollOffset + 1, maxScrollUp);
       return;
@@ -1555,7 +1489,6 @@ shouldStayInStand = false;
           lastMoveTime = currentTime;
         }
       }
-    }
     }
   });
 
@@ -1899,10 +1832,7 @@ function drawInventory() {
     drawChatHistory();
   }
 
-  // This shows the corrected ending of the drawGame function and beginning of the loop
-// Replace lines approximately 1680-1730 in your code with this:
-
-function drawGame() {
+  function drawGame() {
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
@@ -1939,35 +1869,35 @@ function drawGame() {
             drawItemAtTile(screenX, screenY, effectiveItemId);
           }
 
-          // Draw fountain healing effects on players
-          if (window.itemsReady()) {
-            const currentTime = Date.now();
-            fountainEffects = fountainEffects.filter(effect => {
-              const elapsed = currentTime - effect.startTime;
-              if (elapsed < 1000) { // Show for 1 second
-                // Find the player with this ID
-                let targetPlayer = null;
-                if (localPlayer && localPlayer.id === effect.playerId) {
-                  targetPlayer = localPlayer;
-                } else if (otherPlayers[effect.playerId]) {
-                  targetPlayer = otherPlayers[effect.playerId];
-                }
-                
-                if (targetPlayer) {
-                  const { screenX, screenY } = isoScreen(targetPlayer.pos_x, targetPlayer.pos_y);
-                  const meta = window.getItemMeta(309);
-                  if (meta && meta.img && meta.img.complete) {
-                    const { img, yOffset } = meta;
-                    const drawX = screenX;
-                    const drawY = screenY - (yOffset || 0);
-                    ctx.drawImage(img, drawX, drawY);
-                  }
-                }
-                return true; // Keep effect
+      // Draw fountain healing effects on players
+      if (window.itemsReady()) {
+        const currentTime = Date.now();
+        fountainEffects = fountainEffects.filter(effect => {
+          const elapsed = currentTime - effect.startTime;
+          if (elapsed < 1000) { // Show for 1 second
+            // Find the player with this ID
+            let targetPlayer = null;
+            if (localPlayer && localPlayer.id === effect.playerId) {
+              targetPlayer = localPlayer;
+            } else if (otherPlayers[effect.playerId]) {
+              targetPlayer = otherPlayers[effect.playerId];
+            }
+            
+            if (targetPlayer) {
+              const { screenX, screenY } = isoScreen(targetPlayer.pos_x, targetPlayer.pos_y);
+              const meta = window.getItemMeta(309);
+              if (meta && meta.img && meta.img.complete) {
+                const { img, yOffset } = meta;
+                const drawX = screenX;
+                const drawY = screenY - (yOffset || 0);
+                ctx.drawImage(img, drawX, drawY);
               }
-              return false; // Remove effect
-            });
+            }
+            return true; // Keep effect
           }
+          return false; // Remove effect
+        });
+      }
 
           const k = `${x},${y}`;
           const arr = playersByTile[k];
@@ -2008,7 +1938,7 @@ function drawGame() {
 
     // Draw inventory last (on top of everything)
     drawInventory();
-  } // THIS CLOSING BRACE WAS MISSING!
+  }
 
   // ---------- LOOP ----------
   function loop() {
@@ -2153,6 +2083,7 @@ function drawGame() {
       if (data && Array.isArray(data.floor)) {
         floorCollision = data.floor;
         floorCollisionReady = true;
+        console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
       }
     })
     .catch(err => {
@@ -2163,6 +2094,7 @@ function drawGame() {
           if (data && Array.isArray(data.floor)) {
             floorCollision = data.floor;
             floorCollisionReady = true;
+            console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
           }
         })
         .catch(err2 => {
@@ -2173,6 +2105,7 @@ function drawGame() {
               if (data && Array.isArray(data.floor)) {
                 floorCollision = data.floor;
                 floorCollisionReady = true;
+                console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
               }
             })
             .catch(err3 => {
@@ -2197,6 +2130,7 @@ function drawGame() {
           description: item[5]
         }));
         itemDetailsReady = true;
+        console.log(`Client loaded ${itemDetails.length} item details`);
       }
     })
     .catch(err => {
@@ -2215,6 +2149,7 @@ function drawGame() {
               description: item[5]
             }));
             itemDetailsReady = true;
+            console.log(`Client loaded ${itemDetails.length} item details`);
           }
         })
         .catch(err2 => {
@@ -2233,6 +2168,7 @@ function drawGame() {
                   description: item[5]
                 }));
                 itemDetailsReady = true;
+                console.log(`Client loaded ${itemDetails.length} item details`);
               }
             })
             .catch(err3 => {
