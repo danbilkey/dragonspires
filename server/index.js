@@ -1717,12 +1717,12 @@ wss.on('connection', (ws) => {
         pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetMap, playerData.id])
       ]).catch(err => console.error('Error updating player after teleport:', err));
       
-      // Broadcast player left to old map
+      // Broadcast player changed map to old map (don't show "left DragonSpires" message)
       for (const [otherWs, otherPlayer] of clients.entries()) {
         if (otherPlayer && otherPlayer.map_id === oldMapId && otherPlayer.id !== playerData.id) {
           if (otherWs.readyState === WebSocket.OPEN) {
             otherWs.send(JSON.stringify({
-              type: 'player_left',
+              type: 'player_changed_map',
               id: playerData.id
             }));
           }
@@ -2021,6 +2021,12 @@ wss.on('connection', (ws) => {
         attackTimeouts.delete(playerData.id);
       }
       
+      // Reset direction and step to defaults before disconnecting
+      playerData.direction = 'down';
+      playerData.step = 2;
+      
+      // Update database with logout defaults
+      updateDirectionAndStep(playerData.id, 'down', 2).catch(()=>{});
       
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
