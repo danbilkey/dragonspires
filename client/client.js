@@ -512,6 +512,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return 20; // 'stand' animation
   }
 
+  // Use new direction + step system if available
+  if (player.direction && typeof player.step !== 'undefined') {
+    return getAnimationFrameFromDirectionAndStep(player.direction, player.step);
+  }
+
+  // Fallback to old system
   if (typeof player.animationFrame !== 'undefined') {
     return player.animationFrame;
   }
@@ -670,6 +676,7 @@ document.addEventListener('DOMContentLoaded', () => {
               pos_x: msg.x, 
               pos_y: msg.y,
               direction: msg.direction || 'down',
+              step: msg.step || 2,
               isMoving: msg.isMoving || false,
               isAttacking: false,
               animationFrame: msg.animationFrame || DIRECTION_IDLE.down,
@@ -679,6 +686,7 @@ document.addEventListener('DOMContentLoaded', () => {
             otherPlayers[msg.id].pos_x = msg.x; 
             otherPlayers[msg.id].pos_y = msg.y;
             otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+            if (typeof msg.step !== 'undefined') otherPlayers[msg.id].step = msg.step;
             otherPlayers[msg.id].isMoving = msg.isMoving || false;
             otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
             otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
@@ -703,6 +711,15 @@ document.addEventListener('DOMContentLoaded', () => {
         otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
       }
       break;
+        
+      case 'player_animation_update':
+        if (otherPlayers[msg.id]) {
+          if (msg.direction) otherPlayers[msg.id].direction = msg.direction;
+          if (typeof msg.step !== 'undefined') otherPlayers[msg.id].step = msg.step;
+          if (typeof msg.isMoving === 'boolean') otherPlayers[msg.id].isMoving = msg.isMoving;
+          if (typeof msg.isAttacking === 'boolean') otherPlayers[msg.id].isAttacking = msg.isAttacking;
+        }
+        break;
         
       case 'player_equipment_update':
         if (localPlayer && msg.id === localPlayer.id) {
