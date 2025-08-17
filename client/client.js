@@ -83,17 +83,8 @@ document.addEventListener('DOMContentLoaded', () => {
     up: 16     // up
   };
 
-  // Movement sequence mapping: direction + step -> animation frame
-  function getAnimationFrameFromDirectionAndStep(direction, step) {
-    const directionMaps = {
-      down: { 1: 0, 2: 1, 3: 2 },     // down_walk_1, down, down_walk_2
-      right: { 1: 5, 2: 6, 3: 7 },    // right_walk_1, right, right_walk_2  
-      left: { 1: 10, 2: 11, 3: 12 },  // left_walk_1, left, left_walk_2
-      up: { 1: 15, 2: 16, 3: 17 }     // up_walk_1, up, up_walk_2
-    };
-    
-    return directionMaps[direction] ? directionMaps[direction][step] : 1; // Default to 'down' if invalid
-  }
+  // Movement animation sequence: walk_1 -> walk_2 -> idle
+  const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
 
   // ---------- STATE ----------
   let ws = null;
@@ -131,9 +122,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let localPlayer = null;
   let otherPlayers = {};
 
-  // Movement sequence system
-  let playerDirection = 'down'; // Current facing direction: up, down, left, right
-  let playerStep = 2; // Current step: 1, 2, or 3
+  // NEW: Simplified direction and animation state system
+  let playerDirection = 'down'; // Current facing direction
+  let movementAnimationState = 0; // 0=standing, 1=walk_1, 2=walk_2
   let isLocallyAttacking = false; // Local attack state
   let localAttackState = 0; // 0 or 1 for attack_1 or attack_2
   let lastMoveTime = 0; // Prevent rapid movement through collision objects
@@ -512,12 +503,6 @@ document.addEventListener('DOMContentLoaded', () => {
     return 20; // 'stand' animation
   }
 
-  // Use new direction + step system if available
-  if (player.direction && typeof player.step !== 'undefined') {
-    return getAnimationFrameFromDirectionAndStep(player.direction, player.step);
-  }
-
-  // Fallback to old system
   if (typeof player.animationFrame !== 'undefined') {
     return player.animationFrame;
   }
@@ -647,25 +632,19 @@ document.addEventListener('DOMContentLoaded', () => {
         
       case 'player_joined':
         if (!localPlayer || msg.player.id !== localPlayer.id) {
-          // Always replace/update player data (handles both new joins and teleports to same map)
           otherPlayers[msg.player.id] = {
             ...msg.player,
-            username: msg.player.username || msg.player.id, // Ensure username is preserved
             direction: msg.player.direction || 'down',
-            step: msg.player.step || 2,
             isMoving: msg.player.isMoving || false,
             isAttacking: msg.player.isAttacking || false,
-            isPickingUp: msg.player.isPickingUp || false,
-            isBRB: msg.player.isBRB || false,
-            temporarySprite: msg.player.temporarySprite || 0,
             animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
             movementSequenceIndex: msg.player.movementSequenceIndex || 0
           };
+          pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
         }
         break;
         
       case 'player_moved':
-        console.log(`Received player_moved: ${msg.id} to (${msg.x}, ${msg.y})`);
         if (localPlayer && msg.id === localPlayer.id) { 
           localPlayer.pos_x = msg.x; 
           localPlayer.pos_y = msg.y;
@@ -678,11 +657,10 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!otherPlayers[msg.id]) {
             otherPlayers[msg.id] = { 
               id: msg.id, 
-              username: msg.username || `#${msg.id}`, 
+              username: `#${msg.id}`, 
               pos_x: msg.x, 
               pos_y: msg.y,
               direction: msg.direction || 'down',
-              step: msg.step || 2,
               isMoving: msg.isMoving || false,
               isAttacking: false,
               animationFrame: msg.animationFrame || DIRECTION_IDLE.down,
@@ -692,7 +670,6 @@ document.addEventListener('DOMContentLoaded', () => {
             otherPlayers[msg.id].pos_x = msg.x; 
             otherPlayers[msg.id].pos_y = msg.y;
             otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
-            if (typeof msg.step !== 'undefined') otherPlayers[msg.id].step = msg.step;
             otherPlayers[msg.id].isMoving = msg.isMoving || false;
             otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
             otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
@@ -710,7 +687,6 @@ document.addEventListener('DOMContentLoaded', () => {
         localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
       } else if (otherPlayers[msg.id]) {
         otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
-        if (typeof msg.step !== 'undefined') otherPlayers[msg.id].step = msg.step;
         otherPlayers[msg.id].isMoving = msg.isMoving || false;
         otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
         otherPlayers[msg.id].isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
@@ -718,15 +694,6 @@ document.addEventListener('DOMContentLoaded', () => {
         otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
       }
       break;
-        
-      case 'player_animation_update':
-        if (otherPlayers[msg.id]) {
-          if (msg.direction) otherPlayers[msg.id].direction = msg.direction;
-          if (typeof msg.step !== 'undefined') otherPlayers[msg.id].step = msg.step;
-          if (typeof msg.isMoving === 'boolean') otherPlayers[msg.id].isMoving = msg.isMoving;
-          if (typeof msg.isAttacking === 'boolean') otherPlayers[msg.id].isAttacking = msg.isAttacking;
-        }
-        break;
         
       case 'player_equipment_update':
         if (localPlayer && msg.id === localPlayer.id) {
@@ -779,9 +746,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (p.id !== localPlayer.id) {
                   otherPlayers[p.id] = {
                     ...p,
-                    username: p.username || p.id, // Ensure username is preserved
                     direction: p.direction || 'down',
-                    step: p.step || 2,
                     isMoving: p.isMoving || false,
                     isAttacking: p.isAttacking || false,
                     isPickingUp: p.isPickingUp || false,
@@ -846,13 +811,11 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
         
       case 'player_left':
-        // Server already sends "leaves DragonSpires" chat message, just remove from array
+        const p = otherPlayers[msg.id];
+        const name = p?.username ?? msg.id;
+        if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
         delete otherPlayers[msg.id];
         break;
-        
-
-        
-
         
       case 'chat':
         if (typeof msg.text === 'string') pushChat(msg.text);
@@ -1049,8 +1012,7 @@ document.addEventListener('DOMContentLoaded', () => {
       localPickupTimeout = setTimeout(() => {
         isLocallyPickingUp = false;
         localPickupTimeout = null;
-        // Set step to 2 after pickup animation, shouldStayInStand remains true until movement
-        playerStep = 2;
+        // shouldStayInStand remains true until movement
       }, 700); // Slightly longer than server animation
       
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
@@ -1122,7 +1084,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const nextIndex = (currentIndex + 1) % directions.length;
       playerDirection = directions[nextIndex];
       
-      playerStep = 2; // Set step to 2 when rotating
+      movementAnimationState = 0;
       isLocallyAttacking = false;
       
       localPlayer.direction = playerDirection;
@@ -1168,8 +1130,10 @@ document.addEventListener('DOMContentLoaded', () => {
       
       localAttackTimeout = setTimeout(() => {
         isLocallyAttacking = false;
-        // Set step to 2 after attack animation concludes
-        playerStep = 2;
+        // Don't reset movementAnimationState to 0 if we should stay in stand
+        if (!shouldStayInStand) {
+          movementAnimationState = 0;
+        }
         localAttackTimeout = null;
       }, 1000);
       
@@ -1322,8 +1286,9 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           }
           isLocallyAttacking = false;
           
-          // Update direction and position directly to final teleport destination (no step increment for teleports)
+          // Update direction and position directly to final teleport destination
           playerDirection = newDirection;
+          movementAnimationState = 0;
           
           localPlayer.direction = playerDirection;
           localPlayer.pos_x = currentX;
@@ -1347,7 +1312,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           isLocallyAttacking = false;
           
           playerDirection = newDirection;
-          playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          movementAnimationState = 1; // Always use walk_1 for consistency
           
           localPlayer.direction = playerDirection;
           localPlayer.pos_x = nx;
@@ -1365,12 +1330,12 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
+              movementAnimationState = 0;
             }
           }, 200);
         } else {
-          // Can't move but still increment step for visual feedback
           playerDirection = newDirection;
-          playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          movementAnimationState = 1; // Always use walk_1 for consistency
           lastMoveTime = currentTime;
         }
       }
@@ -1490,9 +1455,9 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           }
           isLocallyAttacking = false;
           
-          // Update direction and increment step
+          // Update direction and animation state
           playerDirection = newDirection;
-          playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          movementAnimationState = (movementAnimationState + 1) % 3;
           
           // Update local player object immediately
           localPlayer.direction = playerDirection;
@@ -1514,12 +1479,13 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
+              movementAnimationState = 0;
             }
           }, 200);
         } else {
-          // Can't move but still update direction and increment step for visual feedback
+          // Can't move but still update direction and animation for visual feedback
           playerDirection = newDirection;
-          playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          movementAnimationState = (movementAnimationState + 1) % 3;
           lastMoveTime = currentTime;
         }
       }
@@ -1601,11 +1567,14 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
         animFrame = attackSeq[localAttackState];
       } else {
         // Check if we should stay in stand animation (after pickup and not moving)
-        if (shouldStayInStand && !localPlayer.isMoving) {
+        if (shouldStayInStand && !localPlayer.isMoving && movementAnimationState === 0) {
           animFrame = 20; // Stay in 'stand' animation
+        } else if (movementAnimationState === 0) {
+          animFrame = DIRECTION_IDLE[playerDirection] || DIRECTION_IDLE.down;
         } else {
-          // Use new direction + step system
-          animFrame = getAnimationFrameFromDirectionAndStep(playerDirection, playerStep);
+          const walkIndex = movementAnimationState === 1 ? 0 : 2;
+          const directionOffsets = { down: 0, right: 5, left: 10, up: 15 };
+          animFrame = (directionOffsets[playerDirection] || 0) + walkIndex;
         }
       }
     } else {
@@ -1810,8 +1779,8 @@ function drawInventory() {
       else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
       if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
-      else if (connected) ctx.fillText('Press any key to enter!', 47, 347);
-      else ctx.fillText('Connecting to server...', 47, 347);
+      else if (connected) ctx.fillText('Connecting to server...', 47, 347);
+      else ctx.fillText('Press any key to reconnect.', 47, 347);
     } else {
       ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
@@ -1824,7 +1793,10 @@ function drawInventory() {
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
 
-    // Stand sprite will be drawn in drawGame() after successful login
+    // Draw stand sprite at position 13,198 after login border
+    if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
+      ctx.drawImage(playerSprites[20], 13, 198);
+    }
 
     if (activeField === null) {
       activeField = 'username';
@@ -1938,11 +1910,6 @@ function drawInventory() {
 
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
-
-    // Draw stand sprite at position 13,198 after game border
-    if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
-      ctx.drawImage(playerSprites[20], 13, 198);
-    }
 
     drawBarsAndStats();
     drawChatHistory();
