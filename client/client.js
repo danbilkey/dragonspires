@@ -40,8 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // Chat areas
-  const CHAT = { x1: 156, y1: 289, x2: 618, y2: 423, pad: 8 };
-  const CHAT_INPUT = { x1: 156, y1: 427, x2: 618, y2: 469, pad: 8, maxLen: 200, extraY: 2 };
+  const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
+  const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200, extraY: 2 };
   // Inventory configuration
   const INVENTORY = {
     x: 241,
@@ -1648,7 +1648,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
     const { x1,y1,x2,y2,pad } = CHAT;
     const w = x2 - x1;
     ctx.font = '12px monospace'; ctx.fillStyle = '#000'; ctx.textAlign = 'left';
-    const lineH = 16;
+    const lineH = 14;
     let y = y2 - pad;
     
     // Calculate visible messages based on scroll offset
