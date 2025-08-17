@@ -583,46 +583,52 @@ function checkDirectionalTeleportation(playerX, playerY, dx, dy, direction, mapS
   
   // First check for remote teleportation (bypasses normal collision)
   if (direction === 'down') {
-    // Check if item at position (player_x + 1, player_y + 2) is #338
-    const remoteItemId = getItemAtPosition(playerX + 1, playerY + 2, mapSpec);
+    // Check if item #338 is at (destination + 1, destination + 2)
+    const remoteItemX = nx + 1;
+    const remoteItemY = ny + 2;
+    const remoteItemId = getItemAtPosition(remoteItemX, remoteItemY, mapSpec);
     if (remoteItemId === 338) {
+      // Teleport to 1 tile down from where item #338 is located
       return {
         shouldTeleport: true,
-        destX: playerX + 1,
-        destY: playerY + 3,
+        destX: remoteItemX,
+        destY: remoteItemY + 1,
         blockMovement: false
       };
     }
   }
   
   if (direction === 'right') {
-    // Check if item at position (player_x + 2, player_y + 1) is #42
-    const remoteItemId = getItemAtPosition(playerX + 2, playerY + 1, mapSpec);
+    // Check if item #42 is at (destination + 2, destination + 1)
+    const remoteItemX = nx + 2;
+    const remoteItemY = ny + 1;
+    const remoteItemId = getItemAtPosition(remoteItemX, remoteItemY, mapSpec);
     if (remoteItemId === 42) {
+      // Teleport to 1 tile right from where item #42 is located
       return {
         shouldTeleport: true,
-        destX: playerX + 3,
-        destY: playerY + 1,
+        destX: remoteItemX + 1,
+        destY: remoteItemY,
         blockMovement: false
       };
     }
   }
   
-  // Check what's at the target position
+  // Check what's at the target position for direct teleportation
   const targetItemId = getItemAtPosition(nx, ny, mapSpec);
   
   // Handle item #338 logic
   if (targetItemId === 338) {
     if (direction === 'up') {
-      // Moving up into #338: teleport 2 up, 1 left
+      // Moving up into #338: teleport 2 up, 1 left from the #338 tile
       return {
         shouldTeleport: true,
         destX: nx - 1,
         destY: ny - 2,
         blockMovement: false
       };
-    } else if (direction === 'left' || direction === 'right') {
-      // Moving left/right into #338: block movement
+    } else if (direction === 'right' || direction === 'down' || direction === 'left') {
+      // Moving right/down/left into #338: block movement
       return {
         shouldTeleport: false,
         destX: 0,
@@ -635,15 +641,15 @@ function checkDirectionalTeleportation(playerX, playerY, dx, dy, direction, mapS
   // Handle item #42 logic
   if (targetItemId === 42) {
     if (direction === 'left') {
-      // Moving left into #42: teleport 2 left, 1 up
+      // Moving left into #42: teleport 2 left, 1 up from the #42 tile
       return {
         shouldTeleport: true,
         destX: nx - 2,
         destY: ny - 1,
         blockMovement: false
       };
-    } else if (direction === 'up' || direction === 'down') {
-      // Moving up/down into #42: block movement
+    } else if (direction === 'right' || direction === 'up' || direction === 'down') {
+      // Moving right/up/down into #42: block movement
       return {
         shouldTeleport: false,
         destX: 0,
@@ -660,6 +666,65 @@ function checkDirectionalTeleportation(playerX, playerY, dx, dy, direction, mapS
     destY: 0,
     blockMovement: false
   };
+}
+
+// Calculate chain teleportation following original direction rules
+function calculateDirectionalChainTeleportation(startX, startY, originalDirection, mapSpec) {
+  let currentX = startX;
+  let currentY = startY;
+  let teleportCount = 0;
+  const maxTeleports = 10;
+  
+  // Keep teleporting until we land on a non-teleport tile or hit max teleports
+  while (teleportCount < maxTeleports) {
+    const currentItemId = getItemAtPosition(currentX, currentY, mapSpec);
+    if (currentItemId !== 42 && currentItemId !== 338) {
+      break; // Not a teleport tile, stop here
+    }
+    
+    let nextX, nextY;
+    
+    // Apply directional logic based on original movement direction
+    if (currentItemId === 338) {
+      if (originalDirection === 'up') {
+        // Direct teleportation: 2 up, 1 left from current position
+        nextX = currentX - 1;
+        nextY = currentY - 2;
+      } else if (originalDirection === 'down') {
+        // Remote teleportation: 1 tile down from current position
+        nextX = currentX;
+        nextY = currentY + 1;
+      } else {
+        // Invalid direction for #338, stop chaining
+        break;
+      }
+    } else if (currentItemId === 42) {
+      if (originalDirection === 'left') {
+        // Direct teleportation: 2 left, 1 up from current position
+        nextX = currentX - 2;
+        nextY = currentY - 1;
+      } else if (originalDirection === 'right') {
+        // Remote teleportation: 1 tile right from current position
+        nextX = currentX + 1;
+        nextY = currentY;
+      } else {
+        // Invalid direction for #42, stop chaining
+        break;
+      }
+    }
+    
+    // Check if teleport destination is within bounds
+    if (nextX >= 0 && nextY >= 0 && nextX < MAP_WIDTH && nextY < MAP_HEIGHT) {
+      currentX = nextX;
+      currentY = nextY;
+      teleportCount++;
+    } else {
+      // Can't teleport out of bounds, stop on current teleport tile
+      break;
+    }
+  }
+  
+  return { x: currentX, y: currentY, teleportCount };
 }
 
 function calculateChainTeleportation(startX, startY, mapSpec) {
@@ -1118,8 +1183,8 @@ wss.on('connection', (ws) => {
       const teleportResult = checkDirectionalTeleportation(playerData.pos_x, playerData.pos_y, dx, dy, msg.direction, serverMapSpec);
       
       if (teleportResult.shouldTeleport) {
-        // Handle chain teleportation
-        const finalDestination = calculateChainTeleportation(teleportResult.destX, teleportResult.destY, serverMapSpec);
+        // Handle chain teleportation following original direction
+        const finalDestination = calculateDirectionalChainTeleportation(teleportResult.destX, teleportResult.destY, msg.direction, serverMapSpec);
         
         // Check if final destination is within bounds
         if (finalDestination.x < 0 || finalDestination.y < 0 || 
