@@ -1801,7 +1801,7 @@ function drawInventory() {
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
       if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
       else if (connected) ctx.fillText('Connecting to server...', 47, 347);
-      else ctx.fillText('Press any key to reconnect.', 47, 347);
+      else ctx.fillText('Connecting to server...', 47, 347);
     } else {
       ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
