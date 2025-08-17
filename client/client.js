@@ -1899,7 +1899,10 @@ function drawInventory() {
     drawChatHistory();
   }
 
-  function drawGame() {
+  // This shows the corrected ending of the drawGame function and beginning of the loop
+// Replace lines approximately 1680-1730 in your code with this:
+
+function drawGame() {
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
     if (!localPlayer) return;
@@ -1936,35 +1939,35 @@ function drawInventory() {
             drawItemAtTile(screenX, screenY, effectiveItemId);
           }
 
-      // Draw fountain healing effects on players
-      if (window.itemsReady()) {
-        const currentTime = Date.now();
-        fountainEffects = fountainEffects.filter(effect => {
-          const elapsed = currentTime - effect.startTime;
-          if (elapsed < 1000) { // Show for 1 second
-            // Find the player with this ID
-            let targetPlayer = null;
-            if (localPlayer && localPlayer.id === effect.playerId) {
-              targetPlayer = localPlayer;
-            } else if (otherPlayers[effect.playerId]) {
-              targetPlayer = otherPlayers[effect.playerId];
-            }
-            
-            if (targetPlayer) {
-              const { screenX, screenY } = isoScreen(targetPlayer.pos_x, targetPlayer.pos_y);
-              const meta = window.getItemMeta(309);
-              if (meta && meta.img && meta.img.complete) {
-                const { img, yOffset } = meta;
-                const drawX = screenX;
-                const drawY = screenY - (yOffset || 0);
-                ctx.drawImage(img, drawX, drawY);
+          // Draw fountain healing effects on players
+          if (window.itemsReady()) {
+            const currentTime = Date.now();
+            fountainEffects = fountainEffects.filter(effect => {
+              const elapsed = currentTime - effect.startTime;
+              if (elapsed < 1000) { // Show for 1 second
+                // Find the player with this ID
+                let targetPlayer = null;
+                if (localPlayer && localPlayer.id === effect.playerId) {
+                  targetPlayer = localPlayer;
+                } else if (otherPlayers[effect.playerId]) {
+                  targetPlayer = otherPlayers[effect.playerId];
+                }
+                
+                if (targetPlayer) {
+                  const { screenX, screenY } = isoScreen(targetPlayer.pos_x, targetPlayer.pos_y);
+                  const meta = window.getItemMeta(309);
+                  if (meta && meta.img && meta.img.complete) {
+                    const { img, yOffset } = meta;
+                    const drawX = screenX;
+                    const drawY = screenY - (yOffset || 0);
+                    ctx.drawImage(img, drawX, drawY);
+                  }
+                }
+                return true; // Keep effect
               }
-            }
-            return true; // Keep effect
+              return false; // Remove effect
+            });
           }
-          return false; // Remove effect
-        });
-      }
 
           const k = `${x},${y}`;
           const arr = playersByTile[k];
@@ -2005,7 +2008,7 @@ function drawInventory() {
 
     // Draw inventory last (on top of everything)
     drawInventory();
-  }
+  } // THIS CLOSING BRACE WAS MISSING!
 
   // ---------- LOOP ----------
   function loop() {
