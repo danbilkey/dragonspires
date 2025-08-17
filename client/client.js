@@ -647,15 +647,19 @@ document.addEventListener('DOMContentLoaded', () => {
         
       case 'player_joined':
         if (!localPlayer || msg.player.id !== localPlayer.id) {
+          // Always replace/update player data (handles both new joins and teleports to same map)
           otherPlayers[msg.player.id] = {
             ...msg.player,
             direction: msg.player.direction || 'down',
+            step: msg.player.step || 2,
             isMoving: msg.player.isMoving || false,
             isAttacking: msg.player.isAttacking || false,
+            isPickingUp: msg.player.isPickingUp || false,
+            isBRB: msg.player.isBRB || false,
+            temporarySprite: msg.player.temporarySprite || 0,
             animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
             movementSequenceIndex: msg.player.movementSequenceIndex || 0
           };
-          pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
         }
         break;
         
@@ -839,16 +843,11 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
         
       case 'player_left':
-        const p = otherPlayers[msg.id];
-        const name = msg.username || p?.username || msg.id;
-        if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
+        // Server already sends "leaves DragonSpires" chat message, just remove from array
         delete otherPlayers[msg.id];
         break;
         
-      case 'player_changed_map':
-        // Player teleported to different map - remove from view but don't show "left DragonSpires"
-        delete otherPlayers[msg.id];
-        break;
+
         
 
         
