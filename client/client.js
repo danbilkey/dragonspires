@@ -650,6 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
           // Always replace/update player data (handles both new joins and teleports to same map)
           otherPlayers[msg.player.id] = {
             ...msg.player,
+            username: msg.player.username || msg.player.id, // Ensure username is preserved
             direction: msg.player.direction || 'down',
             step: msg.player.step || 2,
             isMoving: msg.player.isMoving || false,
@@ -777,6 +778,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (p.id !== localPlayer.id) {
                   otherPlayers[p.id] = {
                     ...p,
+                    username: p.username || p.id, // Ensure username is preserved
                     direction: p.direction || 'down',
                     step: p.step || 2,
                     isMoving: p.isMoving || false,
