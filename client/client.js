@@ -839,7 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
       case 'player_left':
         const p = otherPlayers[msg.id];
-        const name = p?.username ?? msg.id;
+        const name = msg.username || p?.username || msg.id;
         if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
         delete otherPlayers[msg.id];
         break;
@@ -847,6 +847,25 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'player_changed_map':
         // Player teleported to different map - remove from view but don't show "left DragonSpires"
         delete otherPlayers[msg.id];
+        break;
+        
+      case 'players_refresh':
+        // Complete refresh of players on current map
+        if (msg.players) {
+          otherPlayers = {};
+          msg.players.forEach(p => {
+            otherPlayers[p.id] = {
+              ...p,
+              direction: p.direction || 'down',
+              step: p.step || 2,
+              isMoving: p.isMoving || false,
+              isAttacking: p.isAttacking || false,
+              isPickingUp: p.isPickingUp || false,
+              isBRB: p.isBRB || false,
+              temporarySprite: p.temporarySprite || 0
+            };
+          });
+        }
         break;
         
       case 'chat':
