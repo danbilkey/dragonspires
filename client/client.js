@@ -1170,7 +1170,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
             lastMoveTime = currentTime;
             
             // Send teleport move to server
-            send({ type: 'move', dx: teleX - localPlayer.pos_x, dy: teleY - localPlayer.pos_y, direction: playerDirection, teleport: true });
+            send({ type: 'move', dx: dx, dy: dy, direction: playerDirection, teleport: true });
             
             // Reset stand flag when teleporting
             shouldStayInStand = false;
@@ -1205,7 +1205,6 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
               movementAnimationState = 0;
             }
           }, 200);
-        }
         } else {
           playerDirection = newDirection;
           movementAnimationState = (movementAnimationState + 1) % 3;
