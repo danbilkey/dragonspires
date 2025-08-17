@@ -789,7 +789,8 @@ async function initializeDatabase() {
       ADD COLUMN IF NOT EXISTS movement_sequence_index INTEGER DEFAULT 0,
       ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'player',
       ADD COLUMN IF NOT EXISTS is_picking_up BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS is_brb BOOLEAN DEFAULT false
+      ADD COLUMN IF NOT EXISTS is_brb BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS map_id INTEGER DEFAULT 1
     `);
 
     // Create map_items table if it doesn't exist
@@ -1604,6 +1605,107 @@ wss.on('connection', (ws) => {
               type: 'temporary_sprite_update',
               id: playerData.id,
               temporarySprite: playerData.temporarySprite
+            }));
+          }
+        }
+      }
+    }
+
+    else if (msg.type === 'use_teleport_item') {
+      if (!playerData) return;
+      
+      const { itemId, magicCost, targetMap, targetX, targetY } = msg;
+      
+      // Verify player has the item in hands
+      if (playerData.hands !== itemId) return;
+      
+      // Verify player has enough magic
+      if ((playerData.magic || 0) < magicCost) {
+        send(ws, {
+          type: 'teleport_result',
+          success: false,
+          message: '~ You do not have enough magic to use that item!'
+        });
+        return;
+      }
+      
+      // Clear temporary sprite
+      playerData.temporarySprite = 0;
+      
+      // Reduce magic
+      playerData.magic = Math.max(0, (playerData.magic || 0) - magicCost);
+      
+      // Get old map for broadcasting player left
+      const oldMapId = playerData.map_id;
+      
+      // Update player position and map
+      playerData.pos_x = targetX;
+      playerData.pos_y = targetY;
+      playerData.map_id = targetMap;
+      
+      // Update database
+      Promise.allSettled([
+        updateStatsInDb(playerData.id, { magic: playerData.magic }),
+        updatePosition(playerData.id, targetX, targetY),
+        pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetMap, playerData.id])
+      ]).catch(err => console.error('Error updating player after teleport:', err));
+      
+      // Broadcast player left to old map
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === oldMapId && otherPlayer.id !== playerData.id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'player_left',
+              id: playerData.id
+            }));
+          }
+        }
+      }
+      
+      // Get players on target map
+      const playersOnTargetMap = Array.from(clients.values())
+        .filter(p => p.map_id === targetMap && p.id !== playerData.id)
+        .map(p => ({ ...p, isBRB: p.isBRB || false, temporarySprite: p.temporarySprite || 0 }));
+      
+      // Get items for target map (you may need to implement per-map items if needed)
+      // For now, using the same mapItems for all maps
+      
+      // Send success response to teleporting player
+      send(ws, {
+        type: 'teleport_result',
+        success: true,
+        id: playerData.id,
+        newMagic: playerData.magic,
+        x: targetX,
+        y: targetY,
+        mapId: targetMap,
+        players: playersOnTargetMap,
+        items: mapItems
+      });
+      
+      // Broadcast magic update to teleporting player
+      send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
+      
+      // Broadcast player joined to target map
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'player_joined',
+              player: { ...playerData, isBRB: playerData.isBRB || false, temporarySprite: playerData.temporarySprite || 0 }
+            }));
+          }
+        }
+      }
+      
+      // Broadcast temporary sprite clear
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'temporary_sprite_update',
+              id: playerData.id,
+              temporarySprite: 0
             }));
           }
         }
