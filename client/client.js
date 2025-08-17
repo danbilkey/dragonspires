@@ -1297,7 +1297,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
    // Draw BRB item (item 181) behind player if in BRB state
     const playerIsBRB = isLocal ? isBRB : (p.isBRB || false);
     if (playerIsBRB && window.itemsReady()) {
-      drawItemAtTile(screenX, screenY-64, 181);
+      drawItemAtTile(screenX, screenY-32, 181);
     }
     
     // Force sit animation if in BRB state
