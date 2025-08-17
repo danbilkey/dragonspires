@@ -142,7 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Inventory state - MOVED TO TOP LEVEL
   let inventoryVisible = false;
   let temporarySprite = 0; // For temporary sprite rendering
-  let fountainEffects = []; // Track fountain healing effects { x, y, startTime }
+  let fountainEffects = []; // Track fountain healing effects { playerId, startTime }
   let inventorySelectedSlot = 1; // Default to slot 1
   let chatScrollOffset = 0; // For scrolling through chat messages
   let playerInventory = {}; // { slotNumber: itemId }
@@ -740,14 +740,14 @@ document.addEventListener('DOMContentLoaded', () => {
           break;
         
         case 'fountain_effect':
-            if (msg.x !== undefined && msg.y !== undefined) {
+            if (msg.playerId !== undefined) {
               fountainEffects.push({
-                x: msg.x,
-                y: msg.y,
+                playerId: msg.playerId,
                 startTime: Date.now()
               });
             }
             break;
+
       case 'item_placed':
         const key = `${msg.x},${msg.y}`;
         if (msg.itemId === 0) {
@@ -1776,19 +1776,29 @@ function drawInventory() {
             drawItemAtTile(screenX, screenY, effectiveItemId);
           }
 
-      // Draw fountain healing effects
+      // Draw fountain healing effects on players
       if (window.itemsReady()) {
         const currentTime = Date.now();
         fountainEffects = fountainEffects.filter(effect => {
           const elapsed = currentTime - effect.startTime;
           if (elapsed < 1000) { // Show for 1 second
-            const { screenX, screenY } = isoScreen(effect.x, effect.y);
-            const meta = window.getItemMeta(309);
-            if (meta && meta.img && meta.img.complete) {
-              const { img, yOffset } = meta;
-              const drawX = screenX;
-              const drawY = screenY - (yOffset || 0);
-              ctx.drawImage(img, drawX, drawY);
+            // Find the player with this ID
+            let targetPlayer = null;
+            if (localPlayer && localPlayer.id === effect.playerId) {
+              targetPlayer = localPlayer;
+            } else if (otherPlayers[effect.playerId]) {
+              targetPlayer = otherPlayers[effect.playerId];
+            }
+            
+            if (targetPlayer) {
+              const { screenX, screenY } = isoScreen(targetPlayer.pos_x, targetPlayer.pos_y);
+              const meta = window.getItemMeta(309);
+              if (meta && meta.img && meta.img.complete) {
+                const { img, yOffset } = meta;
+                const drawX = screenX;
+                const drawY = screenY - (yOffset || 0);
+                ctx.drawImage(img, drawX, drawY);
+              }
             }
             return true; // Keep effect
           }
