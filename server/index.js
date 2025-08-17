@@ -906,9 +906,21 @@ wss.on('connection', (ws) => {
 
         const others = Array.from(clients.values())
           .filter(p => p.id !== playerData.id)
-          .map(p => ({ ...p, isBRB: p.isBRB || false }));
-        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false } });
+          .map(p => ({ 
+            ...p, 
+            isBRB: p.isBRB || false,
+            temporarySprite: p.temporarySprite || 0,
+            step: p.step || 2,
+            direction: p.direction || 'down'
+          }));
+        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others, items: mapItems, inventory: inventory });
+        broadcast({ type: 'player_joined', player: { 
+          ...playerData, 
+          isBRB: playerData.isBRB || false,
+          temporarySprite: playerData.temporarySprite || 0,
+          step: playerData.step || 2,
+          direction: playerData.direction || 'down'
+        } });
       } catch (e) {
         console.error('Login error', e);
         send(ws, { type: 'login_error', message: 'Server error' });
@@ -961,9 +973,22 @@ wss.on('connection', (ws) => {
         // Load player inventory
         const inventory = await loadPlayerInventory(playerData.id);
 
-        const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
+        const others = Array.from(clients.values())
+          .filter(p => p.id !== playerData.id)
+          .map(p => ({ 
+            ...p, 
+            isBRB: p.isBRB || false,
+            temporarySprite: p.temporarySprite || 0,
+            step: p.step || 2,
+            direction: p.direction || 'down'
+          }));
         send(ws, { type: 'signup_success', player: playerData, players: others, items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0 } });
+        broadcast({ type: 'player_joined', player: { 
+          ...playerData, 
+          temporarySprite: playerData.temporarySprite || 0,
+          step: playerData.step || 2,
+          direction: playerData.direction || 'down'
+        } });
       } catch (e) {
         console.error('Signup error', e);
         send(ws, { type: 'signup_error', message: 'Server error' });
@@ -1707,7 +1732,13 @@ wss.on('connection', (ws) => {
       // Get players on target map
       const playersOnTargetMap = Array.from(clients.values())
         .filter(p => p.map_id === targetMap && p.id !== playerData.id)
-        .map(p => ({ ...p, isBRB: p.isBRB || false, temporarySprite: p.temporarySprite || 0 }));
+        .map(p => ({ 
+          ...p, 
+          isBRB: p.isBRB || false, 
+          temporarySprite: p.temporarySprite || 0,
+          step: p.step || 2,
+          direction: p.direction || 'down'
+        }));
       
       // Get items for target map (you may need to implement per-map items if needed)
       // For now, using the same mapItems for all maps
@@ -1734,7 +1765,13 @@ wss.on('connection', (ws) => {
           if (otherWs.readyState === WebSocket.OPEN) {
             otherWs.send(JSON.stringify({
               type: 'player_joined',
-              player: { ...playerData, isBRB: playerData.isBRB || false, temporarySprite: playerData.temporarySprite || 0 }
+              player: { 
+                ...playerData, 
+                isBRB: playerData.isBRB || false, 
+                temporarySprite: playerData.temporarySprite || 0,
+                step: playerData.step || 2,
+                direction: playerData.direction || 'down'
+              }
             }));
           }
         }
