@@ -878,6 +878,7 @@ wss.on('connection', (ws) => {
           armor: found.armor ?? 0,
           hands: found.hands ?? 0,
           direction: found.direction ?? 'down',
+          step: found.step ?? 2,
           isMoving: found.is_moving ?? false,
           isAttacking: found.is_attacking ?? false,
           animationFrame: found.animation_frame ?? DIRECTION_IDLE.down,
@@ -934,6 +935,7 @@ wss.on('connection', (ws) => {
           armor: created.armor ?? 0,
           hands: created.hands ?? 0,
           direction: created.direction ?? 'down',
+          step: created.step ?? 2,
           isMoving: created.is_moving ?? false,
           isAttacking: created.is_attacking ?? false,
           animationFrame: created.animation_frame ?? DIRECTION_IDLE.down,
@@ -1101,11 +1103,9 @@ wss.on('connection', (ws) => {
           playerData.direction = msg.direction;
         }
 
-        // Advance movement sequence index
-        playerData.movementSequenceIndex = (playerData.movementSequenceIndex + 1) % MOVEMENT_SEQUENCE.length;
-
-        // Calculate animation frame based on movement sequence
-        playerData.animationFrame = getMovementAnimationFrame(playerData.direction, playerData.movementSequenceIndex);
+        // Increment step: 1 -> 2 -> 3 -> 1
+        playerData.step = playerData.step === 3 ? 1 : (playerData.step || 2) + 1;
+        
         playerData.isMoving = true;
         playerData.isAttacking = false; // Ensure attack state is cleared
 
@@ -1113,7 +1113,7 @@ wss.on('connection', (ws) => {
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
           updatePosition(playerData.id, nx, ny),
-          updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex)
+          updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
         ]).catch(()=>{});
 
         // Broadcast the updated state immediately
@@ -1123,12 +1123,32 @@ wss.on('connection', (ws) => {
           x: nx, 
           y: ny, 
           direction: playerData.direction,
+          step: playerData.step,
           isMoving: playerData.isMoving,
-          isAttacking: playerData.isAttacking,
-          animationFrame: playerData.animationFrame,
-          movementSequenceIndex: playerData.movementSequenceIndex
+          isAttacking: playerData.isAttacking
         });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+      } else {
+        // Movement blocked but still increment step for visual feedback
+        if (msg.direction) {
+          playerData.direction = msg.direction;
+        }
+        
+        // Increment step even when movement is blocked
+        playerData.step = playerData.step === 3 ? 1 : (playerData.step || 2) + 1;
+        
+        // Save direction and step to database
+        updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
+        
+        // Broadcast the direction and step change
+        broadcast({ 
+          type: 'player_animation_update', 
+          id: playerData.id, 
+          direction: playerData.direction,
+          step: playerData.step,
+          isMoving: false,
+          isAttacking: false
+        });
       }
     }
 
