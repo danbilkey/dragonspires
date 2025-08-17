@@ -844,6 +844,11 @@ document.addEventListener('DOMContentLoaded', () => {
         delete otherPlayers[msg.id];
         break;
         
+      case 'player_changed_map':
+        // Player teleported to different map - remove from view but don't show "left DragonSpires"
+        delete otherPlayers[msg.id];
+        break;
+        
       case 'chat':
         if (typeof msg.text === 'string') pushChat(msg.text);
         break;
