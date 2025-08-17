@@ -576,57 +576,8 @@ function checkTeleportDestination(x, y, itemId) {
   return destX >= 0 && destY >= 0 && destX < MAP_WIDTH && destY < MAP_HEIGHT;
 }
 
-// Check for directional teleportation logic
-function checkDirectionalTeleportation(playerX, playerY, dx, dy, direction, mapSpec) {
-  const nx = playerX + dx;
-  const ny = playerY + dy;
-  
-  // Check what's at the target position
-  const targetItemId = getItemAtPosition(nx, ny, mapSpec);
-  
-  // Handle item #338 logic
-  if (targetItemId === 338) {
-    if (direction === 'up') {
-      // Moving up into #338: teleport 2 up, 1 left
-      return {
-        shouldTeleport: true,
-        destX: nx - 1,
-        destY: ny - 2,
-        blockMovement: false
-      };
-    } else if (direction === 'left' || direction === 'right') {
-      // Moving left/right into #338: block movement
-      return {
-        shouldTeleport: false,
-        destX: 0,
-        destY: 0,
-        blockMovement: true
-      };
-    }
-  }
-  
-  // Handle item #42 logic
-  if (targetItemId === 42) {
-    if (direction === 'left') {
-      // Moving left into #42: teleport 2 left, 1 up
-      return {
-        shouldTeleport: true,
-        destX: nx - 2,
-        destY: ny - 1,
-        blockMovement: false
-      };
-    } else if (direction === 'up' || direction === 'down') {
-      // Moving up/down into #42: block movement
-      return {
-        shouldTeleport: false,
-        destX: 0,
-        destY: 0,
-        blockMovement: true
-      };
-    }
-  }
-  
-  // Check for remote teleportation cases
+// Check for remote teleportation (bypasses normal collision)
+function checkRemoteTeleportation(playerX, playerY, direction, mapSpec) {
   if (direction === 'down') {
     // Check if item at position (player_x + 1, player_y + 2) is #338
     const remoteItemId = getItemAtPosition(playerX + 1, playerY + 2, mapSpec);
@@ -634,8 +585,7 @@ function checkDirectionalTeleportation(playerX, playerY, dx, dy, direction, mapS
       return {
         shouldTeleport: true,
         destX: playerX + 1,
-        destY: playerY + 3,
-        blockMovement: false
+        destY: playerY + 3
       };
     }
   }
@@ -647,19 +597,48 @@ function checkDirectionalTeleportation(playerX, playerY, dx, dy, direction, mapS
       return {
         shouldTeleport: true,
         destX: playerX + 3,
-        destY: playerY + 1,
-        blockMovement: false
+        destY: playerY + 1
       };
     }
   }
   
-  // No teleportation logic applies
-  return {
-    shouldTeleport: false,
-    destX: 0,
-    destY: 0,
-    blockMovement: false
-  };
+  return { shouldTeleport: false };
+}
+
+// Check if a direction is blocked for a teleport item
+function isDirectionBlockedForTeleportItem(itemId, direction) {
+  if (itemId === 338) {
+    // Block left/right movement into #338
+    return direction === 'left' || direction === 'right';
+  }
+  
+  if (itemId === 42) {
+    // Block up/down movement into #42
+    return direction === 'up' || direction === 'down';
+  }
+  
+  return false;
+}
+
+// Get standard teleportation destination for an item
+function getStandardTeleportDestination(x, y, itemId) {
+  if (itemId === 338) {
+    // 2 up, 1 left
+    return {
+      destX: x - 1,
+      destY: y - 2
+    };
+  }
+  
+  if (itemId === 42) {
+    // 2 left, 1 up
+    return {
+      destX: x - 2,
+      destY: y - 1
+    };
+  }
+  
+  return { destX: x, destY: y };
 }
 
 // Calculate chain teleportation with directional logic
@@ -678,25 +657,15 @@ function calculateDirectionalChainTeleportation(startX, startY, originalDirectio
     
     let nextX, nextY;
     
-    // Apply directional logic based on original movement direction
+    // Apply standard teleportation logic for chaining
     if (currentItemId === 338) {
-      if (originalDirection === 'up') {
-        // Standard teleportation: 2 up, 1 left
-        nextX = currentX - 1;
-        nextY = currentY - 2;
-      } else {
-        // This shouldn't happen in chain since we only chain from valid teleports
-        break;
-      }
+      // Standard teleportation: 2 up, 1 left
+      nextX = currentX - 1;
+      nextY = currentY - 2;
     } else if (currentItemId === 42) {
-      if (originalDirection === 'left') {
-        // Standard teleportation: 2 left, 1 up
-        nextX = currentX - 2;
-        nextY = currentY - 1;
-      } else {
-        // This shouldn't happen in chain since we only chain from valid teleports
-        break;
-      }
+      // Standard teleportation: 2 left, 1 up
+      nextX = currentX - 2;
+      nextY = currentY - 1;
     }
     
     // Check if teleport destination is within bounds
@@ -1165,17 +1134,15 @@ wss.on('connection', (ws) => {
       const nx = playerData.pos_x + dx;
       const ny = playerData.pos_y + dy;
 
-      // Check for directional teleportation logic
-      const teleportResult = checkDirectionalTeleportation(playerData.pos_x, playerData.pos_y, dx, dy, msg.direction, serverMapSpec);
-      
-      if (teleportResult.shouldTeleport) {
+      // First check for remote teleportation (bypasses normal collision)
+      const remoteResult = checkRemoteTeleportation(playerData.pos_x, playerData.pos_y, msg.direction, serverMapSpec);
+      if (remoteResult.shouldTeleport) {
         // Handle chain teleportation with directional logic
-        const finalDestination = calculateDirectionalChainTeleportation(teleportResult.destX, teleportResult.destY, msg.direction, serverMapSpec);
+        const finalDestination = calculateDirectionalChainTeleportation(remoteResult.destX, remoteResult.destY, msg.direction, serverMapSpec);
         
         // Check if final destination is within bounds
         if (finalDestination.x < 0 || finalDestination.y < 0 || 
             finalDestination.x >= MAP_WIDTH || finalDestination.y >= MAP_HEIGHT) {
-          // Don't allow movement if final destination is out of bounds
           return;
         }
         
@@ -1220,8 +1187,63 @@ wss.on('connection', (ws) => {
         return;
       }
       
-      if (teleportResult.blockMovement) {
-        // Treat teleport item as collision, block movement entirely
+      // Check for direct teleportation items
+      const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
+      if (targetItemId === 42 || targetItemId === 338) {
+        // Check if this direction is allowed for this teleport item
+        if (isDirectionBlockedForTeleportItem(targetItemId, msg.direction)) {
+          // Block movement - treat as collision
+          return;
+        }
+        
+        // Valid teleportation
+        const teleportResult = getStandardTeleportDestination(nx, ny, targetItemId);
+        const finalDestination = calculateDirectionalChainTeleportation(teleportResult.destX, teleportResult.destY, msg.direction, serverMapSpec);
+        
+        // Check if final destination is within bounds
+        if (finalDestination.x < 0 || finalDestination.y < 0 || 
+            finalDestination.x >= MAP_WIDTH || finalDestination.y >= MAP_HEIGHT) {
+          return;
+        }
+        
+        // Decrement stamina for the movement attempt (only once)
+        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
+        
+        // Set position to final teleport destination
+        playerData.pos_x = finalDestination.x;
+        playerData.pos_y = finalDestination.y;
+        
+        // Update direction
+        if (msg.direction) {
+          playerData.direction = msg.direction;
+        }
+        
+        // Keep movement sequence at 0 for teleport (no walking animation)
+        playerData.movementSequenceIndex = 0;
+        playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
+        playerData.isMoving = false;
+        playerData.isAttacking = false;
+        
+        // Save to database
+        Promise.allSettled([
+          updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
+          updatePosition(playerData.id, finalDestination.x, finalDestination.y),
+          updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, 0)
+        ]).catch(()=>{});
+        
+        // Broadcast the final teleported position
+        broadcast({ 
+          type: 'player_moved', 
+          id: playerData.id, 
+          x: finalDestination.x, 
+          y: finalDestination.y, 
+          direction: playerData.direction,
+          isMoving: false,
+          isAttacking: false,
+          animationFrame: playerData.animationFrame,
+          movementSequenceIndex: 0
+        });
+        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
         return;
       }
       
