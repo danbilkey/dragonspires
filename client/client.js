@@ -665,6 +665,7 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
         
       case 'player_moved':
+        console.log(`Received player_moved: ${msg.id} to (${msg.x}, ${msg.y})`);
         if (localPlayer && msg.id === localPlayer.id) { 
           localPlayer.pos_x = msg.x; 
           localPlayer.pos_y = msg.y;
