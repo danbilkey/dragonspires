@@ -774,6 +774,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   otherPlayers[p.id] = {
                     ...p,
                     direction: p.direction || 'down',
+                    step: p.step || 2,
                     isMoving: p.isMoving || false,
                     isAttacking: p.isAttacking || false,
                     isPickingUp: p.isPickingUp || false,
@@ -849,24 +850,7 @@ document.addEventListener('DOMContentLoaded', () => {
         delete otherPlayers[msg.id];
         break;
         
-      case 'players_refresh':
-        // Complete refresh of players on current map
-        if (msg.players) {
-          otherPlayers = {};
-          msg.players.forEach(p => {
-            otherPlayers[p.id] = {
-              ...p,
-              direction: p.direction || 'down',
-              step: p.step || 2,
-              isMoving: p.isMoving || false,
-              isAttacking: p.isAttacking || false,
-              isPickingUp: p.isPickingUp || false,
-              isBRB: p.isBRB || false,
-              temporarySprite: p.temporarySprite || 0
-            };
-          });
-        }
-        break;
+
         
       case 'chat':
         if (typeof msg.text === 'string') pushChat(msg.text);
@@ -1824,7 +1808,7 @@ function drawInventory() {
       else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
       if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
-      else if (connected) ctx.fillText('Connecting to server...', 47, 347);
+      else if (connected) ctx.fillText('Press any key to enter!', 47, 347);
       else ctx.fillText('Connecting to server...', 47, 347);
     } else {
       ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
@@ -1838,10 +1822,7 @@ function drawInventory() {
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
 
-    // Draw stand sprite at position 13,198 after login border
-    if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
-      ctx.drawImage(playerSprites[20], 13, 198);
-    }
+    // Stand sprite will be drawn in drawGame() after successful login
 
     if (activeField === null) {
       activeField = 'username';
@@ -1955,6 +1936,11 @@ function drawInventory() {
 
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
+
+    // Draw stand sprite at position 13,198 after game border
+    if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
+      ctx.drawImage(playerSprites[20], 13, 198);
+    }
 
     drawBarsAndStats();
     drawChatHistory();
