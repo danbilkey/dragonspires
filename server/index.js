@@ -1774,38 +1774,23 @@ wss.on('connection', (ws) => {
       // Broadcast magic update to teleporting player
       send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
       
-      // Broadcast to all players on target map about the teleport
+      // Broadcast position update to all players on target map (works for both same-map and different-map teleports)
+      console.log(`Teleport: ${playerData.username} teleported to (${targetX}, ${targetY}) on map ${targetMap}`);
       for (const [otherWs, otherPlayer] of clients.entries()) {
         if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
           if (otherWs.readyState === WebSocket.OPEN) {
-            // For same-map teleports, send player_moved. For different maps, send player_joined
-            if (oldMapId === targetMap) {
-              // Same map teleport - send movement update
-              otherWs.send(JSON.stringify({
-                type: 'player_moved',
-                id: playerData.id,
-                username: playerData.username,
-                x: targetX,
-                y: targetY,
-                direction: playerData.direction,
-                step: playerData.step,
-                isMoving: false,
-                isAttacking: false
-              }));
-            } else {
-              // Different map teleport - send join notification
-              otherWs.send(JSON.stringify({
-                type: 'player_joined',
-                player: { 
-                  ...playerData, 
-                  username: playerData.username,
-                  isBRB: playerData.isBRB || false, 
-                  temporarySprite: playerData.temporarySprite || 0,
-                  step: playerData.step || 2,
-                  direction: playerData.direction || 'down'
-                }
-              }));
-            }
+            console.log(`Sending player_moved to ${otherPlayer.username} for ${playerData.username} teleport`);
+            otherWs.send(JSON.stringify({
+              type: 'player_moved',
+              id: playerData.id,
+              username: playerData.username,
+              x: targetX,
+              y: targetY,
+              direction: playerData.direction,
+              step: playerData.step,
+              isMoving: false,
+              isAttacking: false
+            }));
           }
         }
       }
