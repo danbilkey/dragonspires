@@ -1741,6 +1741,9 @@ wss.on('connection', (ws) => {
         pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetMap, playerData.id])
       ]).catch(err => console.error('Error updating player after teleport:', err));
       
+      // Update the player's map_id in the clients Map immediately
+      clients.set(ws, playerData);
+      
       // No need to broadcast "player left" for teleports since player_joined will handle the update
       
       // Get players on target map
