@@ -942,6 +942,9 @@ document.addEventListener('DOMContentLoaded', () => {
       // Clear temporary sprite when picking up
       clearTemporarySprite();
 
+      // Clear fountain effect when picking up
+      fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+
       // Start local pickup animation immediately
       isLocallyPickingUp = true;
       shouldStayInStand = true; // Set flag to stay in stand after animation
@@ -1012,6 +1015,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Clear stand flag when rotating
       shouldStayInStand = false;
+      // Clear fountain effect when rotating
+      fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
 
       if (localAttackTimeout) {
         clearTimeout(localAttackTimeout);
@@ -1058,6 +1063,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Clear temporary sprite when attacking
       clearTemporarySprite();
+      // Clear fountain effect when attacking
+      fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
       isLocallyAttacking = true;
       localAttackState = (localAttackState + 1) % 2;
       
@@ -1164,6 +1171,10 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
       if (dx || dy) {
         // Clear temporary sprite when moving
         clearTemporarySprite();
+
+        // Clear fountain effect when moving
+      fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+
         // Clear BRB state when moving
         if (isBRB) {
           isBRB = false;
@@ -1174,45 +1185,68 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
         // Check for teleportation items first
         const targetItemId = getItemAtPosition(nx, ny);
         if (targetItemId === 42 || targetItemId === 338) {
-          // Calculate teleport destination
-          let teleX, teleY;
-          if (targetItemId === 42) {
-              // 2 left, 1 up from the teleport tile
-              teleX = nx - 2;
-              teleY = ny - 1;  // Fixed: changed from nx - 1 to ny - 1
-            } else if (targetItemId === 338) {
-              // 2 up, 1 left from the teleport tile  
-              teleX = nx - 1;
-              teleY = ny - 2;
-            }
+          // Clear fountain effect when teleporting
+          fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
           
-          // Check if teleport destination is within bounds
-          if (teleX >= 0 && teleY >= 0 && teleX < mapSpec.width && teleY < mapSpec.height) {
-            // Clear any ongoing animations
-            if (localAttackTimeout) {
-              clearTimeout(localAttackTimeout);
-              localAttackTimeout = null;
+          // Calculate chain teleportation
+          let currentX = nx;
+          let currentY = ny;
+          let teleportCount = 0;
+          const maxTeleports = 10;
+          
+          // Keep teleporting until we land on a non-teleport tile or hit max teleports
+          while (teleportCount < maxTeleports) {
+            const currentItemId = getItemAtPosition(currentX, currentY);
+            if (currentItemId !== 42 && currentItemId !== 338) {
+              break; // Not a teleport tile, stop here
             }
-            isLocallyAttacking = false;
             
-            // Update direction and position directly to teleport destination
-            playerDirection = newDirection;
-            movementAnimationState = 0;
+            let nextX, nextY;
+            if (currentItemId === 42) {
+              // 2 left, 1 up from the teleport tile
+              nextX = currentX - 2;
+              nextY = currentY - 1;
+            } else if (currentItemId === 338) {
+              // 2 up, 1 left from the teleport tile  
+              nextX = currentX - 1;
+              nextY = currentY - 2;
+            }
             
-            localPlayer.direction = playerDirection;
-            localPlayer.pos_x = teleX;
-            localPlayer.pos_y = teleY;
-            localPlayer.isAttacking = false;
-            localPlayer.isMoving = false;
-            
-            lastMoveTime = currentTime;
-            
-            // Send teleport move to server
-            send({ type: 'move', dx: dx, dy: dy, direction: playerDirection, teleport: true });
-            
-            // Reset stand flag when teleporting
-            shouldStayInStand = false;
+            // Check if teleport destination is within bounds
+            if (nextX >= 0 && nextY >= 0 && nextX < mapSpec.width && nextY < mapSpec.height) {
+              currentX = nextX;
+              currentY = nextY;
+              teleportCount++;
+            } else {
+              // Can't teleport out of bounds, stop on current teleport tile
+              break;
+            }
           }
+          
+          // Clear any ongoing animations
+          if (localAttackTimeout) {
+            clearTimeout(localAttackTimeout);
+            localAttackTimeout = null;
+          }
+          isLocallyAttacking = false;
+          
+          // Update direction and position directly to final teleport destination
+          playerDirection = newDirection;
+          movementAnimationState = 0;
+          
+          localPlayer.direction = playerDirection;
+          localPlayer.pos_x = currentX;
+          localPlayer.pos_y = currentY;
+          localPlayer.isAttacking = false;
+          localPlayer.isMoving = false;
+          
+          lastMoveTime = currentTime;
+          
+          // Send teleport move to server
+          send({ type: 'move', dx: dx, dy: dy, direction: playerDirection, teleport: true, finalX: currentX, finalY: currentY });
+          
+          // Reset stand flag when teleporting
+          shouldStayInStand = false;
         } else if (canMoveTo(nx, ny, localPlayer.id)) {
           // Normal movement logic
           if (localAttackTimeout) {
@@ -1353,6 +1387,9 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
       if (dx !== 0 || dy !== 0) {
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         
+        // Clear fountain effect when moving
+        fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+
         // Use the same collision checking as keyboard movement
         if (canMoveTo(nx, ny, localPlayer.id)) {
           // Cancel attack animation on movement
@@ -1952,6 +1989,9 @@ function drawInventory() {
   function toggleBRB() {
     // Clear temporary sprite when toggling BRB
     clearTemporarySprite();
+
+    // Clear fountain effect when toggling BRB
+    fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
 
     isBRB = !isBRB;
     if (isBRB) {
