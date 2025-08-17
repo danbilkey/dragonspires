@@ -576,12 +576,11 @@ function checkTeleportDestination(x, y, itemId) {
   return destX >= 0 && destY >= 0 && destX < MAP_WIDTH && destY < MAP_HEIGHT;
 }
 
-function calculateChainTeleportationWithDirection(startX, startY, mapSpec, direction) {
+function calculateChainTeleportation(startX, startY, mapSpec) {
   let currentX = startX;
   let currentY = startY;
   let teleportCount = 0;
   const maxTeleports = 10;
-  let currentDirection = direction;
   
   // Keep teleporting until we land on a non-teleport tile or hit max teleports
   while (teleportCount < maxTeleports) {
@@ -592,31 +591,13 @@ function calculateChainTeleportationWithDirection(startX, startY, mapSpec, direc
     
     let nextX, nextY;
     if (currentItemId === 42) {
-      if (currentDirection === 'left') {
-        // Standard teleport: 2 left, 1 up
-        nextX = currentX - 2;
-        nextY = currentY - 1;
-      } else if (currentDirection === 'right') {
-        // Indirect teleport result: 3 right, 1 down from original position
-        nextX = currentX + 3;
-        nextY = currentY + 1;
-      } else {
-        // Invalid direction for item 42
-        break;
-      }
+      // 2 left, 1 up from the teleport tile
+      nextX = currentX - 2;
+      nextY = currentY - 1;
     } else if (currentItemId === 338) {
-      if (currentDirection === 'up') {
-        // Standard teleport: 2 up, 1 left
-        nextX = currentX - 1;
-        nextY = currentY - 2;
-      } else if (currentDirection === 'down') {
-        // Indirect teleport result: 3 down, 1 right from original position
-        nextX = currentX + 1;
-        nextY = currentY + 3;
-      } else {
-        // Invalid direction for item 338
-        break;
-      }
+      // 2 up, 1 left from the teleport tile  
+      nextX = currentX - 1;
+      nextY = currentY - 2;
     }
     
     // Check if teleport destination is within bounds
@@ -624,7 +605,6 @@ function calculateChainTeleportationWithDirection(startX, startY, mapSpec, direc
       currentX = nextX;
       currentY = nextY;
       teleportCount++;
-      // Direction stays the same for chain teleportation
     } else {
       // Can't teleport out of bounds, stop on current teleport tile
       break;
@@ -633,6 +613,7 @@ function calculateChainTeleportationWithDirection(startX, startY, mapSpec, direc
   
   return { x: currentX, y: currentY, teleportCount };
 }
+
 // Start attack animation for a player
 function startAttackAnimation(playerData, ws) {
   // Clear any existing attack timeout
@@ -1047,134 +1028,59 @@ wss.on('connection', (ws) => {
       const nx = playerData.pos_x + dx;
       const ny = playerData.pos_y + dy;
 
-    // Check for teleportation items first - with directional logic
-const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
-let shouldTeleport = false;
-let teleportStartX = nx;
-let teleportStartY = ny;
-let teleportDirection = msg.direction;
-
-// Check for indirect teleportation first (takes precedence)
-if (!shouldTeleport) {
-  if (msg.direction === 'down') {
-    // Check if item 2 down + 1 right is item #338
-    const indirectX = playerData.pos_x + 1;
-    const indirectY = playerData.pos_y + 2;
-    if (indirectX >= 0 && indirectX < MAP_WIDTH && indirectY >= 0 && indirectY < MAP_HEIGHT) {
-      const indirectItemId = getItemAtPosition(indirectX, indirectY, serverMapSpec);
-      if (indirectItemId === 338) {
-        // Teleport to 3 down + 1 right
-        teleportStartX = playerData.pos_x + 1;
-        teleportStartY = playerData.pos_y + 3;
-        shouldTeleport = true;
+     // Check for teleportation items first
+      const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
+      if (targetItemId === 42 || targetItemId === 338) {
+        // Handle chain teleportation
+        const finalDestination = calculateChainTeleportation(nx, ny, serverMapSpec);
+        
+        // Check if final destination is within bounds (should be, but double-check)
+        if (finalDestination.x < 0 || finalDestination.y < 0 || 
+            finalDestination.x >= MAP_WIDTH || finalDestination.y >= MAP_HEIGHT) {
+          // Don't allow movement if final destination is out of bounds
+          return;
+        }
+        
+        // Decrement stamina for the movement attempt (only once)
+        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
+        
+        // Set position to final teleport destination
+        playerData.pos_x = finalDestination.x;
+        playerData.pos_y = finalDestination.y;
+        
+        // Update direction
+        if (msg.direction) {
+          playerData.direction = msg.direction;
+        }
+        
+        // Keep movement sequence at 0 for teleport (no walking animation)
+        playerData.movementSequenceIndex = 0;
+        playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
+        playerData.isMoving = false;
+        playerData.isAttacking = false;
+        
+        // Save to database
+        Promise.allSettled([
+          updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
+          updatePosition(playerData.id, finalDestination.x, finalDestination.y),
+          updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, 0)
+        ]).catch(()=>{});
+        
+        // Broadcast the final teleported position
+        broadcast({ 
+          type: 'player_moved', 
+          id: playerData.id, 
+          x: finalDestination.x, 
+          y: finalDestination.y, 
+          direction: playerData.direction,
+          isMoving: false,
+          isAttacking: false,
+          animationFrame: playerData.animationFrame,
+          movementSequenceIndex: 0
+        });
+        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+        return;
       }
-    }
-  } else if (msg.direction === 'right') {
-    // Check if item 2 right + 1 down is item #42
-    const indirectX = playerData.pos_x + 2;
-    const indirectY = playerData.pos_y + 1;
-    if (indirectX >= 0 && indirectX < MAP_WIDTH && indirectY >= 0 && indirectY < MAP_HEIGHT) {
-      const indirectItemId = getItemAtPosition(indirectX, indirectY, serverMapSpec);
-      if (indirectItemId === 42) {
-        // Teleport to 3 right + 1 down
-        teleportStartX = playerData.pos_x + 3;
-        teleportStartY = playerData.pos_y + 1;
-        shouldTeleport = true;
-      }
-    }
-  }
-}
-
-// Check for direct teleportation (moving onto teleport tile)
-if (!shouldTeleport) {
-  if ((targetItemId === 338 && msg.direction === 'up') || 
-      (targetItemId === 42 && msg.direction === 'left')) {
-    shouldTeleport = true;
-    teleportStartX = nx;
-    teleportStartY = ny;
-  } else if ((targetItemId === 338 && (msg.direction === 'left' || msg.direction === 'right')) ||
-             (targetItemId === 42 && (msg.direction === 'up' || msg.direction === 'down'))) {
-    // Blocked movement - don't move but allow animation
-    if (msg.direction) {
-      playerData.direction = msg.direction;
-    }
-    
-    // Don't move position, but advance animation for visual feedback
-    playerData.movementSequenceIndex = (playerData.movementSequenceIndex + 1) % MOVEMENT_SEQUENCE.length;
-    playerData.animationFrame = getMovementAnimationFrame(playerData.direction, playerData.movementSequenceIndex);
-    playerData.isMoving = true;
-    playerData.isAttacking = false;
-    
-    // Update database
-    updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex)
-      .catch(err => console.error('Blocked movement animation DB error:', err));
-    
-    // Broadcast animation update
-    broadcast({ 
-      type: 'animation_update',
-      id: playerData.id,
-      direction: playerData.direction,
-      isMoving: playerData.isMoving,
-      isAttacking: playerData.isAttacking,
-      animationFrame: playerData.animationFrame,
-      movementSequenceIndex: playerData.movementSequenceIndex
-    });
-    
-    return; // Exit without moving
-  }
-}
-
-if (shouldTeleport) {
-  // Handle chain teleportation with directional logic
-  const finalDestination = calculateChainTeleportationWithDirection(teleportStartX, teleportStartY, serverMapSpec, teleportDirection);
-  
-  // Check if final destination is within bounds (should be, but double-check)
-  if (finalDestination.x < 0 || finalDestination.y < 0 || 
-      finalDestination.x >= MAP_WIDTH || finalDestination.y >= MAP_HEIGHT) {
-    // Don't allow movement if final destination is out of bounds
-    return;
-  }
-  
-  // Decrement stamina for the movement attempt (only once)
-  playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
-  
-  // Set position to final teleport destination
-  playerData.pos_x = finalDestination.x;
-  playerData.pos_y = finalDestination.y;
-  
-  // Update direction
-  if (msg.direction) {
-    playerData.direction = msg.direction;
-  }
-  
-  // Keep movement sequence at 0 for teleport (no walking animation)
-  playerData.movementSequenceIndex = 0;
-  playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
-  playerData.isMoving = false;
-  playerData.isAttacking = false;
-  
-  // Save to database
-  Promise.allSettled([
-    updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
-    updatePosition(playerData.id, finalDestination.x, finalDestination.y),
-    updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, 0)
-  ]).catch(()=>{});
-  
-  // Broadcast the final teleported position
-  broadcast({ 
-    type: 'player_moved', 
-    id: playerData.id, 
-    x: finalDestination.x, 
-    y: finalDestination.y, 
-    direction: playerData.direction,
-    isMoving: false,
-    isAttacking: false,
-    animationFrame: playerData.animationFrame,
-    movementSequenceIndex: 0
-  });
-  send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-  return;
-}
       
       if (canMoveTo(nx, ny, playerData.id)) {
         // Decrement stamina by **1**
