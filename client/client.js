@@ -93,6 +93,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let showLoginGUI = false;
   let loggedIn = false;
   let chatMode = false;
+  // BRB/AFK state
+  let isBRB = false;
 
   // Assets ready flags
   let tilesReady = false;
@@ -548,6 +550,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       isLocallyPickingUp = false;
       shouldStayInStand = false;
+      isBRB = false;
       playerInventory = {};
       inventoryVisible = false;
 
@@ -696,7 +699,13 @@ document.addEventListener('DOMContentLoaded', () => {
           if ('hands' in msg) otherPlayers[msg.id].hands = msg.hands;
         }
         break;
-        
+        case 'player_brb_update':
+          if (localPlayer && msg.id === localPlayer.id) {
+            isBRB = msg.brb || false;
+          } else if (otherPlayers[msg.id]) {
+            otherPlayers[msg.id].isBRB = msg.brb || false;
+          }
+          break;
       case 'item_placed':
         const key = `${msg.x},${msg.y}`;
         if (msg.itemId === 0) {
@@ -778,6 +787,8 @@ document.addEventListener('DOMContentLoaded', () => {
           clearChatMessages();
         } else if (toSend === '-stats') {
           showPlayerStats();
+        } else if (toSend === '-brb') {
+          toggleBRB();
         } else if (toSend.length > 0) {
           send({ type: 'chat', text: toSend.slice(0, CHAT_INPUT.maxLen) });
         }
@@ -949,6 +960,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      // Clear BRB state when attacking
+      if (isBRB) {
+        isBRB = false;
+        send({ type: 'set_brb', brb: false });
+      }
+
       // Clear stand flag when attacking
       shouldStayInStand = false;
       
@@ -1040,6 +1057,11 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
       else if (k === 'arrowright' || k === 'd') { dx = 1; newDirection = 'right'; }
       
       if (dx || dy) {
+        // Clear BRB state when moving
+        if (isBRB) {
+          isBRB = false;
+          send({ type: 'set_brb', brb: false });
+        }
         const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
         
         if (canMoveTo(nx, ny, localPlayer.id)) {
@@ -1114,6 +1136,11 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
     // Handle stats area click (74,196 to 110,209)
     if (connected && loggedIn && mx >= 74 && mx <= 110 && my >= 196 && my <= 209) {
       showPlayerStats();
+      return;
+    }
+    // Handle BRB area click (114,196 to 150,209)
+    if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 196 && my <= 209) {
+      toggleBRB();
       return;
     }
 
@@ -1267,7 +1294,16 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
 
     let animFrame;
     
-    if (isLocal) {
+   // Draw BRB item (item 181) behind player if in BRB state
+    const playerIsBRB = isLocal ? isBRB : (p.isBRB || false);
+    if (playerIsBRB && window.itemsReady()) {
+      drawItemAtTile(screenX, screenY, 181);
+    }
+    
+    // Force sit animation if in BRB state
+    if (playerIsBRB) {
+      animFrame = 21; // 'sit' animation
+    } else if (isLocal) {
       if (isLocallyPickingUp) {
         animFrame = 21; // 'sit' animation
       } else if (isLocallyAttacking) {
@@ -1665,6 +1701,30 @@ function drawInventory() {
     pushChat(`Life: ${localPlayer.life || 0} / ${localPlayer.max_life || 0}`);
     pushChat(`Stamina: ${localPlayer.stamina || 0} / ${localPlayer.max_stamina || 0}`);
     pushChat(`Magic: ${localPlayer.magic || 0} / ${localPlayer.max_magic || 0}`);
+  }
+
+  function toggleBRB() {
+    isBRB = !isBRB;
+    if (isBRB) {
+      // Clear any ongoing animations when going BRB
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
+        localAttackTimeout = null;
+      }
+      if (localPickupTimeout) {
+        clearTimeout(localPickupTimeout);
+        localPickupTimeout = null;
+      }
+      isLocallyAttacking = false;
+      isLocallyPickingUp = false;
+      shouldStayInStand = false;
+      
+      // Send BRB state to server
+      send({ type: 'set_brb', brb: true });
+    } else {
+      // Send un-BRB state to server
+      send({ type: 'set_brb', brb: false });
+    }
   }
 
   window.connectToServer = connectToServer;
