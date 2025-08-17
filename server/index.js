@@ -921,6 +921,9 @@ wss.on('connection', (ws) => {
           step: playerData.step || 2,
           direction: playerData.direction || 'down'
         } });
+        
+        // Global chat message for login
+        broadcast({ type: 'chat', text: `${playerData.username} enters DragonSpires.` });
       } catch (e) {
         console.error('Login error', e);
         send(ws, { type: 'login_error', message: 'Server error' });
@@ -989,6 +992,9 @@ wss.on('connection', (ws) => {
           step: playerData.step || 2,
           direction: playerData.direction || 'down'
         } });
+        
+        // Global chat message for signup
+        broadcast({ type: 'chat', text: `${playerData.username} enters DragonSpires.` });
       } catch (e) {
         console.error('Signup error', e);
         send(ws, { type: 'signup_error', message: 'Server error' });
@@ -1777,6 +1783,28 @@ wss.on('connection', (ws) => {
         }
       }
       
+      // Send complete player list refresh to all players on target map (including teleporting player)
+      const allPlayersOnTargetMap = Array.from(clients.values())
+        .filter(p => p.map_id === targetMap)
+        .map(p => ({ 
+          ...p, 
+          isBRB: p.isBRB || false, 
+          temporarySprite: p.temporarySprite || 0,
+          step: p.step || 2,
+          direction: p.direction || 'down'
+        }));
+      
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === targetMap) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({
+              type: 'players_refresh',
+              players: allPlayersOnTargetMap.filter(p => p.id !== otherPlayer.id)
+            }));
+          }
+        }
+      }
+      
       // Broadcast temporary sprite clear
       for (const [otherWs, otherPlayer] of clients.entries()) {
         if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
@@ -2024,13 +2052,20 @@ wss.on('connection', (ws) => {
       // Reset direction and step to defaults before disconnecting
       playerData.direction = 'down';
       playerData.step = 2;
+      playerData.animationFrame = DIRECTION_IDLE.down; // Set to "down" sprite
       
       // Update database with logout defaults
-      updateDirectionAndStep(playerData.id, 'down', 2).catch(()=>{});
+      Promise.allSettled([
+        updateDirectionAndStep(playerData.id, 'down', 2),
+        updateAnimationState(playerData.id, 'down', false, false, DIRECTION_IDLE.down, 0)
+      ]).catch(()=>{});
+      
+      // Global chat message for logout
+      broadcast({ type: 'chat', text: `${playerData.username} leaves DragonSpires.` });
       
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
-      broadcast({ type: 'player_left', id: playerData.id });
+      broadcast({ type: 'player_left', id: playerData.id, username: playerData.username });
     }
   });
 
