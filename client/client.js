@@ -1018,10 +1018,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
       const itemDetails = getItemDetails(itemId);
       
-      console.log(`Pickup attempt: position (${localPlayer.pos_x},${localPlayer.pos_y}), itemId: ${itemId}, itemDetails:`, itemDetails);
-      
       if (itemDetails && isItemPickupable(itemDetails)) {
-        console.log(`Sending pickup request for item ${itemId}`);
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
@@ -1030,7 +1027,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
       else if ((!itemDetails || !isItemPickupable(itemDetails)) && localPlayer.hands && localPlayer.hands > 0) {
-        console.log(`Dropping item from hands: ${localPlayer.hands}`);
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
@@ -1038,7 +1034,6 @@ document.addEventListener('DOMContentLoaded', () => {
           itemId: 0
         });
       } else {
-        console.log(`No action taken - no pickupable item and no hands item to drop`);
         // Send pickup anyway to show animation
         send({
           type: 'pickup_item',
@@ -1101,7 +1096,6 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Check stamina requirement (at least 10)
       if ((localPlayer.stamina ?? 0) < 10) {
-        console.log('Not enough stamina to attack (need 10, have ' + (localPlayer.stamina ?? 0) + ')');
         return;
       }
 
@@ -2156,7 +2150,6 @@ function drawInventory() {
       if (data && Array.isArray(data.floor)) {
         floorCollision = data.floor;
         floorCollisionReady = true;
-        console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
       }
     })
     .catch(err => {
@@ -2167,7 +2160,6 @@ function drawInventory() {
           if (data && Array.isArray(data.floor)) {
             floorCollision = data.floor;
             floorCollisionReady = true;
-            console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
           }
         })
         .catch(err2 => {
@@ -2178,7 +2170,6 @@ function drawInventory() {
               if (data && Array.isArray(data.floor)) {
                 floorCollision = data.floor;
                 floorCollisionReady = true;
-                console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
               }
             })
             .catch(err3 => {
@@ -2203,7 +2194,6 @@ function drawInventory() {
           description: item[5]
         }));
         itemDetailsReady = true;
-        console.log(`Client loaded ${itemDetails.length} item details`);
       }
     })
     .catch(err => {
@@ -2222,7 +2212,6 @@ function drawInventory() {
               description: item[5]
             }));
             itemDetailsReady = true;
-            console.log(`Client loaded ${itemDetails.length} item details`);
           }
         })
         .catch(err2 => {
@@ -2241,7 +2230,6 @@ function drawInventory() {
                   description: item[5]
                 }));
                 itemDetailsReady = true;
-                console.log(`Client loaded ${itemDetails.length} item details`);
               }
             })
             .catch(err3 => {
