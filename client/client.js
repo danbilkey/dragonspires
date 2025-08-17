@@ -83,8 +83,17 @@ document.addEventListener('DOMContentLoaded', () => {
     up: 16     // up
   };
 
-  // Movement animation sequence: walk_1 -> walk_2 -> idle
-  const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
+  // Movement sequence mapping: direction + step -> animation frame
+  function getAnimationFrameFromDirectionAndStep(direction, step) {
+    const directionMaps = {
+      down: { 1: 0, 2: 1, 3: 2 },     // down_walk_1, down, down_walk_2
+      right: { 1: 5, 2: 6, 3: 7 },    // right_walk_1, right, right_walk_2  
+      left: { 1: 10, 2: 11, 3: 12 },  // left_walk_1, left, left_walk_2
+      up: { 1: 15, 2: 16, 3: 17 }     // up_walk_1, up, up_walk_2
+    };
+    
+    return directionMaps[direction] ? directionMaps[direction][step] : 1; // Default to 'down' if invalid
+  }
 
   // ---------- STATE ----------
   let ws = null;
@@ -122,9 +131,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let localPlayer = null;
   let otherPlayers = {};
 
-  // NEW: Simplified direction and animation state system
-  let playerDirection = 'down'; // Current facing direction
-  let movementAnimationState = 0; // 0=standing, 1=walk_1, 2=walk_2
+  // Movement sequence system
+  let playerDirection = 'down'; // Current facing direction: up, down, left, right
+  let playerStep = 2; // Current step: 1, 2, or 3
   let isLocallyAttacking = false; // Local attack state
   let localAttackState = 0; // 0 or 1 for attack_1 or attack_2
   let lastMoveTime = 0; // Prevent rapid movement through collision objects
@@ -1012,7 +1021,8 @@ document.addEventListener('DOMContentLoaded', () => {
       localPickupTimeout = setTimeout(() => {
         isLocallyPickingUp = false;
         localPickupTimeout = null;
-        // shouldStayInStand remains true until movement
+        // Set step to 2 after pickup animation, shouldStayInStand remains true until movement
+        playerStep = 2;
       }, 700); // Slightly longer than server animation
       
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
@@ -1084,7 +1094,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const nextIndex = (currentIndex + 1) % directions.length;
       playerDirection = directions[nextIndex];
       
-      movementAnimationState = 0;
+      playerStep = 2; // Set step to 2 when rotating
       isLocallyAttacking = false;
       
       localPlayer.direction = playerDirection;
@@ -1130,10 +1140,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       localAttackTimeout = setTimeout(() => {
         isLocallyAttacking = false;
-        // Don't reset movementAnimationState to 0 if we should stay in stand
-        if (!shouldStayInStand) {
-          movementAnimationState = 0;
-        }
+        // Set step to 2 after attack animation concludes
+        playerStep = 2;
         localAttackTimeout = null;
       }, 1000);
       
@@ -1286,9 +1294,8 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           }
           isLocallyAttacking = false;
           
-          // Update direction and position directly to final teleport destination
+          // Update direction and position directly to final teleport destination (no step increment for teleports)
           playerDirection = newDirection;
-          movementAnimationState = 0;
           
           localPlayer.direction = playerDirection;
           localPlayer.pos_x = currentX;
@@ -1312,7 +1319,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           isLocallyAttacking = false;
           
           playerDirection = newDirection;
-          movementAnimationState = 1; // Always use walk_1 for consistency
+          playerStep = playerStep === 3 ? 1 : playerStep + 1;
           
           localPlayer.direction = playerDirection;
           localPlayer.pos_x = nx;
@@ -1330,12 +1337,12 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
-              movementAnimationState = 0;
             }
           }, 200);
         } else {
+          // Can't move but still increment step for visual feedback
           playerDirection = newDirection;
-          movementAnimationState = 1; // Always use walk_1 for consistency
+          playerStep = playerStep === 3 ? 1 : playerStep + 1;
           lastMoveTime = currentTime;
         }
       }
@@ -1455,9 +1462,9 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           }
           isLocallyAttacking = false;
           
-          // Update direction and animation state
+          // Update direction and increment step
           playerDirection = newDirection;
-          movementAnimationState = (movementAnimationState + 1) % 3;
+          playerStep = playerStep === 3 ? 1 : playerStep + 1;
           
           // Update local player object immediately
           localPlayer.direction = playerDirection;
@@ -1479,13 +1486,12 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
-              movementAnimationState = 0;
             }
           }, 200);
         } else {
-          // Can't move but still update direction and animation for visual feedback
+          // Can't move but still update direction and increment step for visual feedback
           playerDirection = newDirection;
-          movementAnimationState = (movementAnimationState + 1) % 3;
+          playerStep = playerStep === 3 ? 1 : playerStep + 1;
           lastMoveTime = currentTime;
         }
       }
@@ -1567,14 +1573,11 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
         animFrame = attackSeq[localAttackState];
       } else {
         // Check if we should stay in stand animation (after pickup and not moving)
-        if (shouldStayInStand && !localPlayer.isMoving && movementAnimationState === 0) {
+        if (shouldStayInStand && !localPlayer.isMoving) {
           animFrame = 20; // Stay in 'stand' animation
-        } else if (movementAnimationState === 0) {
-          animFrame = DIRECTION_IDLE[playerDirection] || DIRECTION_IDLE.down;
         } else {
-          const walkIndex = movementAnimationState === 1 ? 0 : 2;
-          const directionOffsets = { down: 0, right: 5, left: 10, up: 15 };
-          animFrame = (directionOffsets[playerDirection] || 0) + walkIndex;
+          // Use new direction + step system
+          animFrame = getAnimationFrameFromDirectionAndStep(playerDirection, playerStep);
         }
       }
     } else {
