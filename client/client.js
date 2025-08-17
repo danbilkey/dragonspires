@@ -1,2152 +1,2180 @@
-// server/index.js
-require('dotenv').config();
-const http = require('http');
-const WebSocket = require('ws');
-const { Pool } = require('pg');
-const bcrypt = require('bcrypt');
+// client.js - Browser-side game client
+document.addEventListener('DOMContentLoaded', () => {
+  // ---------- CONFIG ----------
+  const PROD_WS = "wss://dragonspires.onrender.com";
+  const DEV_WS = "ws://localhost:3000";
+  const WS_URL = location.hostname.includes('localhost') ? DEV_WS : PROD_WS;
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
+  const canvas = document.getElementById('gameCanvas');
+  if (!canvas) { console.error('Missing <canvas id="gameCanvas">'); return; }
+  const ctx = canvas.getContext('2d');
 
-const MAP_WIDTH = 64;
-const MAP_HEIGHT = 64;
+  const CANVAS_W = 640, CANVAS_H = 480;
+  canvas.width = CANVAS_W; canvas.height = CANVAS_H;
 
-const MAX_CHAT_LEN = 200;
-const sqlLikePattern = /(select|insert|update|delete|drop|alter|truncate|merge|exec|union|;|--|\/\*|\*\/|xp_)/i;
-function looksMalicious(text) {
-  if (!text || typeof text !== 'string') return true;
-  if (text.length > MAX_CHAT_LEN) return true;
-  return sqlLikePattern.test(text);
-}
+  // Logical diamond for positioning
+  const TILE_W = 64, TILE_H = 32;
 
-// Animation constants
-const ANIMATION_NAMES = [
-  'down_walk_1', 'down', 'down_walk_2', 'down_attack_1', 'down_attack_2',
-  'right_walk_1', 'right', 'right_walk_2', 'right_attack_1', 'right_attack_2',
-  'left_walk_1', 'left', 'left_walk_2', 'left_attack_1', 'left_attack_2',
-  'up_walk_1', 'up', 'up_walk_2', 'up_attack_1', 'up_attack_2',
-  'stand', 'sit'
-];
+  // Screen anchor for local tile
+  const PLAYER_SCREEN_X = 430, PLAYER_SCREEN_Y = 142;
 
-const DIRECTION_IDLE = {
-  down: 1,   // down
-  right: 6,  // right
-  left: 11,  // left
-  up: 16     // up
-};
+  // World/camera offsets (as previously tuned)
+  const WORLD_SHIFT_X = -32, WORLD_SHIFT_Y = 16;
+  const CENTER_LOC_ADJ_X = 32, CENTER_LOC_ADJ_Y = -8;
+  const CENTER_LOC_FINE_X = -5, CENTER_LOC_FINE_Y = 0;
 
-// Attack animation pairs
-const ATTACK_SEQUENCES = {
-  down: [3, 4],   // down_attack_1, down_attack_2
-  right: [8, 9],  // right_attack_1, right_attack_2
-  left: [13, 14], // left_attack_1, left_attack_2
-  up: [18, 19]    // up_attack_1, up_attack_2
-};
+  // Sprite offsets (as tuned earlier)
+  const PLAYER_OFFSET_X = -32, PLAYER_OFFSET_Y = -16;
+  const SPRITE_CENTER_ADJ_X = 23;  // = 64 - 41
+  const SPRITE_CENTER_ADJ_Y = -20; // = -24 + 4
 
-// Movement animation sequence: walk_1 -> walk_2 -> idle
-const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
-
-const server = http.createServer((req, res) => {
-  res.writeHead(200, {'Content-Type':'text/plain'});
-  res.end('DragonSpires server is running\n');
-});
-const wss = new WebSocket.Server({ server });
-
-const clients = new Map();      // Map<ws, playerData>
-const usernameToWs = new Map(); // Map<username, ws>
-const attackTimeouts = new Map(); // Map<playerId, timeoutId> for attack timeouts
-const playerAttackIndex = new Map(); // Map<playerId, attackIndex> for alternating attacks
-
-// In-memory item storage
-let mapItems = {}; // { "x,y": itemId }
-
-// Item details for server-side collision checking
-let itemDetails = [];
-let itemDetailsReady = false;
-
-// Floor collision data
-let floorCollision = [];
-let floorCollisionReady = false;
-
-// Load floor collision data on server startup
-async function loadFloorCollision() {
-  try {
-    const fs = require('fs').promises;
-    const path = require('path');
-    
-    // Try multiple possible paths for floorcollision.json
-    const possiblePaths = [
-      path.join(__dirname, 'assets', 'floorcollision.json'),
-      path.join(__dirname, '..', 'assets', 'floorcollision.json'),
-      path.join(__dirname, '..', 'client', 'assets', 'floorcollision.json'),
-      path.join(__dirname, '..', '..', 'assets', 'floorcollision.json'),
-      path.join(__dirname, '..', '..', 'client', 'assets', 'floorcollision.json'),
-      path.join(process.cwd(), 'assets', 'floorcollision.json'),
-      path.join(process.cwd(), 'client', 'assets', 'floorcollision.json'),
-      path.join(process.cwd(), 'server', 'assets', 'floorcollision.json')
-    ];
-    
-    let data = null;
-    let usedPath = null;
-    
-    for (const collisionPath of possiblePaths) {
-      try {
-        data = await fs.readFile(collisionPath, 'utf8');
-        usedPath = collisionPath;
-        break;
-      } catch (err) {
-        // Try next path
-        continue;
-      }
-    }
-    
-    if (!data) {
-      console.error('Could not find floorcollision.json in any of the expected paths:', possiblePaths);
-      floorCollisionReady = true; // Don't block server startup
-      return;
-    }
-    
-    const parsed = JSON.parse(data);
-    
-    if (parsed && Array.isArray(parsed.floor)) {
-      floorCollision = parsed.floor;
-      floorCollisionReady = true;
-      console.log(`Server loaded floor collision data: ${floorCollision.length} tiles from: ${usedPath}`);
-    }
-  } catch (error) {
-    console.error('Failed to load floor collision data:', error);
-    floorCollisionReady = true; // Don't block server startup
-  }
-}
-
-function hasFloorCollision(x, y) {
-  if (!floorCollisionReady || !floorCollision || !serverMapSpec || 
-      x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) {
-    return false; // No collision data, no map spec, or out of bounds
-  }
-  
-  // Get the floor tile ID at this position
-  const tileId = (serverMapSpec.tiles && serverMapSpec.tiles[y] && 
-                  typeof serverMapSpec.tiles[y][x] !== 'undefined') 
-                  ? serverMapSpec.tiles[y][x] : 0;
-  
-  // If no tile (ID 0) or tile ID is out of range, no collision
-  if (tileId <= 0 || tileId > floorCollision.length) {
-    return false;
-  }
-  
-  // Look up collision for this tile ID (convert to 0-based index)
-  return floorCollision[tileId - 1] === true || floorCollision[tileId - 1] === "true";
-}
-
-function isPlayerAtPosition(x, y, excludePlayerId = null) {
-  for (const [ws, playerData] of clients.entries()) {
-    if (excludePlayerId && playerData.id === excludePlayerId) continue;
-    if (playerData.pos_x === x && playerData.pos_y === y) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Load item details on server startup
-async function loadItemDetails() {
-  try {
-    const fs = require('fs').promises;
-    const path = require('path');
-    
-    // Try multiple possible paths for itemdetails.json
-    const possiblePaths = [
-      path.join(__dirname, 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', 'client', 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', '..', 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', '..', 'client', 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', '..', 'server', 'assets', 'itemdetails.json'), // For Render structure
-      path.join(process.cwd(), 'assets', 'itemdetails.json'),
-      path.join(process.cwd(), 'client', 'assets', 'itemdetails.json'),
-      path.join(process.cwd(), 'server', 'assets', 'itemdetails.json'),
-      // Additional paths for potential Render deployment structure
-      path.join(process.cwd(), 'src', 'server', 'assets', 'itemdetails.json'),
-      path.join(process.cwd(), 'src', 'assets', 'itemdetails.json'),
-      path.join(process.cwd(), 'src', 'client', 'assets', 'itemdetails.json')
-    ];
-    
-    let data = null;
-    let usedPath = null;
-    
-    // Debug: log all paths being tried
-    console.log('Searching for itemdetails.json in these paths:');
-    for (const itemDetailsPath of possiblePaths) {
-      console.log(`  Trying: ${itemDetailsPath}`);
-      try {
-        data = await fs.readFile(itemDetailsPath, 'utf8');
-        usedPath = itemDetailsPath;
-        break;
-      } catch (err) {
-        // Try next path
-        continue;
-      }
-    }
-    
-    if (!data) {
-      console.error('Could not find itemdetails.json in any of the expected paths');
-      console.log('Current working directory:', process.cwd());
-      console.log('__dirname:', __dirname);
-      itemDetailsReady = true; // Don't block server startup
-      return;
-    }
-    
-    const parsed = JSON.parse(data);
-    
-    if (parsed && Array.isArray(parsed.items)) {
-      itemDetails = parsed.items.map((item, index) => ({
-        id: index + 1,
-        name: item[0],
-        collision: item[1] === "true",
-        type: item[2],
-        statMin: parseInt(item[3]) || 0,
-        statMax: parseInt(item[4]) || 0,
-        description: item[5]
-      }));
-      itemDetailsReady = true;
-      console.log(`Server loaded ${itemDetails.length} item details from: ${usedPath}`);
-    }
-  } catch (error) {
-    console.error('Failed to load server item details:', error);
-    itemDetailsReady = true; // Don't block server startup
-  }
-}
-
-function getItemDetails(itemId) {
-  if (!itemDetailsReady || !itemDetails || itemId < 1 || itemId > itemDetails.length) {
-    return null;
-  }
-  return itemDetails[itemId - 1];
-}
-
-function getRandomItemByTypes(types) {
-  if (!itemDetailsReady || !itemDetails) return 0;
-  
-  const matchingItems = itemDetails.filter(item => types.includes(item.type));
-  if (matchingItems.length === 0) return 0;
-  
-  const randomItem = matchingItems[Math.floor(Math.random() * matchingItems.length)];
-  return randomItem.id;
-}
-
-function getItemAtPosition(x, y, mapSpec) {
-  // Check both map items and placed items
-  const mapItem = (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
-    ? mapSpec.items[y][x] : 0;
-  const placedItem = mapItems[`${x},${y}`];
-  
-  // If there's a placed item entry (but not -1 which means "picked up"), it overrides the map item
-  if (placedItem !== undefined && placedItem !== -1) {
-    return placedItem;
-  }
-  
-  // If placedItem is -1, it means the map item was picked up, so return 0
-  if (placedItem === -1) {
-    return 0;
-  }
-  
-  // Otherwise return the map item
-  return mapItem;
-}
-
-// We need to load the map spec on server for proper item detection
-let serverMapSpec = null;
-
-async function loadMapSpec() {
-  try {
-    const fs = require('fs').promises;
-    const path = require('path');
-    // Try multiple possible paths for map.json including /maps/ directory
-    const possiblePaths = [
-      path.join(__dirname, '..', 'maps', 'map.json'),
-      path.join(__dirname, 'maps', 'map.json'),
-      path.join(__dirname, '..', '..', 'maps', 'map.json'),
-      path.join(process.cwd(), 'maps', 'map.json'),
-      path.join(__dirname, '..', 'map.json'),
-      path.join(__dirname, 'map.json'),
-      path.join(__dirname, '..', '..', 'map.json'),
-      path.join(process.cwd(), 'map.json')
-    ];
-    
-    let data = null;
-    let usedPath = null;
-    
-    for (const mapPath of possiblePaths) {
-      try {
-        data = await fs.readFile(mapPath, 'utf8');
-        usedPath = mapPath;
-        break;
-      } catch (err) {
-        // Try next path
-        continue;
-      }
-    }
-    
-    if (!data) {
-      console.error('Could not find map.json in any of the expected paths:', possiblePaths);
-      return;
-    }
-    
-    const parsed = JSON.parse(data);
-    
-    if (parsed && parsed.width && parsed.height) {
-      serverMapSpec = {
-        width: parsed.width,
-        height: parsed.height,
-        tiles: Array.isArray(parsed.tiles) ? parsed.tiles : (Array.isArray(parsed.tilemap) ? parsed.tilemap : []),
-        items: Array.isArray(parsed.items) ? parsed.items : []
-      };
-      console.log(`Server loaded map spec from: ${usedPath}`);
-      console.log(`Map dimensions: ${serverMapSpec.width}x${serverMapSpec.height}`);
-      console.log(`Map has ${serverMapSpec.items.length} item rows`);
-      if (serverMapSpec.items.length > 0) {
-        console.log(`Sample items row 0:`, serverMapSpec.items[0]);
-      }
-    }
-  } catch (error) {
-    console.error('Failed to load map spec on server:', error);
-  }
-}
-
-async function loadPlayer(username) {
-  const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
-  return r.rows[0];
-}
-
-async function createPlayer(username, password) {
-  const hashed = await bcrypt.hash(password, 10);
-  const r = await pool.query(
-    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, is_picking_up, animation_frame, movement_sequence_index)
-     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [username, hashed, 'down', false, false, false, DIRECTION_IDLE.down, 0]
-  );
-  
-  // Initialize empty inventory for new player
-  const playerId = r.rows[0].id;
-  await initializePlayerInventory(playerId);
-  
-  return r.rows[0];
-}
-
-async function updatePosition(playerId, x, y) {
-  await pool.query('UPDATE players SET pos_x=$1, pos_y=$2 WHERE id=$3', [x, y, playerId]);
-}
-
-async function updateAnimationState(playerId, direction, isMoving, isAttacking, animationFrame, movementSequenceIndex, isPickingUp = false) {
-  await pool.query(
-    'UPDATE players SET direction=$1, is_moving=$2, is_attacking=$3, is_picking_up=$4, animation_frame=$5, movement_sequence_index=$6 WHERE id=$7',
-    [direction, isMoving, isAttacking, isPickingUp, animationFrame, movementSequenceIndex, playerId]
-  );
-}
-
-async function updateStatsInDb(id, fields) {
-  const cols = [], vals = [];
-  let idx = 1;
-  for (const [k,v] of Object.entries(fields)) { 
-    cols.push(`${k}=$${idx++}`); 
-    vals.push(v); 
-  }
-  vals.push(id);
-  if (!cols.length) return;
-  const sql = `UPDATE players SET ${cols.join(', ')} WHERE id=$${idx}`;
-  await pool.query(sql, vals);
-}
-
-async function saveItemToDatabase(x, y, itemId) {
-  try {
-    await pool.query(
-      'INSERT INTO map_items (x, y, item_id) VALUES ($1, $2, $3) ON CONFLICT (x, y) DO UPDATE SET item_id = $3',
-      [x, y, itemId]
-    );
-  } catch (error) {
-    console.error('Error saving item to database:', error);
-  }
-}
-
-async function loadItemsFromDatabase() {
-  try {
-    const result = await pool.query('SELECT x, y, item_id FROM map_items');
-    const items = {};
-    result.rows.forEach(row => {
-      // Include all entries, including -1 (picked up map items)
-      items[`${row.x},${row.y}`] = row.item_id;
-    });
-    return items;
-  } catch (error) {
-    console.error('Error loading items from database:', error);
-    return {};
-  }
-}
-
-// Inventory management functions
-async function initializePlayerInventory(playerId) {
-  try {
-    // Create 16 empty slots for new player
-    const insertPromises = [];
-    for (let slot = 1; slot <= 16; slot++) {
-      insertPromises.push(
-        pool.query(
-          'INSERT INTO player_inventory (player_id, slot_number, item_id) VALUES ($1, $2, $3)',
-          [playerId, slot, 0]
-        )
-      );
-    }
-    await Promise.all(insertPromises);
-    console.log(`Initialized inventory for player ${playerId}`);
-  } catch (error) {
-    console.error('Error initializing player inventory:', error);
-  }
-}
-
-async function loadPlayerInventory(playerId) {
-  try {
-    const result = await pool.query(
-      'SELECT slot_number, item_id FROM player_inventory WHERE player_id = $1 ORDER BY slot_number',
-      [playerId]
-    );
-    
-    // Convert to object with slot numbers as keys
-    const inventory = {};
-    result.rows.forEach(row => {
-      inventory[row.slot_number] = row.item_id;
-    });
-    
-    // Ensure all 16 slots exist
-    for (let slot = 1; slot <= 16; slot++) {
-      if (!(slot in inventory)) {
-        inventory[slot] = 0;
-      }
-    }
-    
-    return inventory;
-  } catch (error) {
-    console.error('Error loading player inventory:', error);
-    return {};
-  }
-}
-
-async function updateInventorySlot(playerId, slotNumber, itemId) {
-  try {
-    await pool.query(
-      'INSERT INTO player_inventory (player_id, slot_number, item_id) VALUES ($1, $2, $3) ' +
-      'ON CONFLICT (player_id, slot_number) DO UPDATE SET item_id = $3',
-      [playerId, slotNumber, itemId]
-    );
-  } catch (error) {
-    console.error('Error updating inventory slot:', error);
-  }
-}
-
-// Function to clear all map items from database and memory
-async function clearAllMapItems() {
-  try {
-    await pool.query('DELETE FROM map_items');
-    mapItems = {}; // Clear in-memory items
-    console.log('All map items cleared from database and memory');
-    return true;
-  } catch (error) {
-    console.error('Error clearing map items:', error);
-    return false;
-  }
-}
-
-// Function to reload map and item data
-async function reloadGameData() {
-  try {
-    // Reload map specification
-    await loadMapSpec();
-    
-    // Reload item details
-    await loadItemDetails();
-    
-    // Reload floor collision data
-    await loadFloorCollision();
-    
-    // Reload items from database (should be empty after reset)
-    mapItems = await loadItemsFromDatabase();
-    
-    console.log('Game data reloaded successfully');
-    return true;
-  } catch (error) {
-    console.error('Error reloading game data:', error);
-    return false;
-  }
-}
-
-// Function to get current online players
-function getOnlinePlayersList() {
-  const playerNames = [];
-  for (const [ws, playerData] of clients.entries()) {
-    if (playerData && playerData.username) {
-      playerNames.push(playerData.username);
-    }
-  }
-  return playerNames.sort(); // Sort alphabetically
-}
-
-function broadcast(obj) {
-  const s = JSON.stringify(obj);
-  for (const [ws] of clients.entries()) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(s);
-  }
-}
-
-function send(ws, obj) {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
-}
-
-// Get animation frame based on direction and movement sequence
-function getMovementAnimationFrame(direction, sequenceIndex) {
-  const sequenceType = MOVEMENT_SEQUENCE[sequenceIndex];
-  if (sequenceType === 'idle') {
-    return DIRECTION_IDLE[direction] || DIRECTION_IDLE.down;
-  } else {
-    // walk_1 or walk_2
-    const walkIndex = sequenceType === 'walk_1' ? 0 : 2;
-    const directionOffsets = {
-      down: 0,
-      right: 5,
-      left: 10,
-      up: 15
-    };
-    return (directionOffsets[direction] || 0) + walkIndex;
-  }
-}
-
-// Get adjacent position based on direction
-function getAdjacentPosition(x, y, direction) {
-  switch (direction) {
-    case 'up': return { x, y: y - 1 };
-    case 'down': return { x, y: y + 1 };
-    case 'left': return { x: x - 1, y };
-    case 'right': return { x: x + 1, y };
-    default: return { x, y };
-  }
-}
-
-// Check if movement to position is allowed
-function canMoveTo(x, y, excludePlayerId = null) {
-  // Check map bounds
-  if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) {
-    return false;
-  }
-  
-  // Check floor collision
-  if (hasFloorCollision(x, y)) {
-    return false;
-  }
-  
-  // Check item collision
-  const targetItemId = getItemAtPosition(x, y, serverMapSpec);
-  const targetItemDetails = getItemDetails(targetItemId);
-  if (targetItemDetails && targetItemDetails.collision) {
-    return false;
-  }
-  
-  // Check player collision
-  if (isPlayerAtPosition(x, y, excludePlayerId)) {
-    return false;
-  }
-  
-  return true;
-}
-
-function checkTeleportDestination(x, y, itemId) {
-  let destX = x, destY = y;
-  
-  if (itemId === 42) {
-    // 2 left, 1 up
-    destX = x - 2;
-    destY = y - 1;
-  } else if (itemId === 338) {
-    // 2 up, 1 left
-    destX = x - 1;
-    destY = y - 2;
-  }
-  
-  // Check if destination is within map bounds
-  return destX >= 0 && destY >= 0 && destX < MAP_WIDTH && destY < MAP_HEIGHT;
-}
-
-// Check for directional teleportation logic
-function checkDirectionalTeleportation(playerX, playerY, dx, dy, direction, mapSpec) {
-  const nx = playerX + dx;
-  const ny = playerY + dy;
-  
-  // Check what's at the target position
-  const targetItemId = getItemAtPosition(nx, ny, mapSpec);
-  
-  // Handle item #338 logic
-  if (targetItemId === 338) {
-    if (direction === 'up') {
-      // Moving up into #338: teleport 2 up, 1 left
-      return {
-        shouldTeleport: true,
-        destX: nx - 1,
-        destY: ny - 2,
-        blockMovement: false
-      };
-    } else if (direction === 'left' || direction === 'right') {
-      // Moving left/right into #338: block movement
-      return {
-        shouldTeleport: false,
-        destX: 0,
-        destY: 0,
-        blockMovement: true
-      };
-    }
-  }
-  
-  // Handle item #42 logic
-  if (targetItemId === 42) {
-    if (direction === 'left') {
-      // Moving left into #42: teleport 2 left, 1 up
-      return {
-        shouldTeleport: true,
-        destX: nx - 2,
-        destY: ny - 1,
-        blockMovement: false
-      };
-    } else if (direction === 'up' || direction === 'down') {
-      // Moving up/down into #42: block movement
-      return {
-        shouldTeleport: false,
-        destX: 0,
-        destY: 0,
-        blockMovement: true
-      };
-    }
-  }
-  
-  // Check for remote teleportation cases
-  if (direction === 'down') {
-    // Check if item at position (player_x + 1, player_y + 2) is #338
-    const remoteItemId = getItemAtPosition(playerX + 1, playerY + 2, mapSpec);
-    if (remoteItemId === 338) {
-      return {
-        shouldTeleport: true,
-        destX: playerX + 1,
-        destY: playerY + 3,
-        blockMovement: false
-      };
-    }
-  }
-  
-  if (direction === 'right') {
-    // Check if item at position (player_x + 2, player_y + 1) is #42
-    const remoteItemId = getItemAtPosition(playerX + 2, playerY + 1, mapSpec);
-    if (remoteItemId === 42) {
-      return {
-        shouldTeleport: true,
-        destX: playerX + 3,
-        destY: playerY + 1,
-        blockMovement: false
-      };
-    }
-  }
-  
-  // No teleportation logic applies
-  return {
-    shouldTeleport: false,
-    destX: 0,
-    destY: 0,
-    blockMovement: false
+  // GUI (+50,+50)
+  const GUI_OFFSET_X = 50, GUI_OFFSET_Y = 50;
+  const FIELD_H = 16;
+  const FIELD_TOP = (y) => (y - 13);
+  const GUI = {
+    username: { x: 260 + GUI_OFFSET_X, y: 34 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
+    password: { x: 260 + GUI_OFFSET_X, y: 58 + GUI_OFFSET_Y, w: 240, h: FIELD_H },
+    loginBtn:  { x: 260 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 },
+    signupBtn: { x: 390 + GUI_OFFSET_X, y: 86 + GUI_OFFSET_Y, w: 120, h: 22 }
   };
-}
 
-// Calculate chain teleportation with directional logic
-function calculateDirectionalChainTeleportation(startX, startY, originalDirection, mapSpec) {
-  let currentX = startX;
-  let currentY = startY;
-  let teleportCount = 0;
-  const maxTeleports = 10;
-  
-  // Keep teleporting until we land on a non-teleport tile or hit max teleports
-  while (teleportCount < maxTeleports) {
-    const currentItemId = getItemAtPosition(currentX, currentY, mapSpec);
-    if (currentItemId !== 42 && currentItemId !== 338) {
-      break; // Not a teleport tile, stop here
+  // Chat areas
+  const CHAT = { x1: 156, y1: 289, x2: 618, y2: 407, pad: 8 };
+  const CHAT_INPUT = { x1: 156, y1: 411, x2: 618, y2: 453, pad: 8, maxLen: 200, extraY: 2 };
+  // Inventory configuration
+  const INVENTORY = {
+    x: 241,
+    y: 28,
+    width: 250,
+    height: 150,
+    backgroundColor: 'rgb(0, 133, 182)',
+    borderColor: 'black',
+    slotWidth: 62,
+    slotHeight: 38,
+    cols: 4,
+    rows: 4,
+    selectionCircleColor: 'yellow',
+    selectionCircleDiameter: 32
+  };
+
+  // Animation constants
+  const ANIMATION_NAMES = [
+    'down_walk_1', 'down', 'down_walk_2', 'down_attack_1', 'down_attack_2',
+    'right_walk_1', 'right', 'right_walk_2', 'right_attack_1', 'right_attack_2',
+    'left_walk_1', 'left', 'left_walk_2', 'left_attack_1', 'left_attack_2',
+    'up_walk_1', 'up', 'up_walk_2', 'up_attack_1', 'up_attack_2',
+    'stand', 'sit'
+  ];
+
+  // Attack animation pairs
+  const ATTACK_SEQUENCES = {
+    down: [3, 4],   // down_attack_1, down_attack_2
+    right: [8, 9],  // right_attack_1, right_attack_2
+    left: [13, 14], // left_attack_1, left_attack_2
+    up: [18, 19]    // up_attack_1, up_attack_2
+  };
+
+  // Direction animations for idle state
+  const DIRECTION_IDLE = {
+    down: 1,   // down
+    right: 6,  // right
+    left: 11,  // left
+    up: 16     // up
+  };
+
+  // Movement animation sequence: walk_1 -> walk_2 -> idle
+  const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
+
+  // ---------- STATE ----------
+  let ws = null;
+  let connected = false;
+  let connectionPaused = false;
+  let showLoginGUI = false;
+  let loggedIn = false;
+  let chatMode = false;
+  // BRB/AFK state
+  let isBRB = false;
+
+  // Assets ready flags
+  let tilesReady = false;
+  let mapReady = false;
+  let playerSpritesReady = false;
+  let itemDetailsReady = false;
+  let floorCollisionReady = false;
+
+  // Map
+  let mapSpec = { width: 64, height: 64, tiles: [] };
+  let mapItems = {}; // { "x,y": itemId }
+
+  // Item details
+  let itemDetails = []; // Array of item detail objects
+
+  // Floor collision data
+  let floorCollision = []; // Array of collision data for tile types
+
+  // Auth GUI
+  let usernameStr = "";
+  let passwordStr = "";
+  let activeField = null;
+
+  // Players
+  let localPlayer = null;
+  let otherPlayers = {};
+
+  // NEW: Simplified direction and animation state system
+  let playerDirection = 'down'; // Current facing direction
+  let movementAnimationState = 0; // 0=standing, 1=walk_1, 2=walk_2
+  let isLocallyAttacking = false; // Local attack state
+  let localAttackState = 0; // 0 or 1 for attack_1 or attack_2
+  let lastMoveTime = 0; // Prevent rapid movement through collision objects
+
+  // Chat
+  let messages = [];
+  let typingBuffer = "";
+
+  // Animation state - SIMPLIFIED ATTACK HANDLING
+  let localAttackTimeout = null; // Track our own attack timeout
+  let isLocallyPickingUp = false; // Local pickup state
+  let localPickupTimeout = null; // Track our own pickup timeout
+  let shouldStayInStand = false;
+
+  // Inventory state - MOVED TO TOP LEVEL
+  let inventoryVisible = false;
+  let temporarySprite = 0; // For temporary sprite rendering
+  let fountainEffects = []; // Track fountain healing effects { playerId, startTime }
+  let inventorySelectedSlot = 1; // Default to slot 1
+  let chatScrollOffset = 0; // For scrolling through chat messages
+  let playerInventory = {}; // { slotNumber: itemId }
+
+  // ---------- COLLISION HELPERS ----------
+  function hasFloorCollision(x, y) {
+    if (!floorCollisionReady || !floorCollision || 
+        x < 0 || y < 0 || x >= mapSpec.width || y >= mapSpec.height) {
+      return false; // No collision data or out of bounds
     }
     
-    let nextX, nextY;
+    // Get the floor tile ID at this position
+    const tileId = (mapSpec.tiles && mapSpec.tiles[y] && 
+                    typeof mapSpec.tiles[y][x] !== 'undefined') 
+                    ? mapSpec.tiles[y][x] : 0;
     
-    // Apply directional logic based on original movement direction
-    if (currentItemId === 338) {
-      if (originalDirection === 'up') {
-        // Standard teleportation: 2 up, 1 left
-        nextX = currentX - 1;
-        nextY = currentY - 2;
-      } else {
-        // This shouldn't happen in chain since we only chain from valid teleports
+    // If no tile (ID 0) or tile ID is out of range, no collision
+    if (tileId <= 0 || tileId > floorCollision.length) {
+      return false;
+    }
+    
+    // Look up collision for this tile ID (convert to 0-based index)
+    return floorCollision[tileId - 1] === true || floorCollision[tileId - 1] === "true";
+  }
+
+  function isPlayerAtPosition(x, y, excludePlayerId = null) {
+    // Check local player
+    if (localPlayer && localPlayer.pos_x === x && localPlayer.pos_y === y) {
+      if (!excludePlayerId || localPlayer.id !== excludePlayerId) {
+        return true;
+      }
+    }
+    
+    // Check other players
+    for (const id in otherPlayers) {
+      const player = otherPlayers[id];
+      if (player.pos_x === x && player.pos_y === y) {
+        if (!excludePlayerId || player.id !== excludePlayerId) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  function canMoveTo(x, y, excludePlayerId = null) {
+    // Check map bounds
+    if (x < 0 || x >= mapSpec.width || y < 0 || y >= mapSpec.height) {
+      return false;
+    }
+    
+    // Check floor collision
+    if (hasFloorCollision(x, y)) {
+      return false;
+    }
+    
+    // Check item collision
+    const targetItemId = getItemAtPosition(x, y);
+    const targetItemDetails = getItemDetails(targetItemId);
+    if (targetItemDetails && targetItemDetails.collision) {
+      return false;
+    }
+    
+    // Check player collision
+    if (isPlayerAtPosition(x, y, excludePlayerId)) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  // ---------- INVENTORY HELPERS ----------
+  function getInventorySlotPosition(slotNumber) {
+    // Convert slot number (1-16) to row/col (0-based)
+    const index = slotNumber - 1;
+    const col = index % INVENTORY.cols;
+    const row = Math.floor(index / INVENTORY.cols);
+    
+    // Calculate position within inventory
+    const x = INVENTORY.x + col * INVENTORY.slotWidth;
+    const y = INVENTORY.y + row * INVENTORY.slotHeight;
+    
+    return { x, y };
+  }
+  
+  function moveInventorySelection(direction) {
+    if (!inventoryVisible) return;
+    
+    const currentIndex = inventorySelectedSlot - 1; // Convert to 0-based
+    const currentRow = Math.floor(currentIndex / INVENTORY.cols);
+    const currentCol = currentIndex % INVENTORY.cols;
+    
+    let newRow = currentRow;
+    let newCol = currentCol;
+    
+    switch (direction) {
+      case 'up':
+        newRow = currentRow === 0 ? INVENTORY.rows - 1 : currentRow - 1;
         break;
-      }
-    } else if (currentItemId === 42) {
-      if (originalDirection === 'left') {
-        // Standard teleportation: 2 left, 1 up
-        nextX = currentX - 2;
-        nextY = currentY - 1;
-      } else {
-        // This shouldn't happen in chain since we only chain from valid teleports
+      case 'down':
+        newRow = currentRow === INVENTORY.rows - 1 ? 0 : currentRow + 1;
         break;
+      case 'left':
+        newCol = currentCol === 0 ? INVENTORY.cols - 1 : currentCol - 1;
+        break;
+      case 'right':
+        newCol = currentCol === INVENTORY.cols - 1 ? 0 : currentCol + 1;
+        break;
+    }
+    
+    // Convert back to slot number (1-based)
+    inventorySelectedSlot = (newRow * INVENTORY.cols) + newCol + 1;
+  }
+
+  // ---------- ASSETS ----------
+  const imgTitle = new Image();
+  imgTitle.src = "/assets/title.GIF";
+
+  // Border: magenta keyed
+  const imgBorder = new Image();
+  imgBorder.src = "/assets/game_border_2025.gif";
+  let borderProcessed = null;
+  imgBorder.onload = () => {
+    try {
+      const w = imgBorder.width, h = imgBorder.height;
+      const off = document.createElement('canvas');
+      off.width = w; off.height = h;
+      const octx = off.getContext('2d');
+      octx.drawImage(imgBorder, 0, 0);
+      const data = octx.getImageData(0, 0, w, h);
+      const d = data.data;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
       }
+      octx.putImageData(data, 0, 0);
+      borderProcessed = off;
+    } catch {
+      borderProcessed = null;
     }
-    
-    // Check if teleport destination is within bounds
-    if (nextX >= 0 && nextY >= 0 && nextX < MAP_WIDTH && nextY < MAP_HEIGHT) {
-      currentX = nextX;
-      currentY = nextY;
-      teleportCount++;
-    } else {
-      // Can't teleport out of bounds, stop on current teleport tile
-      break;
+  };
+
+  // Player sprites: extract multiple animations from player.gif using player.json
+  const imgPlayerSrc = new Image();
+  imgPlayerSrc.src = "/assets/player.gif";
+  let playerSprites = []; // Array of Image objects for each animation frame
+  let playerSpriteMeta = []; // Array of {w, h} for each sprite
+
+  Promise.all([
+    new Promise(resolve => {
+      if (imgPlayerSrc.complete) resolve();
+      else { imgPlayerSrc.onload = resolve; imgPlayerSrc.onerror = resolve; }
+    }),
+    fetch('/assets/player.json').then(r => r.json()).catch(() => null)
+  ]).then(([_, playerJson]) => {
+    if (!playerJson || !playerJson.knight) {
+      console.error('Failed to load player.json or knight data');
+      playerSpritesReady = true;
+      return;
     }
-  }
-  
-  return { x: currentX, y: currentY, teleportCount };
-}
 
-function calculateChainTeleportation(startX, startY, mapSpec) {
-  let currentX = startX;
-  let currentY = startY;
-  let teleportCount = 0;
-  const maxTeleports = 10;
-  
-  // Keep teleporting until we land on a non-teleport tile or hit max teleports
-  while (teleportCount < maxTeleports) {
-    const currentItemId = getItemAtPosition(currentX, currentY, mapSpec);
-    if (currentItemId !== 42 && currentItemId !== 338) {
-      break; // Not a teleport tile, stop here
-    }
-    
-    let nextX, nextY;
-    if (currentItemId === 42) {
-      // 2 left, 1 up from the teleport tile
-      nextX = currentX - 2;
-      nextY = currentY - 1;
-    } else if (currentItemId === 338) {
-      // 2 up, 1 left from the teleport tile  
-      nextX = currentX - 1;
-      nextY = currentY - 2;
-    }
-    
-    // Check if teleport destination is within bounds
-    if (nextX >= 0 && nextY >= 0 && nextX < MAP_WIDTH && nextY < MAP_HEIGHT) {
-      currentX = nextX;
-      currentY = nextY;
-      teleportCount++;
-    } else {
-      // Can't teleport out of bounds, stop on current teleport tile
-      break;
-    }
-  }
-  
-  return { x: currentX, y: currentY, teleportCount };
-}
+    const knightCoords = playerJson.knight;
+    const loadPromises = [];
 
-// Start attack animation for a player
-function startAttackAnimation(playerData, ws) {
-  // Clear any existing attack timeout
-  const existingTimeout = attackTimeouts.get(playerData.id);
-  if (existingTimeout) {
-    clearTimeout(existingTimeout);
-  }
-
-  // Set attacking state
-  playerData.isAttacking = true;
-  
-  // Get current attack index for this player and alternate it
-  let currentIndex = playerAttackIndex.get(playerData.id);
-  if (currentIndex === undefined) {
-    // First attack starts with index 0
-    currentIndex = 0;
-  } else {
-    // Alternate between 0 and 1
-    currentIndex = currentIndex === 0 ? 1 : 0;
-  }
-  playerAttackIndex.set(playerData.id, currentIndex);
-  
-  // Get attack animation frame based on alternating index
-  const attackSeq = ATTACK_SEQUENCES[playerData.direction] || ATTACK_SEQUENCES.down;
-  playerData.animationFrame = attackSeq[currentIndex];
-  
-  // Update database
-  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, true, playerData.animationFrame, playerData.movementSequenceIndex)
-    .catch(err => console.error('Attack start DB error:', err));
-
-  // Broadcast attack start
-  broadcast({
-    type: 'animation_update',
-    id: playerData.id,
-    direction: playerData.direction,
-    isMoving: playerData.isMoving,
-    isAttacking: true,
-    animationFrame: playerData.animationFrame,
-    movementSequenceIndex: playerData.movementSequenceIndex
-  });
-
-  // Set timeout to stop attack after 1 second
-  const timeoutId = setTimeout(() => {
-    stopAttackAnimation(playerData, ws);
-    attackTimeouts.delete(playerData.id);
-  }, 1000);
-  
-  attackTimeouts.set(playerData.id, timeoutId);
-}
-
-// Stop attack animation for a player
-function stopAttackAnimation(playerData, ws) {
-  if (!playerData.isAttacking) return;
-  
-  // Clear timeout if it exists
-  const existingTimeout = attackTimeouts.get(playerData.id);
-  if (existingTimeout) {
-    clearTimeout(existingTimeout);
-    attackTimeouts.delete(playerData.id);
-  }
-
-  // Set back to appropriate animation based on current state
-  playerData.isAttacking = false;
-  
-  // If player is in stand state (from pickup), keep them in stand
-  // Otherwise return to directional idle
-  if (playerData.animationFrame === 20 && !playerData.isMoving) {
-    // Keep stand animation
-    playerData.animationFrame = 20;
-  } else {
-    // Return to directional idle
-    playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
-  }
-  
-  // Update database
-  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, false, playerData.animationFrame, playerData.movementSequenceIndex)
-    .catch(err => console.error('Attack stop DB error:', err));
-
-  // Broadcast attack stop
-  broadcast({
-    type: 'animation_update',
-    id: playerData.id,
-    direction: playerData.direction,
-    isMoving: playerData.isMoving,
-    isAttacking: false,
-    animationFrame: playerData.animationFrame,
-    movementSequenceIndex: playerData.movementSequenceIndex
-  });
-}
-
-// Start pickup animation for a player
-function startPickupAnimation(playerData, ws) {
-  // Clear any existing attack timeout
-  const existingTimeout = attackTimeouts.get(playerData.id);
-  if (existingTimeout) {
-    clearTimeout(existingTimeout);
-    attackTimeouts.delete(playerData.id);
-  }
-
-  // Set pickup state - using 'sit' animation (index 21)
-  playerData.isPickingUp = true;
-  playerData.isAttacking = false;
-  playerData.isMoving = false;
-  playerData.animationFrame = 21; // 'sit' animation
-
-  // Update database
-  updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
-    .catch(err => console.error('Pickup start DB error:', err));
-
-  // Broadcast pickup animation start
-  broadcast({
-    type: 'animation_update',
-    id: playerData.id,
-    direction: playerData.direction,
-    isMoving: false,
-    isAttacking: false,
-    isPickingUp: true,
-    animationFrame: playerData.animationFrame,
-    movementSequenceIndex: playerData.movementSequenceIndex
-  });
-
-  // Set timeout to stop pickup after 0.5 seconds
-  const timeoutId = setTimeout(() => {
-    stopPickupAnimation(playerData, ws);
-    attackTimeouts.delete(playerData.id);
-  }, 500);
-  
-  attackTimeouts.set(playerData.id, timeoutId);
-}
-
-// Stop pickup animation for a player
-function stopPickupAnimation(playerData, ws) {
-  if (!playerData.isPickingUp) return;
-  
-  // Clear timeout if it exists
-  const existingTimeout = attackTimeouts.get(playerData.id);
-  if (existingTimeout) {
-    clearTimeout(existingTimeout);
-    attackTimeouts.delete(playerData.id);
-  }
-
-  // Set to 'stand' animation (index 20) - this will be overridden if player moves
-  playerData.isPickingUp = false;
-  playerData.animationFrame = 20; // 'stand' animation
-  
-  // Update database
-  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex, false)
-    .catch(err => console.error('Pickup stop DB error:', err));
-
-  // Broadcast stand animation
-  broadcast({
-    type: 'animation_update',
-    id: playerData.id,
-    direction: playerData.direction,
-    isMoving: playerData.isMoving,
-    isAttacking: playerData.isAttacking,
-    isPickingUp: false,
-    animationFrame: playerData.animationFrame,
-    movementSequenceIndex: playerData.movementSequenceIndex
-  });
-}
-
-// Initialize database with animation columns if they don't exist
-async function initializeDatabase() {
-  try {
-    // Add animation columns to players table if they don't exist
-    await pool.query(`
-      ALTER TABLE players 
-      ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'down',
-      ADD COLUMN IF NOT EXISTS is_moving BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS is_attacking BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS animation_frame INTEGER DEFAULT 1,
-      ADD COLUMN IF NOT EXISTS movement_sequence_index INTEGER DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'player',
-      ADD COLUMN IF NOT EXISTS is_picking_up BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS is_brb BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS map_id INTEGER DEFAULT 1
-    `);
-
-    // Create map_items table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS map_items (
-        x INTEGER,
-        y INTEGER,
-        item_id INTEGER,
-        PRIMARY KEY (x, y)
-      )
-    `);
-
-    // Create player_inventory table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS player_inventory (
-        player_id INTEGER,
-        slot_number INTEGER,
-        item_id INTEGER DEFAULT 0,
-        PRIMARY KEY (player_id, slot_number),
-        FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE,
-        CHECK (slot_number >= 1 AND slot_number <= 16)
-      )
-    `);
-
-    console.log('Database tables initialized');
-    
-    // Load existing items
-    mapItems = await loadItemsFromDatabase();
-    console.log(`Loaded ${Object.keys(mapItems).length} items from database`);
-  } catch (error) {
-    console.error('Error initializing database:', error);
-  }
-}
-
-// Initialize database on startup
-initializeDatabase();
-loadItemDetails();
-loadMapSpec();
-loadFloorCollision();
-
-wss.on('connection', (ws) => {
-  let playerData = null;
-
-  ws.on('message', async (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
-
-    if (msg.type === 'login') {
+    knightCoords.forEach(([sx, sy, sw, sh], index) => {
       try {
-        const found = await loadPlayer(msg.username);
-        if (!found) return send(ws, { type: 'login_error', message: 'User not found' });
+        const off = document.createElement('canvas');
+        off.width = sw;
+        off.height = sh;
+        const octx = off.getContext('2d');
+        octx.drawImage(imgPlayerSrc, sx, sy, sw, sh, 0, 0, sw, sh);
 
-        const ok = await bcrypt.compare(msg.password, found.password);
-        if (!ok) return send(ws, { type: 'login_error', message: 'Invalid password' });
-
-        // single-session: kick prior
-        const prev = usernameToWs.get(found.username);
-        if (prev && prev !== ws) {
-          try { send(prev, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
-          try { prev.close(); } catch {}
+        // Make magenta transparent
+        const data = octx.getImageData(0, 0, sw, sh);
+        const d = data.data;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
         }
+        octx.putImageData(data, 0, 0);
 
-        playerData = {
-          id: found.id,
-          username: found.username,
-          map_id: found.map_id,
-          pos_x: found.pos_x,
-          pos_y: found.pos_y,
-          stamina: found.stamina ?? 10,
-          max_stamina: found.max_stamina ?? 10,
-          life: found.life ?? 20,
-          max_life: found.max_life ?? 20,
-          magic: found.magic ?? 0,
-          max_magic: found.max_magic ?? 0,
-          gold: found.gold ?? 0,
-          weapon: found.weapon ?? 0,
-          armor: found.armor ?? 0,
-          hands: found.hands ?? 0,
-          direction: found.direction ?? 'down',
-          isMoving: found.is_moving ?? false,
-          isAttacking: found.is_attacking ?? false,
-          animationFrame: found.animation_frame ?? DIRECTION_IDLE.down,
-          movementSequenceIndex: found.movement_sequence_index ?? 0,
-          role: found.role ?? 'player',
-          temporarySprite: 0,
-          isBRB: false
-        };
-
-        clients.set(ws, playerData);
-        usernameToWs.set(playerData.username, ws);
-
-        // Load player inventory
-        const inventory = await loadPlayerInventory(playerData.id);
-
-        const others = Array.from(clients.values())
-          .filter(p => p.id !== playerData.id)
-          .map(p => ({ ...p, isBRB: p.isBRB || false }));
-        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false } });
+        const sprite = new Image();
+        const promise = new Promise(resolve => {
+          sprite.onload = resolve;
+          sprite.onerror = resolve;
+        });
+        sprite.src = off.toDataURL();
+        
+        playerSprites[index] = sprite;
+        playerSpriteMeta[index] = { w: sw, h: sh };
+        loadPromises.push(promise);
       } catch (e) {
-        console.error('Login error', e);
-        send(ws, { type: 'login_error', message: 'Server error' });
+        console.error(`Failed to process sprite ${index}:`, e);
       }
-    }
+    });
 
-    else if (msg.type === 'signup') {
-      try {
-        const existing = await loadPlayer(msg.username);
-        if (existing) return send(ws, { type: 'signup_error', message: 'Username taken' });
+    Promise.all(loadPromises).then(() => {
+      playerSpritesReady = true;
+    });
+  });
 
-        const created = await createPlayer(msg.username, msg.password);
+  // Floor tiles from /assets/floor.png: 9 columns x 11 rows, each 62x32, with 1px overlapping border
+  const imgFloor = new Image();
+  imgFloor.src = "/assets/floor.png";
+  let floorTiles = []; // 1-based indexing
+  imgFloor.onload = async () => {
+    try {
+      const sheetW = imgFloor.width;
+      const sheetH = imgFloor.height;
+      const tileW = 62, tileH = 32;
+      const cols = 9;   // 9 columns
+      const rows = 11;  // 11 rows
 
-        const prev = usernameToWs.get(created.username);
-        if (prev && prev !== ws) {
-          try { send(prev, { type: 'chat', text: 'Disconnected: logged in from another game instance.' }); } catch {}
-          try { prev.close(); } catch {}
-        }
+      const off = document.createElement('canvas');
+      off.width = sheetW; off.height = sheetH;
+      const octx = off.getContext('2d');
+      octx.drawImage(imgFloor, 0, 0);
 
-        playerData = {
-          id: created.id,
-          username: created.username,
-          map_id: created.map_id,
-          pos_x: created.pos_x,
-          pos_y: created.pos_y,
-          stamina: created.stamina ?? 10,
-          max_stamina: created.max_stamina ?? 10,
-          life: created.life ?? 20,
-          max_life: created.max_life ?? 20,
-          magic: created.magic ?? 0,
-          max_magic: created.max_magic ?? 0,
-          gold: created.gold ?? 0,
-          weapon: created.weapon ?? 0,
-          armor: created.armor ?? 0,
-          hands: created.hands ?? 0,
-          direction: created.direction ?? 'down',
-          isMoving: created.is_moving ?? false,
-          isAttacking: created.is_attacking ?? false,
-          animationFrame: created.animation_frame ?? DIRECTION_IDLE.down,
-          movementSequenceIndex: created.movement_sequence_index ?? 0,
-          role: created.role ?? 'player',
-          temporarySprite: 0,
-          isBRB: false
-        };
+      let idCounter = 1;
+      const loadPromises = [];
 
-        clients.set(ws, playerData);
-        usernameToWs.set(playerData.username, ws);
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const sx = 1 + (col * 63);  // 63 = 62 + 1 pixel border
+          const sy = 1 + (row * 33);  // 33 = 32 + 1 pixel border
 
-        // Load player inventory
-        const inventory = await loadPlayerInventory(playerData.id);
+          const tcan = document.createElement('canvas');
+          tcan.width = tileW; tcan.height = tileH;
+          const tctx = tcan.getContext('2d', { willReadFrequently: true });
+          tctx.drawImage(off, sx, sy, tileW, tileH, 0, 0, tileW, tileH);
 
-        const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
-        send(ws, { type: 'signup_success', player: playerData, players: others, items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0 } });
-      } catch (e) {
-        console.error('Signup error', e);
-        send(ws, { type: 'signup_error', message: 'Server error' });
-      }
-    }
-
-    else if (msg.type === 'move') {
-      if (!playerData) return;
-      
-      // Clear temporary sprite when attacking
-      playerData.temporarySprite = 0;
-      // Broadcast temporary sprite clear
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'temporary_sprite_update',
-              id: playerData.id,
-              temporarySprite: 0
-            }));
+          // magenta -> transparent (if present in art)
+          const imgData = tctx.getImageData(0, 0, tileW, tileH);
+          const d = imgData.data;
+          for (let i = 0; i < d.length; i += 4) {
+            if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
           }
+          tctx.putImageData(imgData, 0, 0);
+
+          const tileImg = new Image();
+          const p = new Promise((resolve) => { tileImg.onload = resolve; tileImg.onerror = resolve; });
+          tileImg.src = tcan.toDataURL();
+          floorTiles[idCounter] = tileImg;
+          loadPromises.push(p);
+          idCounter++;
         }
       }
 
-      // Clear temporary sprite when moving
-      playerData.temporarySprite = 0;
+      await Promise.all(loadPromises);
+      tilesReady = true;
 
-      // Clear fountain effect when moving (broadcast to all players)
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'clear_fountain_effect',
-              playerId: playerData.id
-            }));
+      fetch('map.json')
+        .then(r => r.json())
+        .then(m => {
+          if (m && m.width && m.height) {
+            const tiles = Array.isArray(m.tiles) ? m.tiles : (Array.isArray(m.tilemap) ? m.tilemap : null);
+            mapSpec = {
+              width: m.width,
+              height: m.height,
+              tiles: tiles || [],
+              items: Array.isArray(m.items) ? m.items : []
+            };
           }
-        }
-      }
-    
-      // Clear BRB state when player moves
-      if (playerData.isBRB) {
-        playerData.isBRB = false;
-        
-        const brbUpdate = {
-          type: 'player_brb_update',
-          id: playerData.id,
-          brb: false
-        };
-        
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify(brbUpdate));
-            }
-          }
-        }
-      }
-    
-      // Cancel any pickup animation when moving
-      if (playerData.isPickingUp) {
-        const existingTimeout = attackTimeouts.get(playerData.id);
-        if (existingTimeout) {
-          clearTimeout(existingTimeout);
-          attackTimeouts.delete(playerData.id);
-        }
-        playerData.isPickingUp = false;
-      }
-    
-      // stamina gate
-      if ((playerData.stamina ?? 0) <= 0) {
-        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-        return;
-      }
-
-      // Cancel any attack animation when moving
-      if (playerData.isAttacking) {
-        stopAttackAnimation(playerData, ws);
-      }
-
-      const dx = Number(msg.dx) || 0;
-      const dy = Number(msg.dy) || 0;
-      const nx = playerData.pos_x + dx;
-      const ny = playerData.pos_y + dy;
-
-      // Check for directional teleportation logic
-      const teleportResult = checkDirectionalTeleportation(playerData.pos_x, playerData.pos_y, dx, dy, msg.direction, serverMapSpec);
-      
-      if (teleportResult.shouldTeleport) {
-        // Handle chain teleportation with directional logic
-        const finalDestination = calculateDirectionalChainTeleportation(teleportResult.destX, teleportResult.destY, msg.direction, serverMapSpec);
-        
-        // Check if final destination is within bounds
-        if (finalDestination.x < 0 || finalDestination.y < 0 || 
-            finalDestination.x >= MAP_WIDTH || finalDestination.y >= MAP_HEIGHT) {
-          // Don't allow movement if final destination is out of bounds
-          return;
-        }
-        
-        // Decrement stamina for the movement attempt (only once)
-        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
-        
-        // Set position to final teleport destination
-        playerData.pos_x = finalDestination.x;
-        playerData.pos_y = finalDestination.y;
-        
-        // Update direction
-        if (msg.direction) {
-          playerData.direction = msg.direction;
-        }
-        
-        // Keep movement sequence at 0 for teleport (no walking animation)
-        playerData.movementSequenceIndex = 0;
-        playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
-        playerData.isMoving = false;
-        playerData.isAttacking = false;
-        
-        // Save to database
-        Promise.allSettled([
-          updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
-          updatePosition(playerData.id, finalDestination.x, finalDestination.y),
-          updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, 0)
-        ]).catch(()=>{});
-        
-        // Broadcast the final teleported position
-        broadcast({ 
-          type: 'player_moved', 
-          id: playerData.id, 
-          x: finalDestination.x, 
-          y: finalDestination.y, 
-          direction: playerData.direction,
-          isMoving: false,
-          isAttacking: false,
-          animationFrame: playerData.animationFrame,
-          movementSequenceIndex: 0
-        });
-        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-        return;
-      }
-      
-      if (teleportResult.blockMovement) {
-        // Treat teleport item as collision, block movement entirely
-        return;
-      }
-      
-      if (canMoveTo(nx, ny, playerData.id)) {
-        // Decrement stamina by **1**
-        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
-        playerData.pos_x = nx;
-        playerData.pos_y = ny;
-
-        // IMMEDIATELY update direction for consistent state
-        if (msg.direction) {
-          playerData.direction = msg.direction;
-        }
-
-        // Advance movement sequence index
-        playerData.movementSequenceIndex = (playerData.movementSequenceIndex + 1) % MOVEMENT_SEQUENCE.length;
-
-        // Calculate animation frame based on movement sequence
-        playerData.animationFrame = getMovementAnimationFrame(playerData.direction, playerData.movementSequenceIndex);
-        playerData.isMoving = true;
-        playerData.isAttacking = false; // Ensure attack state is cleared
-
-        // Save to database immediately
-        Promise.allSettled([
-          updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
-          updatePosition(playerData.id, nx, ny),
-          updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex)
-        ]).catch(()=>{});
-
-        // Broadcast the updated state immediately
-        broadcast({ 
-          type: 'player_moved', 
-          id: playerData.id, 
-          x: nx, 
-          y: ny, 
-          direction: playerData.direction,
-          isMoving: playerData.isMoving,
-          isAttacking: playerData.isAttacking,
-          animationFrame: playerData.animationFrame,
-          movementSequenceIndex: playerData.movementSequenceIndex
-        });
-        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-      }
-    }
-
-    else if (msg.type === 'rotate') {
-      if (!playerData) return;
-
-      // Clear temporary sprite when picking up
-      playerData.temporarySprite = 0;
-      // Broadcast temporary sprite clear
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'temporary_sprite_update',
-              id: playerData.id,
-              temporarySprite: 0
-            }));
-          }
-        }
-      }
-      
-      // Update direction without moving
-      if (msg.direction) {
-        playerData.direction = msg.direction;
-        playerData.isAttacking = false;
-        playerData.isMoving = false;
-        playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
-        
-        // Update database
-        updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
-          .catch(err => console.error('Rotation DB error:', err));
-        
-        // Broadcast rotation to all clients
-        broadcast({
-          type: 'animation_update',
-          id: playerData.id,
-          direction: playerData.direction,
-          isMoving: false,
-          isAttacking: false,
-          animationFrame: playerData.animationFrame,
-          movementSequenceIndex: playerData.movementSequenceIndex
-        });
-      }
-    }
-
-    else if (msg.type === 'attack') {
-      if (!playerData) return;
-      
-      // Clear BRB state when player attacks
-      if (playerData.isBRB) {
-        playerData.isBRB = false;
-        
-        const brbUpdate = {
-          type: 'player_brb_update',
-          id: playerData.id,
-          brb: false
-        };
-        
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify(brbUpdate));
-            }
-          }
-        }
-      }
-      
-      console.log(`Attack attempt by ${playerData.username}: stamina ${playerData.stamina ?? 0}/10`);
-      
-      // Check stamina requirement (at least 10)
-      if ((playerData.stamina ?? 0) < 10) {
-        console.log(`Attack blocked for player ${playerData.username}: insufficient stamina (${playerData.stamina ?? 0}/10)`);
-        // Send stamina update to client to sync any discrepancy
-        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-        return;
-      }
-      
-      // Reduce stamina by 10
-      const oldStamina = playerData.stamina ?? 0;
-      playerData.stamina = Math.max(0, oldStamina - 10);
-      console.log(`Attack stamina: ${oldStamina} -> ${playerData.stamina}`);
-      
-      // Update direction if provided
-      if (msg.direction) {
-        playerData.direction = msg.direction;
-      }
-      
-      // Start attack animation (this will handle alternating)
-      startAttackAnimation(playerData, ws);
-      
-      // Update stamina in database and send to client
-      updateStatsInDb(playerData.id, { stamina: playerData.stamina })
-        .then(() => {
-          console.log(`Stamina updated in database for ${playerData.username}: ${playerData.stamina}`);
         })
-        .catch(err => console.error('Error updating stamina after attack:', err));
-      
-      send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-      console.log(`Sent stamina update to client: ${playerData.stamina}`);
+        .catch(() => {})
+        .finally(() => { mapReady = true; });
+
+    } catch (e) {
+      console.error("Floor tile extraction failed:", e);
+      tilesReady = true; mapReady = true; // fail-safe
     }
+  };
 
-    else if (msg.type === 'stop_attack') {
-      if (!playerData) return;
-      
-      // Stop attack animation
-      stopAttackAnimation(playerData, ws);
-    }
-
-    else if (msg.type === 'animation_update') {
-      if (!playerData) return;
-
-      // Update animation state
-      if (msg.direction) {
-        playerData.direction = msg.direction;
-      }
-      if (typeof msg.isMoving === 'boolean') {
-        playerData.isMoving = msg.isMoving;
-      }
-      if (typeof msg.isAttacking === 'boolean') {
-        playerData.isAttacking = msg.isAttacking;
-      }
-      if (typeof msg.animationFrame === 'number') {
-        playerData.animationFrame = msg.animationFrame;
-      }
-      if (typeof msg.movementSequenceIndex === 'number') {
-        playerData.movementSequenceIndex = msg.movementSequenceIndex;
-      }
-
-      // Save animation state to database
-      updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex)
-        .catch(err => console.error('Animation update DB error:', err));
-
-      // Broadcast animation update to all clients
-      broadcast({
-        type: 'animation_update',
-        id: playerData.id,
-        direction: playerData.direction,
-        isMoving: playerData.isMoving,
-        isAttacking: playerData.isAttacking,
-        animationFrame: playerData.animationFrame,
-        movementSequenceIndex: playerData.movementSequenceIndex
+  // ---------- ITEMS (sheet + coords, true magenta keyed, top-left alignment with yOffset) ----------
+  (() => {
+    const imgItems = new Image();
+    imgItems.src = "/assets/item.gif";
+  
+    const itemsJsonPromise = fetch("/assets/item.json")
+      .then(r => r.json())
+      .catch(() => null);
+  
+    const itemSprites = []; // 1-based
+    const itemMeta = [];    // 1-based: { img, w, h, yOffset }
+    let itemsReady = false;
+  
+    function waitImage(img) {
+      return new Promise((resolve) => {
+        if (img.complete) return resolve();
+        img.onload = resolve;
+        img.onerror = resolve;
       });
     }
-
-    else if (msg.type === 'pickup_item') {
-      if (!playerData) return;
-      
-      // Start pickup animation immediately for ALL pickup attempts
-      startPickupAnimation(playerData, ws);
-      
-      const { x, y, itemId } = msg;
-      
-      // Special case: itemId=0 means player wants to drop their hands item
-      if (itemId === 0) {
-        const handsItem = playerData.hands || 0;
-        if (handsItem === 0) return; // Animation already started, just return
-        
-        playerData.hands = 0;
-        const key = `${x},${y}`;
-        mapItems[key] = handsItem;
-        saveItemToDatabase(x, y, handsItem);
-        
-        updateStatsInDb(playerData.id, { hands: playerData.hands })
-          .catch(err => console.error('Error updating player hands:', err));
-        
-        broadcast({
-          type: 'item_placed',
-          x: x,
-          y: y,
-          itemId: handsItem
-        });
-        
-        broadcast({
-          type: 'player_equipment_update',
-          id: playerData.id,
-          hands: playerData.hands
-        });
-        
-        return;
-      }
-      
-      // Verify item exists (but animation already started)
-      const actualItemId = getItemAtPosition(x, y, serverMapSpec);
-      if (actualItemId !== itemId) {
-        console.log(`ERROR: Item mismatch! Expected ${itemId}, found ${actualItemId}`);
-        return; // Animation continues even if pickup fails
-      }
-      
-      // Verify item is pickupable (but animation already started)
-      const itemDetails = getItemDetails(itemId);
-      if (!itemDetails) {
-        console.log(`ERROR: No item details for item ${itemId}`);
-        return; // Animation continues even if pickup fails
-      }
-      
-      const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
-      if (!pickupableTypes.includes(itemDetails.type)) {
-        console.log(`ERROR: Item ${itemId} type '${itemDetails.type}' not pickupable`);
-        return; // Animation continues even if pickup fails
-      }
-      
-      // Pick up the item (animation already started above)
-      const oldHands = playerData.hands || 0;
-      playerData.hands = itemId;
-      
-      const key = `${x},${y}`;
-      
-      // Mark as picked up with -1 (this should make it disappear)
-      mapItems[key] = -1;
-      saveItemToDatabase(x, y, -1);
-      
-      // Update player
-      updateStatsInDb(playerData.id, { hands: playerData.hands })
-        .catch(err => console.error('Error updating player hands:', err));
-      
-      // Broadcast that this position now has -1 (picked up)
-      broadcast({
-        type: 'item_placed',
-        x: x,
-        y: y,
-        itemId: -1
+  
+    Promise.all([waitImage(imgItems), itemsJsonPromise]).then(([_, meta]) => {
+      if (!meta || !Array.isArray(meta.item_coords)) return;
+  
+      const off = document.createElement("canvas");
+      const octx = off.getContext("2d");
+  
+      meta.item_coords.forEach((coords, idx) => {
+        const [sx, sy, sw, sh, yOffset] = coords;
+        off.width = sw; off.height = sh;
+        octx.clearRect(0, 0, sw, sh);
+        octx.drawImage(imgItems, sx, sy, sw, sh, 0, 0, sw, sh);
+  
+        // Make true magenta transparent
+        try {
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = sw; tempCanvas.height = sh;
+          const tempCtx = tempCanvas.getContext("2d", { willReadFrequently: true });
+          tempCtx.drawImage(off, 0, 0);
+          
+          const data = tempCtx.getImageData(0, 0, sw, sh);
+          const d = data.data;
+  
+          // magenta -> transparent
+          for (let i = 0; i < d.length; i += 4) {
+            if (d[i] === 255 && d[i + 1] === 0 && d[i + 2] === 255) d[i + 3] = 0;
+          }
+  
+          tempCtx.putImageData(data, 0, 0);
+          octx.clearRect(0, 0, sw, sh);
+          octx.drawImage(tempCanvas, 0, 0);
+        } catch {
+          // fallback if canvas is tainted (shouldn't be here)
+        }
+  
+        // Freeze the processed pixels into an <img>
+        const sprite = new Image();
+        sprite.src = off.toDataURL();
+  
+        itemSprites[idx + 1] = sprite;
+        itemMeta[idx + 1] = { img: sprite, w: sw, h: sh, yOffset: yOffset || 0 };
       });
-      
-      broadcast({
-        type: 'player_equipment_update',
-        id: playerData.id,
-        hands: playerData.hands
-      });
-    }
+  
+      itemsReady = true;
+    });
+  
+    // accessors
+    window.getItemSprite = (i) => itemSprites[i] || null;
+    window.getItemMeta   = (i) => itemMeta[i] || null;
+    window.itemSpriteCount = () => itemSprites.length - 1;
+    window.itemsReady = () => itemsReady;
+  })();
 
-    else if (msg.type === 'equip_weapon') {
-      if (!playerData) return;
+  // ---------- ANIMATION HELPERS ----------
+  function getCurrentAnimationFrame(player, isLocal = false) {
+  if (player.isPickingUp) {
+    return player.animationFrame || 21; // 'sit' animation
+  }
+  
+  if (player.isAttacking) {
+    return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
+  }
+
+  // If player is in stand animation from server, respect it
+  if (player.animationFrame === 20 && !player.isMoving) {
+    return 20; // 'stand' animation
+  }
+
+  if (typeof player.animationFrame !== 'undefined') {
+    return player.animationFrame;
+  }
+
+  return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
+}
+
+  // ---------- WS ----------
+  function connectToServer() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    
+    console.log('Attempting to connect to:', WS_URL);
+    ws = new WebSocket(WS_URL);
+
+    ws.onopen = () => {
+      console.log('WebSocket connected successfully');
+      connected = true;
+      connectionPaused = true;
+      showLoginGUI = false;
+    };
+    ws.onmessage = (ev) => {
+      const data = safeParse(ev.data);
+      if (!data) return;
+      handleServerMessage(data);
+    };
+    ws.onerror = (e) => {
+      console.error('WebSocket error:', e);
+      console.log('Failed to connect to:', WS_URL);
+    };
+    ws.onclose = (e) => {
+      console.log('WebSocket closed:', e.code, e.reason);
+      connected = false;
+      connectionPaused = false;
+      showLoginGUI = false;
+      loggedIn = false;
+      chatMode = false;
+      localPlayer = null;
+      otherPlayers = {};
+      mapItems = {};
       
-      const handsItem = playerData.hands || 0;
-      const weaponItem = playerData.weapon || 0;
+      // Add disconnection message to chat
+      pushChat("~ You have been disconnected from the server.");
       
-      // Case 1: Has weapon item in hands, exchange with weapon slot
-      if (handsItem > 0) {
-        const handsItemDetails = getItemDetails(handsItem);
-        if (!handsItemDetails || handsItemDetails.type !== 'weapon') return;
+      // Clear any pending attack timeout
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
+        localAttackTimeout = null;
+      }
+      if (localPickupTimeout) {
+        clearTimeout(localPickupTimeout);
+        localPickupTimeout = null;
+      }
+      isLocallyPickingUp = false;
+      shouldStayInStand = false;
+      isBRB = false;
+      playerInventory = {};
+      inventoryVisible = false;
+    
+      // Auto-reconnect after 3 seconds if not manually closed
+      if (e.code !== 1000) { // 1000 = normal closure
+        console.log('Attempting to reconnect in 3 seconds...');
+        setTimeout(connectToServer, 3000);
+      }
+    };;
+  }
+  connectToServer();
+
+  function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
+  function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+  function pushChat(line) { messages.push(String(line)); if (messages.length > 200) messages.shift(); }
+
+  function handleServerMessage(msg) {
+    switch (msg.type) {
+      case 'login_success':
+        if (msg.inventory) {
+          playerInventory = { ...msg.inventory };
+        }
+      case 'signup_success':
+        loggedIn = true;
+        localPlayer = { 
+          ...msg.player,
+          direction: msg.player.direction || 'down',
+          isMoving: false,
+          isAttacking: false,
+          isPickingUp: false,
+          animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
+          movementSequenceIndex: msg.player.movementSequenceIndex || 0,
+          weapon: msg.player.weapon || 0,
+          armor: msg.player.armor || 0,
+          hands: msg.player.hands || 0
+        };
         
-        // Exchange weapon and hands
-        playerData.weapon = handsItem;
-        playerData.hands = weaponItem;
-      }
-      // Case 2: No item in hands but has weapon equipped, unequip to hands
-      else if (handsItem === 0 && weaponItem > 0) {
-        playerData.hands = weaponItem;
-        playerData.weapon = 0;
-      }
-      // Case 3: Nothing to do (no weapon in hands or weapon slot)
-      else {
-        return;
-      }
-      
-      // Update database
-      updateStatsInDb(playerData.id, { weapon: playerData.weapon, hands: playerData.hands })
-        .catch(err => console.error('Error updating player equipment:', err));
-      
-      // Broadcast equipment update
-      broadcast({
-        type: 'player_equipment_update',
-        id: playerData.id,
-        weapon: playerData.weapon,
-        hands: playerData.hands
-      });
-    }
-
-    else if (msg.type === 'equip_armor') {
-      if (!playerData) return;
-      
-      const handsItem = playerData.hands || 0;
-      const armorItem = playerData.armor || 0;
-      
-      // Case 1: Has armor item in hands, exchange with armor slot
-      if (handsItem > 0) {
-        const handsItemDetails = getItemDetails(handsItem);
-        if (!handsItemDetails || handsItemDetails.type !== 'armor') return;
+        // Initialize local state variables
+        playerDirection = localPlayer.direction;
+        movementAnimationState = 0;
+        isLocallyAttacking = false;
+        localAttackState = 0;
         
-        // Exchange armor and hands
-        playerData.armor = handsItem;
-        playerData.hands = armorItem;
-      }
-      // Case 2: No item in hands but has armor equipped, unequip to hands
-      else if (handsItem === 0 && armorItem > 0) {
-        playerData.hands = armorItem;
-        playerData.armor = 0;
-      }
-      // Case 3: Nothing to do (no armor in hands or armor slot)
-      else {
-        return;
-      }
-      
-      // Update database
-      updateStatsInDb(playerData.id, { armor: playerData.armor, hands: playerData.hands })
-        .catch(err => console.error('Error updating player equipment:', err));
-      
-      // Broadcast equipment update
-      broadcast({
-        type: 'player_equipment_update',
-        id: playerData.id,
-        armor: playerData.armor,
-        hands: playerData.hands
-      });
-    }
+        // Initialize inventory if not already set
+        if (msg.inventory) {
+          playerInventory = { ...msg.inventory };
+        }
+        
+        otherPlayers = {};
+        if (Array.isArray(msg.players)) {
+          msg.players.forEach(p => { 
+            if (!localPlayer || p.id !== localPlayer.id) {
+              otherPlayers[p.id] = {
+                ...p,
+                direction: p.direction || 'down',
+                isMoving: p.isMoving || false,
+                isAttacking: p.isAttacking || false,
+                isPickingUp: p.isPickingUp || false,
+                animationFrame: p.animationFrame || DIRECTION_IDLE.down,
+                movementSequenceIndex: p.movementSequenceIndex || 0
+              };
+            }
+          });
+        }
 
-    else if (msg.type === 'inventory_swap') {
-      if (!playerData) return;
-      
-      const { slotNumber } = msg;
-      
-      // Validate slot number
-      if (slotNumber < 1 || slotNumber > 16) {
-        console.log(`ERROR: Invalid slot number ${slotNumber}`);
-        return;
-      }
-      
-      // Get current inventory
-      const inventory = await loadPlayerInventory(playerData.id);
-      const slotItem = inventory[slotNumber] || 0;
-      const handsItem = playerData.hands || 0;
-      
-      // Swap items
-      playerData.hands = slotItem;
-      inventory[slotNumber] = handsItem;
-      
-      // Update database
-      await Promise.allSettled([
-        updateStatsInDb(playerData.id, { hands: playerData.hands }),
-        updateInventorySlot(playerData.id, slotNumber, handsItem)
-      ]);
-      
-      // Send updated inventory and hands to player
-      send(ws, {
-        type: 'inventory_update',
-        inventory: inventory
-      });
-      
-      broadcast({
-        type: 'player_equipment_update',
-        id: playerData.id,
-        hands: playerData.hands
-      });
-    }
+        if (msg.items) {
+          mapItems = { ...msg.items };
+        }
 
-    else if (msg.type === 'set_brb') {
-      if (!playerData || typeof msg.brb !== 'boolean') return;
-      
-      // Clear temporary sprite when toggling BRB
-      playerData.temporarySprite = 0;
-
-      // Clear fountain effect when moving (broadcast to all players)
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'clear_fountain_effect',
-              playerId: playerData.id
-            }));
+        pushChat("Welcome to DragonSpires!");
+        break;
+        
+      case 'player_joined':
+        if (!localPlayer || msg.player.id !== localPlayer.id) {
+          otherPlayers[msg.player.id] = {
+            ...msg.player,
+            direction: msg.player.direction || 'down',
+            isMoving: msg.player.isMoving || false,
+            isAttacking: msg.player.isAttacking || false,
+            animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
+            movementSequenceIndex: msg.player.movementSequenceIndex || 0
+          };
+          pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
+        }
+        break;
+        
+      case 'player_moved':
+        if (localPlayer && msg.id === localPlayer.id) { 
+          localPlayer.pos_x = msg.x; 
+          localPlayer.pos_y = msg.y;
+          localPlayer.isMoving = msg.isMoving || false;
+          if (!localPlayer.isMoving) {
+            localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
+            localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
+          }
+        } else {
+          if (!otherPlayers[msg.id]) {
+            otherPlayers[msg.id] = { 
+              id: msg.id, 
+              username: `#${msg.id}`, 
+              pos_x: msg.x, 
+              pos_y: msg.y,
+              direction: msg.direction || 'down',
+              isMoving: msg.isMoving || false,
+              isAttacking: false,
+              animationFrame: msg.animationFrame || DIRECTION_IDLE.down,
+              movementSequenceIndex: msg.movementSequenceIndex || 0
+            };
+          } else { 
+            otherPlayers[msg.id].pos_x = msg.x; 
+            otherPlayers[msg.id].pos_y = msg.y;
+            otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+            otherPlayers[msg.id].isMoving = msg.isMoving || false;
+            otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
+            otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
           }
         }
+        break;
+        
+      case 'animation_update':
+      if (localPlayer && msg.id === localPlayer.id) {
+        localPlayer.direction = msg.direction || localPlayer.direction;
+        localPlayer.isMoving = msg.isMoving || false;
+        localPlayer.isAttacking = msg.isAttacking || false;
+        localPlayer.isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
+        localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
+        localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
+      } else if (otherPlayers[msg.id]) {
+        otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+        otherPlayers[msg.id].isMoving = msg.isMoving || false;
+        otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
+        otherPlayers[msg.id].isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
+        otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
+        otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
       }
-
-      // Broadcast temporary sprite clear
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'temporary_sprite_update',
-              id: playerData.id,
-              temporarySprite: 0
-            }));
-          }
+      break;
+        
+      case 'player_equipment_update':
+        if (localPlayer && msg.id === localPlayer.id) {
+          if ('weapon' in msg) localPlayer.weapon = msg.weapon;
+          if ('armor' in msg) localPlayer.armor = msg.armor;
+          if ('hands' in msg) localPlayer.hands = msg.hands;
+        } else if (otherPlayers[msg.id]) {
+          if ('weapon' in msg) otherPlayers[msg.id].weapon = msg.weapon;
+          if ('armor' in msg) otherPlayers[msg.id].armor = msg.armor;
+          if ('hands' in msg) otherPlayers[msg.id].hands = msg.hands;
         }
-      }
+        break;
+        case 'player_brb_update':
+          if (localPlayer && msg.id === localPlayer.id) {
+            isBRB = msg.brb || false;
+          } else if (otherPlayers[msg.id]) {
+            otherPlayers[msg.id].isBRB = msg.brb || false;
+          }
+          break;
+        case 'temporary_sprite_update':
+          if (localPlayer && msg.id === localPlayer.id) {
+            localPlayer.temporarySprite = msg.temporarySprite || 0;
+            temporarySprite = localPlayer.temporarySprite;
+          } else if (otherPlayers[msg.id]) {
+            otherPlayers[msg.id].temporarySprite = msg.temporarySprite || 0;
+          }
+          break;
+        case 'transformation_result':
+          if (msg.success && localPlayer && msg.id === localPlayer.id) {
+            localPlayer.magic = msg.newMagic;
+            temporarySprite = msg.temporarySprite;
+            localPlayer.temporarySprite = msg.temporarySprite;
+          } else if (!msg.success && msg.message) {
+            pushChat(msg.message);
+          }
+          break;
+      case 'teleport_result':
+          if (msg.success && localPlayer && msg.id === localPlayer.id) {
+            localPlayer.magic = msg.newMagic;
+            localPlayer.pos_x = msg.x;
+            localPlayer.pos_y = msg.y;
+            localPlayer.map_id = msg.mapId;
+            
+            // Clear other players since we're on a new map
+            otherPlayers = {};
+            
+            // Update other players on new map
+            if (msg.players) {
+              msg.players.forEach(p => {
+                if (p.id !== localPlayer.id) {
+                  otherPlayers[p.id] = {
+                    ...p,
+                    direction: p.direction || 'down',
+                    isMoving: p.isMoving || false,
+                    isAttacking: p.isAttacking || false,
+                    isPickingUp: p.isPickingUp || false,
+                    animationFrame: p.animationFrame || DIRECTION_IDLE.down,
+                    movementSequenceIndex: p.movementSequenceIndex || 0
+                  };
+                }
+              });
+            }
+            
+            // Update map items
+            if (msg.items) {
+              mapItems = { ...msg.items };
+            }
+            
+            pushChat("~ You have been teleported!");
+          } else if (!msg.success && msg.message) {
+            pushChat(msg.message);
+          }
+          break;
+      case 'fountain_heal':
+          if (localPlayer && msg.id === localPlayer.id) {
+            localPlayer.stamina = msg.stamina;
+            localPlayer.life = msg.life;
+            localPlayer.magic = msg.magic;
+            pushChat("~ You are refreshed by the fountains healing waters!");
+          }
+          break;
+        
+        case 'fountain_effect':
+            if (msg.playerId !== undefined) {
+              fountainEffects.push({
+                playerId: msg.playerId,
+                startTime: Date.now()
+              });
+            }
+            break;
 
-      playerData.isBRB = msg.brb;
+      case 'clear_fountain_effect':
+          if (msg.playerId !== undefined) {
+            fountainEffects = fountainEffects.filter(effect => effect.playerId !== msg.playerId);
+          }
+          break;
+
+      case 'item_placed':
+        const key = `${msg.x},${msg.y}`;
+        if (msg.itemId === 0) {
+          delete mapItems[key];
+        } else {
+          mapItems[key] = msg.itemId;
+        }
+        break;
+
+      case 'server_reset':
+        // Handle server reset - update items and show message
+        if (msg.items) {
+          mapItems = { ...msg.items };
+        }
+        if (msg.message) {
+          pushChat(`~ ${msg.message}`);
+        }
+        break;
+        
+      case 'player_left':
+        const p = otherPlayers[msg.id];
+        const name = p?.username ?? msg.id;
+        if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
+        delete otherPlayers[msg.id];
+        break;
+        
+      case 'chat':
+        if (typeof msg.text === 'string') pushChat(msg.text);
+        break;
+        
+      case 'chat_error':
+        pushChat('~ The game has rejected your message due to bad language.');
+        break;
+
+      case 'inventory_update':
+        if (msg.inventory) {
+          playerInventory = { ...msg.inventory };
+        }
+        break;
+        
+      case 'stats_update':
+        const apply = (obj) => {
+          if (!obj) return;
+          if ('stamina' in msg) obj.stamina = msg.stamina;
+          if ('life' in msg) obj.life = msg.life;
+          if ('magic' in msg) obj.magic = msg.magic;
+        };
+        if (localPlayer && msg.id === localPlayer.id) apply(localPlayer);
+        else if (otherPlayers[msg.id]) apply(otherPlayers[msg.id]);
+        break;
+        
+      case 'login_error':
+      case 'signup_error':
+        pushChat(msg.message || 'Auth error');
+        break;
+    }
+  }
+
+  // ---------- INPUT ----------
+  window.addEventListener('keydown', (e) => {
+    // Help controls with Ctrl+Z
+    if (e.ctrlKey && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      showHelpControls();
+      return;
+    }
+    if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
+
+    // Toggle / submit chat
+    if (e.key === 'Enter' && loggedIn) {
+      if (!chatMode) { chatMode = true; typingBuffer = ""; }
+      else {
+        const toSend = typingBuffer.trim();
+       if (toSend === '-pos' && localPlayer) {
+          pushChat(`~ ${localPlayer.username} is currently on Map ${localPlayer.map_id ?? 1} at location x:${localPlayer.pos_x}, y:${localPlayer.pos_y}.`);
+        } else if (toSend === '-help') {
+          showHelpControls();
+        } else if (toSend === '-cls') {
+          clearChatMessages();
+        } else if (toSend === '-stats') {
+          showPlayerStats();
+        } else if (toSend === '-brb') {
+          toggleBRB();
+        } else if (toSend.length > 0) {
+          send({ type: 'chat', text: toSend.slice(0, CHAT_INPUT.maxLen) });
+        }
+        typingBuffer = ""; chatMode = false;
+      }
+      e.preventDefault(); return;
+    }
+
+    // Capture chat text
+    if (chatMode) {
+      if (e.key === 'Backspace') { typingBuffer = typingBuffer.slice(0, -1); e.preventDefault(); }
+      else if (e.key.length === 1 && typingBuffer.length < CHAT_INPUT.maxLen) typingBuffer += e.key;
+      return;
+    }
+
+    // Login GUI typing
+    if (!loggedIn && showLoginGUI && activeField) {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        activeField = (activeField === 'username') ? 'password' : 'username';
+        return;
+      } else if (e.key === 'Backspace') {
+        if (activeField === 'username') usernameStr = usernameStr.slice(0, -1);
+        else passwordStr = passwordStr.slice(0, -1);
+        e.preventDefault();
+      } else if (e.key === 'Enter') {
+        send({ type: 'login', username: usernameStr, password: passwordStr });
+        e.preventDefault();
+      } else if (e.key.length === 1) {
+        if (activeField === 'username') usernameStr += e.key;
+        else passwordStr += e.key;
+      }
+      return;
+    }
+
+    // Look command with 'l' key
+    if (loggedIn && localPlayer && e.key === 'l') {
+      e.preventDefault();
       
-      // Broadcast BRB state update to all players on the same map
-      const brbUpdate = {
-        type: 'player_brb_update',
-        id: playerData.id,
-        brb: playerData.isBRB
+      let lookX = localPlayer.pos_x;
+      let lookY = localPlayer.pos_y;
+      
+      switch (playerDirection) {
+        case 'up': lookY -= 1; break;
+        case 'down': lookY += 1; break;
+        case 'left': lookX -= 1; break;
+        case 'right': lookX += 1; break;
+      }
+      
+      if (lookX >= 0 && lookX < mapSpec.width && lookY >= 0 && lookY < mapSpec.height) {
+        const itemId = getItemAtPosition(lookX, lookY);
+        const itemDetails = getItemDetails(itemId);
+        
+        if (itemDetails && itemDetails.description && itemDetails.description.trim()) {
+          pushChat(`~ ${itemDetails.description}`);
+        } else {
+          pushChat("~ You see nothing.");
+        }
+      } else {
+        pushChat("~ You see nothing.");
+      }
+      
+      return;
+    }
+
+    // Transformation with 'U' key
+    if (loggedIn && localPlayer && e.key === 'u' || e.key === 'U') {
+      e.preventDefault();
+      
+      const handsItem = localPlayer.hands || 0;
+      const playerMagic = localPlayer.magic || 0;
+      
+      // Define transformation mappings
+      const transformations = {
+        57: { cost: 10, result: 14 },   // Item 57 -> Item 14
+        101: { cost: 10, result: 87 },  // Item 101 -> Item 87
+        59: { cost: 10, result: 61 },   // Item 59 -> Item 61
+        98: { cost: 10, result: 117 },  // Item 98 -> Item 117
+        285: { cost: 10, result: 323 }, // Item 285 -> Item 323
+        283: { cost: 10, result: -1 },  // Item 283 -> Random (special case)
+        58: { cost: 20, result: -2 }    // Item 58 -> Teleport to map 1 (special case)
       };
       
-      // Send to all players on the same map
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify(brbUpdate));
-          }
-        }
-      }
-    }
-    
-      else if (msg.type === 'temporary_sprite_update') {
-        if (!playerData) return;
+      if (handsItem > 0 && transformations[handsItem]) {
+        const transformation = transformations[handsItem];
         
-        playerData.temporarySprite = msg.temporarySprite || 0;
-        
-        // Broadcast to all players on the same map
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'temporary_sprite_update',
-                id: playerData.id,
-                temporarySprite: playerData.temporarySprite
-              }));
-            }
-          }
-        }
-      }
-    else if (msg.type === 'use_transformation_item') {
-      if (!playerData) return;
-      
-      const { itemId, magicCost, resultItem } = msg;
-      
-      // Verify player has the item in hands
-      if (playerData.hands !== itemId) return;
-      
-      // Verify player has enough magic
-      if ((playerData.magic || 0) < magicCost) {
-        send(ws, {
-          type: 'transformation_result',
-          success: false,
-          message: '~ You do not have enough magic to use that item!'
-        });
-        return;
-      }
-      
-      // Clear temporary sprite
-      playerData.temporarySprite = 0;
-
-      // Clear fountain effect when rotating (broadcast to all players)
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'clear_fountain_effect',
-              playerId: playerData.id
-            }));
-          }
-        }
-      }
-      
-      // Reduce magic
-      playerData.magic = Math.max(0, (playerData.magic || 0) - magicCost);
-      
-      let finalResultItem = resultItem;
-      
-      // Special case for item 283 - random transformation
-      if (itemId === 283) {
-        const validTypes = ['nothing', 'sign', 'portal', 'interactable'];
-        finalResultItem = getRandomItemByTypes(validTypes);
-      }
-      
-      // Set temporary sprite
-      playerData.temporarySprite = finalResultItem;
-      
-      // Update database
-      updateStatsInDb(playerData.id, { magic: playerData.magic })
-        .catch(err => console.error('Error updating magic after transformation:', err));
-      
-      // Send success response to player
-      send(ws, {
-        type: 'transformation_result',
-        success: true,
-        id: playerData.id,
-        newMagic: playerData.magic,
-        temporarySprite: playerData.temporarySprite
-      });
-      
-      // Broadcast magic update
-      send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
-      
-      // Broadcast temporary sprite update to all players on same map
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'temporary_sprite_update',
-              id: playerData.id,
-              temporarySprite: playerData.temporarySprite
-            }));
-          }
-        }
-      }
-    }
-
-    else if (msg.type === 'use_teleport_item') {
-      if (!playerData) return;
-      
-      const { itemId, magicCost, targetMap, targetX, targetY } = msg;
-      
-      // Verify player has the item in hands
-      if (playerData.hands !== itemId) return;
-      
-      // Verify player has enough magic
-      if ((playerData.magic || 0) < magicCost) {
-        send(ws, {
-          type: 'teleport_result',
-          success: false,
-          message: '~ You do not have enough magic to use that item!'
-        });
-        return;
-      }
-      
-      // Clear temporary sprite
-      playerData.temporarySprite = 0;
-      
-      // Reduce magic
-      playerData.magic = Math.max(0, (playerData.magic || 0) - magicCost);
-      
-      // Get old map for broadcasting player left
-      const oldMapId = playerData.map_id;
-      
-      // Update player position and map
-      playerData.pos_x = targetX;
-      playerData.pos_y = targetY;
-      playerData.map_id = targetMap;
-      
-      // Update database
-      Promise.allSettled([
-        updateStatsInDb(playerData.id, { magic: playerData.magic }),
-        updatePosition(playerData.id, targetX, targetY),
-        pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetMap, playerData.id])
-      ]).catch(err => console.error('Error updating player after teleport:', err));
-      
-      // Broadcast player left to old map
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === oldMapId && otherPlayer.id !== playerData.id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'player_left',
-              id: playerData.id
-            }));
-          }
-        }
-      }
-      
-      // Get players on target map
-      const playersOnTargetMap = Array.from(clients.values())
-        .filter(p => p.map_id === targetMap && p.id !== playerData.id)
-        .map(p => ({ ...p, isBRB: p.isBRB || false, temporarySprite: p.temporarySprite || 0 }));
-      
-      // Get items for target map (you may need to implement per-map items if needed)
-      // For now, using the same mapItems for all maps
-      
-      // Send success response to teleporting player
-      send(ws, {
-        type: 'teleport_result',
-        success: true,
-        id: playerData.id,
-        newMagic: playerData.magic,
-        x: targetX,
-        y: targetY,
-        mapId: targetMap,
-        players: playersOnTargetMap,
-        items: mapItems
-      });
-      
-      // Broadcast magic update to teleporting player
-      send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
-      
-      // Broadcast player joined to target map
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'player_joined',
-              player: { ...playerData, isBRB: playerData.isBRB || false, temporarySprite: playerData.temporarySprite || 0 }
-            }));
-          }
-        }
-      }
-      
-      // Broadcast temporary sprite clear
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'temporary_sprite_update',
-              id: playerData.id,
-              temporarySprite: 0
-            }));
-          }
-        }
-      }
-    }
-
-    else if (msg.type === 'attack_fountain') {
-      if (!playerData) return;
-
-      // Clear temporary sprite when attacking fountain
-      playerData.temporarySprite = 0;
-      
-      // Broadcast temporary sprite clear
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'temporary_sprite_update',
-              id: playerData.id,
-              temporarySprite: 0
-            }));
-          }
-        }
-      }
-      
-      // Clear BRB state when player attacks fountain
-      if (playerData.isBRB) {
-        playerData.isBRB = false;
-        
-        const brbUpdate = {
-          type: 'player_brb_update',
-          id: playerData.id,
-          brb: false
-        };
-        
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify(brbUpdate));
-            }
-          }
-        }
-      }
-      
-      // Check stamina requirement (at least 10)
-      if ((playerData.stamina ?? 0) < 10) {
-        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-        return;
-      }
-      
-      // Reduce stamina by 10
-      const oldStamina = playerData.stamina ?? 0;
-      playerData.stamina = Math.max(0, oldStamina - 10);
-      
-      // Update direction if provided
-      if (msg.direction) {
-        playerData.direction = msg.direction;
-      }
-      
-      // Start attack animation
-      startAttackAnimation(playerData, ws);
-      
-      // Verify the fountain item is still there
-      const targetItemId = getItemAtPosition(msg.x, msg.y, serverMapSpec);
-      if (targetItemId === 60) {
-        // Heal the player
-        playerData.stamina = playerData.max_stamina ?? 10;
-        playerData.life = playerData.max_life ?? 20;
-        playerData.magic = playerData.max_magic ?? 0;
-        
-        // Send healing response
-        send(ws, {
-          type: 'fountain_heal',
-          id: playerData.id,
-          stamina: playerData.stamina,
-          life: playerData.life,
-          magic: playerData.magic
-        });
-        
-        // Broadcast fountain effect to all players on same map (show on the healed player)
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'fountain_effect',
-                playerId: playerData.id
-              }));
-            }
-          }
-        }
-        
-        // Update database
-        updateStatsInDb(playerData.id, { 
-          stamina: playerData.stamina, 
-          life: playerData.life, 
-          magic: playerData.magic 
-        }).catch(err => console.error('Error updating stats after fountain heal:', err));
-      } else {
-        // Update stamina in database and send to client (fountain not found)
-        updateStatsInDb(playerData.id, { stamina: playerData.stamina })
-          .catch(err => console.error('Error updating stamina after fountain attack:', err));
-      }
-      
-      send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-    }
-
-    else if (msg.type === 'chat') {
-      if (!playerData || typeof msg.text !== 'string') return;
-      const t = msg.text.trim();
-      if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
-
-      // Check for -resetserver admin command
-      if (t.toLowerCase() === '-resetserver') {
-        // Validate admin role
-        if (playerData.role !== 'admin') {
-          // Do nothing for non-admin users (silent ignore)
-          return;
-        }
-
-        send(ws, { type: 'chat', text: '~ Resetting server, clearing all items...' });
-        
-        try {
-          // Clear all map items
-          const itemsClearSuccess = await clearAllMapItems();
-          if (!itemsClearSuccess) {
-            send(ws, { type: 'chat', text: '~ Error: Failed to clear map items.' });
-            return;
-          }
-
-          // Reload all game data
-          const reloadSuccess = await reloadGameData();
-          if (!reloadSuccess) {
-            send(ws, { type: 'chat', text: '~ Error: Failed to reload game data.' });
-            return;
-          }
-
-          // Broadcast the reset to all players
-          broadcast({
-            type: 'server_reset',
-            items: mapItems, // Should be empty object after reset
-            message: 'Server has been reset by an administrator.'
-          });
-
-          // Send confirmation to admin
-          send(ws, { type: 'chat', text: '~ Server reset completed successfully.' });
+        if (playerMagic >= transformation.cost) {
+          // Clear any existing temporary sprite first
+          clearTemporarySprite();
           
-        } catch (error) {
-          console.error('Error during server reset:', error);
-          send(ws, { type: 'chat', text: '~ Error: Server reset failed.' });
-        }
-        return;
-      }
-
-      // Check for -players command (available to all players)
-      if (t.toLowerCase() === '-players') {
-        const onlinePlayers = getOnlinePlayersList();
-        const playerCount = onlinePlayers.length;
-        
-        // Format the response
-        const playerListText = onlinePlayers.join(', ');
-        const response1 = '[*] DragonSpires - Players Currently Online [*]';
-        const response2 = playerListText;
-        const response3 = `Total Players: ${playerCount}`;
-        
-        // Send the formatted response to the requesting player
-        send(ws, { type: 'chat', text: response1 });
-        send(ws, { type: 'chat', text: response2 });
-        send(ws, { type: 'chat', text: response3 });
-        return;
-      }
-
-      // Check for existing admin placeitem command
-      const placeItemMatch = t.match(/^-placeitem\s+(\d+)$/i);
-      if (placeItemMatch) {
-        // Validate admin role
-        if (playerData.role !== 'admin') {
-          // Do nothing for non-admin users
-          return;
-        }
-
-        const itemId = parseInt(placeItemMatch[1]);
-        if (itemId < 0 || itemId > 999) return; // Basic validation
-
-        // Get adjacent position based on player's facing direction
-        const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
-        
-        // Check bounds
-        if (adjacentPos.x < 0 || adjacentPos.x >= MAP_WIDTH || adjacentPos.y < 0 || adjacentPos.y >= MAP_HEIGHT) {
-          send(ws, { type: 'chat', text: '~ Cannot place item outside map bounds.' });
-          return;
-        }
-
-        // Update item in memory and database
-        const key = `${adjacentPos.x},${adjacentPos.y}`;
-        if (itemId === 0) {
-          delete mapItems[key];
-          // Remove from database
-          pool.query('DELETE FROM map_items WHERE x=$1 AND y=$2', [adjacentPos.x, adjacentPos.y])
-            .catch(err => console.error('Error removing item from database:', err));
+          // Send transformation request to server
+          if (handsItem === 58) {
+            // Special teleport item
+            send({ 
+              type: 'use_teleport_item', 
+              itemId: handsItem,
+              magicCost: transformation.cost,
+              targetMap: 1,
+              targetX: 33,
+              targetY: 27
+            });
+          } else {
+            send({ 
+              type: 'use_transformation_item', 
+              itemId: handsItem,
+              magicCost: transformation.cost,
+              resultItem: transformation.result
+            });
+          }
         } else {
-          mapItems[key] = itemId;
-          // Save to database
-          saveItemToDatabase(adjacentPos.x, adjacentPos.y, itemId);
+          pushChat("~ You do not have enough magic to use that item!");
         }
+      }
+      
+      return;
+    }
 
-        // Broadcast item update to all clients
-        broadcast({
-          type: 'item_placed',
-          x: adjacentPos.x,
-          y: adjacentPos.y,
+    // Pick up item with 'g' key
+    if (loggedIn && localPlayer && e.key === 'g') {
+      e.preventDefault();
+      
+      // Clear temporary sprite when picking up
+      clearTemporarySprite();
+
+      // Clear fountain effect when picking up
+      fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+
+      // Start local pickup animation immediately
+      isLocallyPickingUp = true;
+      shouldStayInStand = true; // Set flag to stay in stand after animation
+      
+      if (localPickupTimeout) {
+        clearTimeout(localPickupTimeout);
+      }
+      
+      localPickupTimeout = setTimeout(() => {
+        isLocallyPickingUp = false;
+        localPickupTimeout = null;
+        // shouldStayInStand remains true until movement
+      }, 700); // Slightly longer than server animation
+      
+      const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
+      const itemDetails = getItemDetails(itemId);
+      
+      console.log(`Pickup attempt: position (${localPlayer.pos_x},${localPlayer.pos_y}), itemId: ${itemId}, itemDetails:`, itemDetails);
+      
+      if (itemDetails && isItemPickupable(itemDetails)) {
+        console.log(`Sending pickup request for item ${itemId}`);
+        send({
+          type: 'pickup_item',
+          x: localPlayer.pos_x,
+          y: localPlayer.pos_y,
           itemId: itemId
         });
-
-        send(ws, { 
-          type: 'chat', 
-          text: itemId === 0 
-            ? `~ Item removed from (${adjacentPos.x}, ${adjacentPos.y})`
-            : `~ Item ${itemId} placed at (${adjacentPos.x}, ${adjacentPos.y})`
+      }
+      else if ((!itemDetails || !isItemPickupable(itemDetails)) && localPlayer.hands && localPlayer.hands > 0) {
+        console.log(`Dropping item from hands: ${localPlayer.hands}`);
+        send({
+          type: 'pickup_item',
+          x: localPlayer.pos_x,
+          y: localPlayer.pos_y,
+          itemId: 0
         });
+      } else {
+        console.log(`No action taken - no pickupable item and no hands item to drop`);
+        // Send pickup anyway to show animation
+        send({
+          type: 'pickup_item',
+          x: localPlayer.pos_x,
+          y: localPlayer.pos_y,
+          itemId: 0
+        });
+      }
+      
+      return;
+    }
+
+    // Equip weapon with 't' key
+    if (loggedIn && localPlayer && e.key === 't') {
+      e.preventDefault();
+      send({ type: 'equip_weapon' });
+      return;
+    }
+
+    // Equip armor with 'y' key
+    if (loggedIn && localPlayer && e.key === 'y') {
+      e.preventDefault();
+      send({ type: 'equip_armor' });
+      return;
+    }
+
+    // Rotation with '0' key
+    if (loggedIn && localPlayer && e.key === '0') {
+      e.preventDefault();
+      
+      // Clear stand flag when rotating
+      shouldStayInStand = false;
+      // Clear fountain effect when rotating
+      fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
+        localAttackTimeout = null;
+      }
+      
+      const directions = ['right', 'down', 'left', 'up'];
+      const currentIndex = directions.indexOf(playerDirection);
+      const nextIndex = (currentIndex + 1) % directions.length;
+      playerDirection = directions[nextIndex];
+      
+      movementAnimationState = 0;
+      isLocallyAttacking = false;
+      
+      localPlayer.direction = playerDirection;
+      localPlayer.isAttacking = false;
+      localPlayer.isMoving = false;
+      
+      send({ type: 'rotate', direction: playerDirection });
+      return;
+    }
+
+    // Attack input
+    if (loggedIn && localPlayer && e.key === 'Tab') {
+      e.preventDefault();
+      
+      // Check stamina requirement (at least 10)
+      if ((localPlayer.stamina ?? 0) < 10) {
+        console.log('Not enough stamina to attack (need 10, have ' + (localPlayer.stamina ?? 0) + ')');
         return;
       }
 
-      // Regular chat message
-      broadcast({ type: 'chat', text: `${playerData.username}: ${t}` });
-    }
-  });
+      // Clear BRB state when attacking
+      if (isBRB) {
+        isBRB = false;
+        send({ type: 'set_brb', brb: false });
+      }
 
-  ws.on('close', () => {
-    if (playerData) {
-      // Clear any pending attack timeout
-      const attackTimeout = attackTimeouts.get(playerData.id);
-      if (attackTimeout) {
-        clearTimeout(attackTimeout);
-        attackTimeouts.delete(playerData.id);
+      // Clear stand flag when attacking
+      shouldStayInStand = false;
+      
+      // Reduce stamina by 10 locally for immediate feedback
+      localPlayer.stamina = Math.max(0, (localPlayer.stamina ?? 0) - 10);
+      
+      // Clear temporary sprite when attacking
+      clearTemporarySprite();
+      // Clear fountain effect when attacking
+      fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+      isLocallyAttacking = true;
+      localAttackState = (localAttackState + 1) % 2;
+      
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
       }
       
+      localAttackTimeout = setTimeout(() => {
+        isLocallyAttacking = false;
+        // Don't reset movementAnimationState to 0 if we should stay in stand
+        if (!shouldStayInStand) {
+          movementAnimationState = 0;
+        }
+        localAttackTimeout = null;
+      }, 1000);
       
-      clients.delete(ws);
-      usernameToWs.delete(playerData.username);
-      broadcast({ type: 'player_left', id: playerData.id });
+      // Check for healing fountain in attack direction
+      let attackX = localPlayer.pos_x;
+      let attackY = localPlayer.pos_y;
+      
+      switch (playerDirection) {
+        case 'up': attackY -= 1; break;
+        case 'down': attackY += 1; break;
+        case 'left': attackX -= 1; break;
+        case 'right': attackX += 1; break;
+      }
+      
+      const targetItemId = getItemAtPosition(attackX, attackY);
+      if (targetItemId === 60) {
+        // Send fountain attack to server
+        send({ type: 'attack_fountain', direction: playerDirection, x: attackX, y: attackY });
+      } else {
+        // Normal attack
+        send({ type: 'attack', direction: playerDirection });
+      }
+
+      return;
+    }
+
+// Toggle inventory with 'i' key
+if (loggedIn && localPlayer && e.key === 'i') {
+  e.preventDefault();
+  inventoryVisible = !inventoryVisible;
+  return;
+}
+
+// Inventory swap with 'c' key
+if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
+  e.preventDefault();
+  send({
+    type: 'inventory_swap',
+    slotNumber: inventorySelectedSlot
+  });
+  return;
+}
+
+  // Inventory navigation when inventory is visible
+  if (loggedIn && localPlayer && inventoryVisible) {
+    const k = e.key.toLowerCase();
+    if (k === 'w' || k === 'arrowup') {
+      e.preventDefault();
+      moveInventorySelection('up');
+      return;
+    } else if (k === 's' || k === 'arrowdown') {
+      e.preventDefault();
+      moveInventorySelection('down');
+      return;
+    } else if (k === 'a' || k === 'arrowleft') {
+      e.preventDefault();
+      moveInventorySelection('left');
+      return;
+    } else if (k === 'd' || k === 'arrowright') {
+      e.preventDefault();
+      moveInventorySelection('right');
+      return;
+    }
+  }
+
+    // Movement (only if inventory is not visible)
+    if (loggedIn && localPlayer && !inventoryVisible) {
+      if ((localPlayer.stamina ?? 0) <= 0) return;
+
+      // Cancel pickup animation when moving
+        if (isLocallyPickingUp) {
+          isLocallyPickingUp = false;
+          shouldStayInStand = false; // Don't stay in stand if we're moving
+          if (localPickupTimeout) {
+            clearTimeout(localPickupTimeout);
+            localPickupTimeout = null;
+          }
+        }
+      
+      const currentTime = Date.now();
+      if (currentTime - lastMoveTime < 100) return;
+      
+      const k = e.key.toLowerCase();
+      let dx = 0, dy = 0, newDirection = null;
+      
+      if (k === 'arrowup' || k === 'w') { dy = -1; newDirection = 'up'; }
+      else if (k === 'arrowdown' || k === 's') { dy = 1; newDirection = 'down'; }
+      else if (k === 'arrowleft' || k === 'a') { dx = -1; newDirection = 'left'; }
+      else if (k === 'arrowright' || k === 'd') { dx = 1; newDirection = 'right'; }
+      
+      if (dx || dy) {
+        // Clear temporary sprite when moving
+        clearTemporarySprite();
+
+        // Clear fountain effect when moving
+      fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+
+        // Clear BRB state when moving
+        if (isBRB) {
+          isBRB = false;
+          send({ type: 'set_brb', brb: false });
+        }
+        const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
+        
+        // Check for teleportation items first
+        const targetItemId = getItemAtPosition(nx, ny);
+        if (targetItemId === 42 || targetItemId === 338) {
+          // Clear fountain effect when teleporting
+          fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+          
+          // Calculate chain teleportation
+          let currentX = nx;
+          let currentY = ny;
+          let teleportCount = 0;
+          const maxTeleports = 10;
+          
+          // Keep teleporting until we land on a non-teleport tile or hit max teleports
+          while (teleportCount < maxTeleports) {
+            const currentItemId = getItemAtPosition(currentX, currentY);
+            if (currentItemId !== 42 && currentItemId !== 338) {
+              break; // Not a teleport tile, stop here
+            }
+            
+            let nextX, nextY;
+            if (currentItemId === 42) {
+              // 2 left, 1 up from the teleport tile
+              nextX = currentX - 2;
+              nextY = currentY - 1;
+            } else if (currentItemId === 338) {
+              // 2 up, 1 left from the teleport tile  
+              nextX = currentX - 1;
+              nextY = currentY - 2;
+            }
+            
+            // Check if teleport destination is within bounds
+            if (nextX >= 0 && nextY >= 0 && nextX < mapSpec.width && nextY < mapSpec.height) {
+              currentX = nextX;
+              currentY = nextY;
+              teleportCount++;
+            } else {
+              // Can't teleport out of bounds, stop on current teleport tile
+              break;
+            }
+          }
+          
+          // Clear any ongoing animations
+          if (localAttackTimeout) {
+            clearTimeout(localAttackTimeout);
+            localAttackTimeout = null;
+          }
+          isLocallyAttacking = false;
+          
+          // Update direction and position directly to final teleport destination
+          playerDirection = newDirection;
+          movementAnimationState = 0;
+          
+          localPlayer.direction = playerDirection;
+          localPlayer.pos_x = currentX;
+          localPlayer.pos_y = currentY;
+          localPlayer.isAttacking = false;
+          localPlayer.isMoving = false;
+          
+          lastMoveTime = currentTime;
+          
+          // Send teleport move to server
+          send({ type: 'move', dx: dx, dy: dy, direction: playerDirection, teleport: true, finalX: currentX, finalY: currentY });
+          
+          // Reset stand flag when teleporting
+          shouldStayInStand = false;
+        } else if (canMoveTo(nx, ny, localPlayer.id)) {
+          // Normal movement logic
+          if (localAttackTimeout) {
+            clearTimeout(localAttackTimeout);
+            localAttackTimeout = null;
+          }
+          isLocallyAttacking = false;
+          
+          playerDirection = newDirection;
+          movementAnimationState = 1; // Always use walk_1 for consistency
+          
+          localPlayer.direction = playerDirection;
+          localPlayer.pos_x = nx;
+          localPlayer.pos_y = ny;
+          localPlayer.isAttacking = false;
+          localPlayer.isMoving = true;
+          
+          lastMoveTime = currentTime;
+          
+          send({ type: 'move', dx, dy, direction: playerDirection });
+        
+          // Reset stand flag when actually moving
+          shouldStayInStand = false;          
+        
+          setTimeout(() => {
+            if (localPlayer) {
+              localPlayer.isMoving = false;
+              movementAnimationState = 0;
+            }
+          }, 200);
+        } else {
+          playerDirection = newDirection;
+          movementAnimationState = 1; // Always use walk_1 for consistency
+          lastMoveTime = currentTime;
+        }
+      }
     }
   });
 
-  ws.on('error', (err) => console.warn('WS error', err));
+  canvas.addEventListener('mousedown', (e) => {
+    const r = canvas.getBoundingClientRect();
+    const mx = e.clientX - r.left, my = e.clientY - r.top;
+
+    if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
+    if (chatMode) return;
+
+    // Handle login GUI clicks
+    if (connected && showLoginGUI && !loggedIn) {
+      const u = GUI.username, p = GUI.password, lb = GUI.loginBtn, sb = GUI.signupBtn;
+      const uTop = FIELD_TOP(u.y), uBottom = uTop + u.h;
+      const pTop = FIELD_TOP(p.y), pBottom = pTop + p.h;
+
+      if (mx >= u.x && mx <= u.x + u.w && my >= uTop && my <= uBottom) { activeField = 'username'; return; }
+      else if (mx >= p.x && mx <= p.x + p.w && my >= pTop && my <= pBottom) { activeField = 'password'; return; }
+      else if (mx >= lb.x && mx <= lb.x + lb.w && my >= lb.y && my <= lb.y + lb.h) { send({ type: 'login', username: usernameStr, password: passwordStr }); return; }
+      else if (mx >= sb.x && mx <= sb.x + sb.w && my >= sb.y && my <= sb.y + sb.h) { send({ type: 'signup', username: usernameStr, password: passwordStr }); return; }
+      activeField = null;
+      return;
+    }
+
+    // Handle help area click (114,241 to 150,254)
+    if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 241 && my <= 254) {
+      showHelpControls();
+      return;
+    }
+    // Handle clear chat area click (114,211 to 150,224)
+    if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 211 && my <= 224) {
+      clearChatMessages();
+      return;
+    }
+    // Handle stats area click (74,196 to 110,209)
+    if (connected && loggedIn && mx >= 74 && mx <= 110 && my >= 196 && my <= 209) {
+      showPlayerStats();
+      return;
+    }
+    // Handle BRB area click (114,196 to 150,209)
+    if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 196 && my <= 209) {
+      toggleBRB();
+      return;
+    }
+
+    // Handle chat scroll up click (135,382 to 151,390)
+    if (connected && loggedIn && mx >= 135 && mx <= 151 && my >= 382 && my <= 390) {
+      const maxVisibleLines = 7;
+      const maxScrollUp = Math.max(0, messages.length - maxVisibleLines);
+      chatScrollOffset = Math.min(chatScrollOffset + 1, maxScrollUp);
+      return;
+    }
+    // Handle chat scroll down click (135,394 to 151,402)
+    if (connected && loggedIn && mx >= 135 && mx <= 151 && my >= 394 && my <= 402) {
+      chatScrollOffset = Math.max(chatScrollOffset - 1, 0);
+      return;
+    }
+
+    // Handle movement quadrant clicks (only when logged in and playing)
+    if (connected && loggedIn && localPlayer) {
+      // Check if stamina is sufficient for movement
+      if ((localPlayer.stamina ?? 0) <= 0) return;
+      
+      // Cancel pickup animation when moving
+      if (isLocallyPickingUp) {
+        isLocallyPickingUp = false;
+        shouldStayInStand = false; // Don't stay in stand if we're moving
+        if (localPickupTimeout) {
+          clearTimeout(localPickupTimeout);
+          localPickupTimeout = null;
+        }
+      }
+
+      // Prevent rapid clicks (same as keyboard movement)
+      const currentTime = Date.now();
+      if (currentTime - lastMoveTime < 100) return;
+
+      let dx = 0, dy = 0, newDirection = null;
+
+      // Game area: 232,20 to 621,276 (width=389, height=256)
+      // Center point: x=426.5, y=148
+      
+      // Movement quadrants within the game area:
+      // Top-left quadrant (left): 232,20 to 426,148
+      if (mx >= 232 && mx <= 426 && my >= 20 && my <= 148) {
+        dx = -1; newDirection = 'left';
+      }
+      // Top-right quadrant (up): 426,20 to 621,148
+      else if (mx >= 426 && mx <= 621 && my >= 20 && my <= 148) {
+        dy = -1; newDirection = 'up';
+      }
+      // Bottom-right quadrant (right): 426,148 to 621,276
+      else if (mx >= 426 && mx <= 621 && my >= 148 && my <= 276) {
+        dx = 1; newDirection = 'right';
+      }
+      // Bottom-left quadrant (down): 232,148 to 426,276
+      else if (mx >= 232 && mx <= 426 && my >= 148 && my <= 276) {
+        dy = 1; newDirection = 'down';
+      }
+
+      // Process movement if a valid quadrant was clicked
+      if (dx !== 0 || dy !== 0) {
+        const nx = localPlayer.pos_x + dx, ny = localPlayer.pos_y + dy;
+        
+        // Clear fountain effect when moving
+        fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+
+        // Use the same collision checking as keyboard movement
+        if (canMoveTo(nx, ny, localPlayer.id)) {
+          // Cancel attack animation on movement
+          if (localAttackTimeout) {
+            clearTimeout(localAttackTimeout);
+            localAttackTimeout = null;
+          }
+          isLocallyAttacking = false;
+          
+          // Update direction and animation state
+          playerDirection = newDirection;
+          movementAnimationState = (movementAnimationState + 1) % 3;
+          
+          // Update local player object immediately
+          localPlayer.direction = playerDirection;
+          localPlayer.pos_x = nx;
+          localPlayer.pos_y = ny;
+          localPlayer.isAttacking = false;
+          localPlayer.isMoving = true;
+          
+          // Update last move time
+          lastMoveTime = currentTime;
+          
+          // Send move command to server
+          send({ type: 'move', dx, dy, direction: playerDirection });
+          
+          // Reset stand flag when actually moving
+          shouldStayInStand = false;
+
+          // Reset to standing after movement
+          setTimeout(() => {
+            if (localPlayer) {
+              localPlayer.isMoving = false;
+              movementAnimationState = 0;
+            }
+          }, 200);
+        } else {
+          // Can't move but still update direction and animation for visual feedback
+          playerDirection = newDirection;
+          movementAnimationState = (movementAnimationState + 1) % 3;
+          lastMoveTime = currentTime;
+        }
+      }
+    }
+  });
+
+  // ---------- RENDER HELPERS ----------
+  function isoBase(x, y) { return { x: (x - y) * (TILE_W/2), y: (x + y) * (TILE_H/2) }; }
+  function isoScreen(x, y) {
+    const base = isoBase(x, y);
+    const camBase = localPlayer ? isoBase(localPlayer.pos_x, localPlayer.pos_y)
+                                : isoBase(Math.floor(mapSpec.width/2), Math.floor(mapSpec.height/2));
+    let screenX = PLAYER_SCREEN_X - TILE_W/2 + (base.x - camBase.x);
+    let screenY = PLAYER_SCREEN_Y - TILE_H/2 + (base.y - camBase.y);
+    screenX += WORLD_SHIFT_X + CENTER_LOC_ADJ_X + CENTER_LOC_FINE_X;
+    screenY += WORLD_SHIFT_Y + CENTER_LOC_ADJ_Y + CENTER_LOC_FINE_Y;
+    return { screenX, screenY };
+  }
+
+  function drawTile(sx, sy, t) {
+    if (t > 0 && floorTiles[t]) {
+      ctx.drawImage(floorTiles[t], sx + 1, sy, 62, 32);
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(sx, sy + TILE_H/2);
+      ctx.lineTo(sx + TILE_W/2, sy);
+      ctx.lineTo(sx + TILE_W, sy + TILE_H/2);
+      ctx.lineTo(sx + TILE_W/2, sy + TILE_H);
+      ctx.closePath();
+      ctx.fillStyle = '#8DBF63';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.stroke();
+    }
+  }
+
+  function drawItemAtTile(sx, sy, itemIndex) {
+  if (!window.getItemMeta || !window.itemsReady()) return;
+  const meta = window.getItemMeta(itemIndex);
+  if (!meta) return;
+
+  const { img, w, h, yOffset } = meta;
+  if (!img || !img.complete) return;
+
+  // Top-left alignment with yOffset subtracted
+  const drawX = sx;
+  const drawY = sy - (yOffset || 0);
+
+  ctx.drawImage(img, drawX, drawY);
+  }
+
+  function drawPlayer(p, isLocal) {
+    const { screenX, screenY } = isoScreen(p.pos_x, p.pos_y);
+    
+    const nameX = screenX + TILE_W / 2 - 2;
+    const nameY = screenY - 34;
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(p.username || `#${p.id}`, nameX, nameY);
+    ctx.fillStyle = 'white'; ctx.fillText(p.username || `#${p.id}`, nameX, nameY);
+    ctx.lineWidth = 1;
+
+    let animFrame;
+    
+   // Draw BRB item (item 181) behind player if in BRB state
+    const playerIsBRB = isLocal ? isBRB : (p.isBRB || false);
+    if (playerIsBRB && window.itemsReady()) {
+      drawItemAtTile(screenX, screenY-32, 181);
+    }
+    
+    // Force sit animation if in BRB state
+    if (playerIsBRB) {
+      animFrame = 21; // 'sit' animation
+    } else if (isLocal) {
+      if (isLocallyPickingUp) {
+        animFrame = 21; // 'sit' animation
+      } else if (isLocallyAttacking) {
+        const attackSeq = ATTACK_SEQUENCES[playerDirection] || ATTACK_SEQUENCES.down;
+        animFrame = attackSeq[localAttackState];
+      } else {
+        // Check if we should stay in stand animation (after pickup and not moving)
+        if (shouldStayInStand && !localPlayer.isMoving && movementAnimationState === 0) {
+          animFrame = 20; // Stay in 'stand' animation
+        } else if (movementAnimationState === 0) {
+          animFrame = DIRECTION_IDLE[playerDirection] || DIRECTION_IDLE.down;
+        } else {
+          const walkIndex = movementAnimationState === 1 ? 0 : 2;
+          const directionOffsets = { down: 0, right: 5, left: 10, up: 15 };
+          animFrame = (directionOffsets[playerDirection] || 0) + walkIndex;
+        }
+      }
+    } else {
+      animFrame = getCurrentAnimationFrame(p, false);
+    }
+    
+    // Check for temporary sprite first
+    if (p.temporarySprite && p.temporarySprite > 0 && window.itemsReady()) {
+      const meta = window.getItemMeta(p.temporarySprite);
+      if (meta && meta.img && meta.img.complete) {
+        const { img, yOffset } = meta;
+        const drawX = screenX;
+        const drawY = screenY - (yOffset || 0);
+        ctx.drawImage(img, drawX, drawY);
+      }
+    } else if (playerSpritesReady && playerSprites[animFrame] && playerSprites[animFrame].complete) {
+      const sprite = playerSprites[animFrame];
+      const meta = playerSpriteMeta[animFrame];
+      
+      if (sprite && meta) {
+        let spriteX = (screenX + TILE_W) - meta.w - 7;
+        let spriteY = (screenY + TILE_H) - meta.h - 12;
+        
+        if (meta.w < 62) {
+          const offsetX = meta.w - 62;
+          spriteX += offsetX;
+        }
+        
+        if (meta.h < 32) {
+          const offsetY = meta.h - 32;
+          spriteY += offsetY;
+        }
+        
+        ctx.drawImage(sprite, spriteX, spriteY, meta.w, meta.h);
+      }
+    } else {
+      ctx.fillStyle = isLocal ? '#1E90FF' : '#FF6347';
+      ctx.beginPath();
+      ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 12, 14, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  function drawBarsAndStats() {
+    if (!loggedIn || !localPlayer) return;
+    const topY = 19, bottomY = 135, span = bottomY - topY;
+
+    const sPct = Math.max(0, Math.min(1, (localPlayer.stamina ?? 0) / Math.max(1, (localPlayer.max_stamina ?? 1))));
+    const sFillY = topY + (1 - sPct) * span;
+    ctx.fillStyle = '#00ff00'; ctx.fillRect(187, sFillY, 13, bottomY - sFillY);
+
+    const lPct = Math.max(0, Math.min(1, (localPlayer.life ?? 0) / Math.max(1, (localPlayer.max_life ?? 1))));
+    const lFillY = topY + (1 - lPct) * span;
+    ctx.fillStyle = '#ff0000'; ctx.fillRect(211, lFillY, 13, bottomY - lFillY);
+
+    const mx = 177, my = 247;
+    const mCur = localPlayer.magic ?? 0, mMax = localPlayer.max_magic ?? 0;
+    ctx.font = '14px monospace'; ctx.textAlign = 'left';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(`${mCur}/${mMax}`, mx, my);
+    ctx.fillStyle = 'yellow'; ctx.fillText(`${mCur}/${mMax}`, mx, my);
+    ctx.lineWidth = 1;
+
+    const gold = localPlayer.gold ?? 0;
+    ctx.font = '14px sans-serif';
+    ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(String(gold), 177, 273);
+    ctx.fillStyle = 'white'; ctx.fillText(String(gold), 177, 273);
+    ctx.lineWidth = 1;
+  }
+
+  function drawChatHistory() {
+    const { x1,y1,x2,y2,pad } = CHAT;
+    const w = x2 - x1;
+    ctx.font = '12px monospace'; ctx.fillStyle = '#000'; ctx.textAlign = 'left';
+    const lineH = 16;
+    let y = y2 - pad;
+    
+    // Calculate visible messages based on scroll offset
+    const maxVisibleLines = 7;
+    const startIndex = Math.max(0, messages.length - maxVisibleLines - chatScrollOffset);
+    const endIndex = Math.max(0, messages.length - chatScrollOffset);
+    
+    for (let i = endIndex - 1; i >= startIndex; i--) {
+      let line = messages[i];
+      while (ctx.measureText(line).width > w - pad*2 && line.length > 1) line = line.slice(0, -1);
+      ctx.fillText(line, x1 + pad, y);
+      y -= lineH;
+      if (y < y1 + pad) break;
+    }
+    
+    // Draw scroll indicator if there are more messages than can be displayed
+    const totalLines = messages.length;
+    if (totalLines > maxVisibleLines) {
+      const scrollBarX = x2 - 8;
+      const scrollBarY = y1 + 5;
+      const scrollBarH = (y2 - y1) - 10;
+      
+      // Draw scroll track
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(scrollBarX, scrollBarY, 6, scrollBarH);
+      
+      // Calculate scroll thumb position and size
+      const thumbHeight = Math.max(10, (maxVisibleLines / totalLines) * scrollBarH);
+      const maxScrollOffset = totalLines - maxVisibleLines;
+      const thumbY = scrollBarY + ((maxScrollOffset - chatScrollOffset) / maxScrollOffset) * (scrollBarH - thumbHeight);
+      
+      // Draw scroll thumb
+      ctx.fillStyle = '#999';
+      ctx.fillRect(scrollBarX + 1, thumbY, 4, thumbHeight);
+    }
+  }
+  
+  function drawChatInput() {
+    if (!chatMode) return;
+    const { x1, y1, x2, y2, pad, extraY } = CHAT_INPUT;
+    const w = x2 - x1;
+    ctx.font = '12px monospace'; ctx.fillStyle = '#000'; ctx.textAlign = 'left';
+    const words = typingBuffer.split(/(\s+)/);
+    let line = '', y = y1 + pad + extraY;
+    for (let i = 0; i < words.length; i++) {
+      const test = line + words[i];
+      if (ctx.measureText(test).width > w - pad*2) {
+        ctx.fillText(line, x1 + pad, y);
+        y += 16; line = words[i].trimStart();
+        if (y > y2 - pad) break;
+      } else line = test;
+    }
+    if (y <= y2 - pad && line.length) ctx.fillText(line, x1 + pad, y);
+  }
+
+  function drawItemOnBorder(itemId, x, y) {
+  if (!window.getItemMeta || !window.itemsReady()) return;
+  const meta = window.getItemMeta(itemId);
+  if (!meta || !meta.img || !meta.img.complete) return;
+
+  const { img, yOffset } = meta;
+  
+  // Top-left alignment with yOffset subtracted
+  const drawX = x;
+  const drawY = y - (yOffset || 0);
+
+  ctx.drawImage(img, drawX, drawY);
+}
+
+function drawItemInInventorySlot(itemId, slotX, slotY, slotW, slotH) {
+  if (!window.getItemMeta || !window.itemsReady() || !itemId || itemId === 0) return;
+  const meta = window.getItemMeta(itemId);
+  if (!meta || !meta.img || !meta.img.complete) return;
+
+  const { img, yOffset } = meta;
+  
+  // Top-left alignment with yOffset subtracted, plus additional 6 pixel offset
+  const drawX = slotX;
+  const drawY = slotY - (yOffset || 0) + 6;
+  
+  ctx.drawImage(img, drawX, drawY);
+}
+
+function drawInventory() {
+  if (!inventoryVisible) return;
+  
+  // Draw inventory background
+  ctx.fillStyle = 'rgba(0, 133, 182, 0.5)';
+  ctx.fillRect(INVENTORY.x, INVENTORY.y, INVENTORY.width, INVENTORY.height);
+  
+  // Draw inventory border
+  ctx.strokeStyle = INVENTORY.borderColor;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(INVENTORY.x, INVENTORY.y, INVENTORY.width, INVENTORY.height);
+  
+  // Draw inventory slots and items
+  for (let slot = 1; slot <= 16; slot++) {
+    const slotPos = getInventorySlotPosition(slot);
+    
+    // Draw item in slot if it exists
+    const itemId = playerInventory[slot] || 0;
+    if (itemId > 0) {
+      drawItemInInventorySlot(itemId, slotPos.x, slotPos.y, INVENTORY.slotWidth, INVENTORY.slotHeight);
+    }
+    
+    // Draw selection circle if this slot is selected
+    if (slot === inventorySelectedSlot) {
+      const centerX = slotPos.x + INVENTORY.slotWidth / 2;
+      const centerY = slotPos.y + INVENTORY.slotHeight / 2;
+      const radius = INVENTORY.selectionCircleDiameter / 2;
+      
+      ctx.strokeStyle = INVENTORY.selectionCircleColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+  }
+}
+
+  // ---------- SCENES ----------
+  function drawConnecting() {
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    if (!showLoginGUI) {
+      if (imgTitle && imgTitle.complete) ctx.drawImage(imgTitle, 0, 0, CANVAS_W, CANVAS_H);
+      else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
+      ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
+      if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
+      else if (connected) ctx.fillText('Connecting to server...', 47, 347);
+      else ctx.fillText('Press any key to reconnect.', 47, 347);
+    } else {
+      ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+      ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
+      if (!connected) ctx.fillText('Connecting to server...', 47, 347);
+    }
+  }
+
+  function drawLogin() {
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
+    else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
+
+    // Draw stand sprite at position 13,198 after login border
+    if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
+      ctx.drawImage(playerSprites[20], 13, 198);
+    }
+
+    if (activeField === null) {
+      activeField = 'username';
+    }
+
+    ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('Username:', GUI.username.x - 70, GUI.username.y + 2);
+    ctx.fillText('Password:', GUI.password.x - 70, GUI.password.y + 2);
+
+    const uTop = FIELD_TOP(GUI.username.y);
+    ctx.fillStyle = (activeField === 'username') ? 'rgb(153,213,255)' : '#fff';
+    ctx.fillRect(GUI.username.x, uTop, GUI.username.w, GUI.username.h);
+    ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.username.x, uTop, GUI.username.w, GUI.username.h);
+    ctx.fillStyle = '#000'; ctx.font = '12px sans-serif';
+    ctx.fillText(usernameStr || '', GUI.username.x + 4, GUI.username.y + 2);
+
+    const pTop = FIELD_TOP(GUI.password.y);
+    ctx.fillStyle = (activeField === 'password') ? 'rgb(153,213,255)' : '#fff';
+    ctx.fillRect(GUI.password.x, pTop, GUI.password.w, GUI.password.h);
+    ctx.strokeStyle = '#000'; ctx.strokeRect(GUI.password.x, pTop, GUI.password.w, GUI.password.h);
+    ctx.fillStyle = '#000';
+    ctx.fillText('*'.repeat(passwordStr.length), GUI.password.x + 4, GUI.password.y + 2);
+
+    ctx.fillStyle = '#ddd'; ctx.strokeStyle = '#000';
+    ctx.fillRect(GUI.loginBtn.x, GUI.loginBtn.y, GUI.loginBtn.w, GUI.loginBtn.h);
+    ctx.strokeRect(GUI.loginBtn.x, GUI.loginBtn.y, GUI.loginBtn.w, GUI.loginBtn.h);
+    ctx.fillRect(GUI.signupBtn.x, GUI.signupBtn.y, GUI.signupBtn.w, GUI.signupBtn.h);
+    ctx.strokeRect(GUI.signupBtn.x, GUI.signupBtn.y, GUI.signupBtn.w, GUI.signupBtn.h);
+    ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.font = '13px sans-serif';
+    ctx.fillText('Login', GUI.loginBtn.x + GUI.loginBtn.w/2, GUI.loginBtn.y + GUI.loginBtn.h - 6);
+    ctx.fillText('Create Account', GUI.signupBtn.x + GUI.signupBtn.w/2, GUI.signupBtn.y + GUI.signupBtn.h - 6);
+
+    drawChatHistory();
+  }
+
+  function drawGame() {
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    ctx.fillStyle = '#0a0a0a'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
+    if (!localPlayer) return;
+
+    if (tilesReady && mapReady) {
+      for (let y = 0; y < mapSpec.height; y++) {
+        for (let x = 0; x < mapSpec.width; x++) {
+          const t = (mapSpec.tiles && mapSpec.tiles[y] && typeof mapSpec.tiles[y][x] !== 'undefined') ? mapSpec.tiles[y][x] : 0;
+          const { screenX, screenY } = isoScreen(x, y);
+          drawTile(screenX, screenY, t);
+        }
+      }
+    }
+
+    const playersByTile = {};
+    if (localPlayer) {
+      const k = `${localPlayer.pos_x},${localPlayer.pos_y}`;
+      (playersByTile[k] ||= []).push({ ...localPlayer, __isLocal: true });
+    }
+    for (const id in otherPlayers) {
+      const p = otherPlayers[id];
+      const k = `${p.pos_x},${p.pos_y}`;
+      (playersByTile[k] ||= []).push(p);
+    }
+
+    if (tilesReady && mapReady && window.itemsReady()) {
+      for (let y = 0; y < mapSpec.height; y++) {
+        for (let x = 0; x < mapSpec.width; x++) {
+          const { screenX, screenY } = isoScreen(x, y);
+
+          const effectiveItemId = getItemAtPosition(x, y);
+          
+          if (effectiveItemId > 0) {
+            drawItemAtTile(screenX, screenY, effectiveItemId);
+          }
+
+      // Draw fountain healing effects on players
+      if (window.itemsReady()) {
+        const currentTime = Date.now();
+        fountainEffects = fountainEffects.filter(effect => {
+          const elapsed = currentTime - effect.startTime;
+          if (elapsed < 1000) { // Show for 1 second
+            // Find the player with this ID
+            let targetPlayer = null;
+            if (localPlayer && localPlayer.id === effect.playerId) {
+              targetPlayer = localPlayer;
+            } else if (otherPlayers[effect.playerId]) {
+              targetPlayer = otherPlayers[effect.playerId];
+            }
+            
+            if (targetPlayer) {
+              const { screenX, screenY } = isoScreen(targetPlayer.pos_x, targetPlayer.pos_y);
+              const meta = window.getItemMeta(309);
+              if (meta && meta.img && meta.img.complete) {
+                const { img, yOffset } = meta;
+                const drawX = screenX;
+                const drawY = screenY - (yOffset || 0);
+                ctx.drawImage(img, drawX, drawY);
+              }
+            }
+            return true; // Keep effect
+          }
+          return false; // Remove effect
+        });
+      }
+
+          const k = `${x},${y}`;
+          const arr = playersByTile[k];
+          if (arr && arr.length) {
+            for (const p of arr) drawPlayer(p, !!p.__isLocal);
+          }
+        }
+      }
+    }
+
+    if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
+    else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
+
+    drawBarsAndStats();
+    drawChatHistory();
+    drawChatInput();
+
+    if (localPlayer && itemDetailsReady) {
+      const playerItemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
+      const playerItemDetails = getItemDetails(playerItemId);
+      
+      if (playerItemDetails && isItemPickupable(playerItemDetails)) {
+        drawItemOnBorder(playerItemId, 57, 431);
+      }
+
+      if (localPlayer.armor && localPlayer.armor > 0) {
+        drawItemOnBorder(localPlayer.armor, 56, 341);
+      }
+      
+      if (localPlayer.weapon && localPlayer.weapon > 0) {
+        drawItemOnBorder(localPlayer.weapon, 38, 296);
+      }
+      
+      if (localPlayer.hands && localPlayer.hands > 0) {
+        drawItemOnBorder(localPlayer.hands, 73, 296);
+      }
+    }
+
+    // Draw inventory last (on top of everything)
+    drawInventory();
+  }
+
+  // ---------- LOOP ----------
+  function loop() {
+    if (!connected) drawConnecting();
+    else if (connected && connectionPaused) drawConnecting();
+    else if (connected && !showLoginGUI) drawConnecting();
+    else if (connected && showLoginGUI && !loggedIn) drawLogin();
+    else if (connected && loggedIn) drawGame();
+    requestAnimationFrame(loop);
+  }
+  loop();
+
+  canvas.addEventListener('mousedown', () => {
+    if (!connected) { connectToServer(); return; }
+    if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; }
+  });
+
+  // Helper functions
+  function getItemDetails(itemId) {
+    if (!itemDetailsReady || !itemDetails || itemId < 1 || itemId > itemDetails.length) {
+      return null;
+    }
+    return itemDetails[itemId - 1];
+  }
+
+  function getItemAtPosition(x, y) {
+    const mapItem = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
+      ? mapSpec.items[y][x] : 0;
+    const placedItem = mapItems[`${x},${y}`];
+    
+    if (placedItem !== undefined) {
+      if (placedItem === -1) {
+        return 0;
+      }
+      if (placedItem === 0) {
+        return 0;
+      }
+      return placedItem;
+    }
+    
+    return mapItem;
+  }
+
+  function isItemPickupable(itemDetails) {
+    if (!itemDetails) return false;
+    const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
+    return pickupableTypes.includes(itemDetails.type);
+  }
+
+  function showHelpControls() {
+    pushChat("[*] DragonSpires - Controls [*]");
+    pushChat("- WASD or Arrow Keys to Move");
+    pushChat("- TAB key to Attack");
+    pushChat("- 'G' key to pick-up / drop an item");
+    pushChat("- 'T' key to equip a weapon in your hand, 'Y' for armor");
+    pushChat("- 'I' key to open / close your inventory");
+    pushChat("- 'C' key to swap an item from your inventory to your hand");
+  }
+
+  function clearChatMessages() {
+    messages = [];
+  }
+
+  function showPlayerStats() {
+    if (!localPlayer) return;
+    
+    pushChat("[*] Player Stats [*]");
+    
+    // Get weapon stats
+    let weaponStats = "None";
+    if (localPlayer.weapon && localPlayer.weapon > 0) {
+      const weaponDetails = getItemDetails(localPlayer.weapon);
+      if (weaponDetails) {
+        weaponStats = `${weaponDetails.statMin}-${weaponDetails.statMax} damage`;
+      }
+    }
+    
+    // Get armor stats
+    let armorStats = "None";
+    if (localPlayer.armor && localPlayer.armor > 0) {
+      const armorDetails = getItemDetails(localPlayer.armor);
+      if (armorDetails) {
+        armorStats = `${armorDetails.statMin}-${armorDetails.statMax} defense`;
+      }
+    }
+    
+    pushChat(`Weapon: ${weaponStats}`);
+    pushChat(`Armor: ${armorStats}`);
+    pushChat(`Life: ${localPlayer.life || 0} / ${localPlayer.max_life || 0}`);
+    pushChat(`Stamina: ${localPlayer.stamina || 0} / ${localPlayer.max_stamina || 0}`);
+    pushChat(`Magic: ${localPlayer.magic || 0} / ${localPlayer.max_magic || 0}`);
+  }
+
+  function clearTemporarySprite() {
+    if (temporarySprite !== 0) {
+      temporarySprite = 0;
+      if (localPlayer) {
+        localPlayer.temporarySprite = 0;
+        send({ type: 'temporary_sprite_update', temporarySprite: 0 });
+      }
+    }
+  }
+
+  function toggleBRB() {
+    // Clear temporary sprite when toggling BRB
+    clearTemporarySprite();
+
+    // Clear fountain effect when toggling BRB
+    fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
+
+    isBRB = !isBRB;
+    if (isBRB) {
+      // Clear any ongoing animations when going BRB
+      if (localAttackTimeout) {
+        clearTimeout(localAttackTimeout);
+        localAttackTimeout = null;
+      }
+      if (localPickupTimeout) {
+        clearTimeout(localPickupTimeout);
+        localPickupTimeout = null;
+      }
+      isLocallyAttacking = false;
+      isLocallyPickingUp = false;
+      shouldStayInStand = false;
+      
+      // Send BRB state to server
+      send({ type: 'set_brb', brb: true });
+    } else {
+      // Send un-BRB state to server
+      send({ type: 'set_brb', brb: false });
+    }
+  }
+
+  window.connectToServer = connectToServer;
+
+  // Load floor collision data - fix path issue
+  const baseUrl = location.hostname.includes('localhost') ? '' : '';
+  
+  fetch(`${baseUrl}/assets/floorcollision.json`)
+    .then(r => r.json())
+    .then(data => {
+      if (data && Array.isArray(data.floor)) {
+        floorCollision = data.floor;
+        floorCollisionReady = true;
+        console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
+      }
+    })
+    .catch(err => {
+      // Try alternative paths
+      fetch('/client/assets/floorcollision.json')
+        .then(r => r.json())
+        .then(data => {
+          if (data && Array.isArray(data.floor)) {
+            floorCollision = data.floor;
+            floorCollisionReady = true;
+            console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
+          }
+        })
+        .catch(err2 => {
+          // Try without any path prefix
+          fetch('floorcollision.json')
+            .then(r => r.json())
+            .then(data => {
+              if (data && Array.isArray(data.floor)) {
+                floorCollision = data.floor;
+                floorCollisionReady = true;
+                console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
+              }
+            })
+            .catch(err3 => {
+              floorCollisionReady = true;
+              console.warn('Failed to load floor collision data from all paths');
+            });
+        });
+    });
+
+  // Load item details - fix path issue
+  fetch(`${baseUrl}/assets/itemdetails.json`)
+    .then(r => r.json())
+    .then(data => {
+      if (data && Array.isArray(data.items)) {
+        itemDetails = data.items.map((item, index) => ({
+          id: index + 1,
+          name: item[0],
+          collision: item[1] === "true",
+          type: item[2],
+          statMin: parseInt(item[3]) || 0,
+          statMax: parseInt(item[4]) || 0,
+          description: item[5]
+        }));
+        itemDetailsReady = true;
+        console.log(`Client loaded ${itemDetails.length} item details`);
+      }
+    })
+    .catch(err => {
+      // Try alternative paths
+      fetch('/client/assets/itemdetails.json')
+        .then(r => r.json())
+        .then(data => {
+          if (data && Array.isArray(data.items)) {
+            itemDetails = data.items.map((item, index) => ({
+              id: index + 1,
+              name: item[0],
+              collision: item[1] === "true",
+              type: item[2],
+              statMin: parseInt(item[3]) || 0,
+              statMax: parseInt(item[4]) || 0,
+              description: item[5]
+            }));
+            itemDetailsReady = true;
+            console.log(`Client loaded ${itemDetails.length} item details`);
+          }
+        })
+        .catch(err2 => {
+          // Try without any path prefix
+          fetch('itemdetails.json')
+            .then(r => r.json())
+            .then(data => {
+              if (data && Array.isArray(data.items)) {
+                itemDetails = data.items.map((item, index) => ({
+                  id: index + 1,
+                  name: item[0],
+                  collision: item[1] === "true",
+                  type: item[2],
+                  statMin: parseInt(item[3]) || 0,
+                  statMax: parseInt(item[4]) || 0,
+                  description: item[5]
+                }));
+                itemDetailsReady = true;
+                console.log(`Client loaded ${itemDetails.length} item details`);
+              }
+            })
+            .catch(err3 => {
+              itemDetailsReady = true;
+              console.warn('Failed to load item details from all paths');
+            });
+        });
+    });
 });
-
-// ---------- Regeneration Loops ----------
-function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
-
-// Every 3s: stamina +10% max
-setInterval(async () => {
-  const updates = [];
-  for (const [ws, p] of clients.entries()) {
-    const inc = Math.floor((p.max_stamina ?? 0) * 0.10);
-    const next = clamp((p.stamina ?? 0) + inc, 0, p.max_stamina ?? 0);
-    if (next !== p.stamina) {
-      p.stamina = next;
-      updates.push({ id: p.id, stamina: p.stamina });
-      send(ws, { type: 'stats_update', id: p.id, stamina: p.stamina });
-    }
-  }
-  for (const u of updates) {
-    try { await updateStatsInDb(u.id, { stamina: u.stamina }); } catch(e){ console.error('stam regen db', e); }
-  }
-}, 3000);
-
-// Every 5s: life +5% max (min +1)
-setInterval(async () => {
-  const updates = [];
-  for (const [ws, p] of clients.entries()) {
-    const inc = Math.max(1, Math.floor((p.max_life ?? 0) * 0.05));
-    const next = clamp((p.life ?? 0) + inc, 0, p.max_life ?? 0);
-    if (next !== p.life) {
-      p.life = next;
-      updates.push({ id: p.id, life: p.life });
-      send(ws, { type: 'stats_update', id: p.id, life: p.life });
-    }
-  }
-  for (const u of updates) {
-    try { await updateStatsInDb(u.id, { life: u.life }); } catch(e){ console.error('life regen db', e); }
-  }
-}, 5000);
-
-// Every 30s: magic +5 flat
-setInterval(async () => {
-  const updates = [];
-  for (const [ws, p] of clients.entries()) {
-    const next = clamp((p.magic ?? 0) + 5, 0, p.max_magic ?? 0);
-    if (next !== p.magic) {
-      p.magic = next;
-      updates.push({ id: p.id, magic: p.magic });
-      send(ws, { type: 'stats_update', id: p.id, magic: p.magic });
-    }
-  }
-  for (const u of updates) {
-    try { await updateStatsInDb(u.id, { magic: u.magic }); } catch(e){ console.error('magic regen db', e); }
-  }
-}, 30000);
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
