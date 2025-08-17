@@ -1370,12 +1370,7 @@ if (shouldTeleport) {
   
   lastMoveTime = currentTime;
   
-  // Send teleport move to server
-  send({ type: 'move', dx: dx, dy: dy, direction: playerDirection, teleport: true, finalX: currentX, finalY: currentY });
-  
-  // Reset stand flag when teleporting
-  shouldStayInStand = false;
-}         
+  // Send telepo
         
           setTimeout(() => {
             if (localPlayer) {
