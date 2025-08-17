@@ -723,7 +723,8 @@ async function initializeDatabase() {
       ADD COLUMN IF NOT EXISTS animation_frame INTEGER DEFAULT 1,
       ADD COLUMN IF NOT EXISTS movement_sequence_index INTEGER DEFAULT 0,
       ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'player',
-      ADD COLUMN IF NOT EXISTS is_picking_up BOOLEAN DEFAULT false
+      ADD COLUMN IF NOT EXISTS is_picking_up BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS is_brb BOOLEAN DEFAULT false
     `);
 
     // Create map_items table if it doesn't exist
@@ -807,7 +808,8 @@ wss.on('connection', (ws) => {
           isAttacking: found.is_attacking ?? false,
           animationFrame: found.animation_frame ?? DIRECTION_IDLE.down,
           movementSequenceIndex: found.movement_sequence_index ?? 0,
-          role: found.role ?? 'player'
+          role: found.role ?? 'player',
+          isBRB: false
         };
 
         clients.set(ws, playerData);
@@ -816,9 +818,11 @@ wss.on('connection', (ws) => {
         // Load player inventory
         const inventory = await loadPlayerInventory(playerData.id);
 
-        const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
+        const others = Array.from(clients.values())
+          .filter(p => p.id !== playerData.id)
+          .map(p => ({ ...p, isBRB: p.isBRB || false }));
         send(ws, { type: 'login_success', player: playerData, players: others, items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: playerData });
+        broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false } });
       } catch (e) {
         console.error('Login error', e);
         send(ws, { type: 'login_error', message: 'Server error' });
@@ -859,7 +863,8 @@ wss.on('connection', (ws) => {
           isAttacking: created.is_attacking ?? false,
           animationFrame: created.animation_frame ?? DIRECTION_IDLE.down,
           movementSequenceIndex: created.movement_sequence_index ?? 0,
-          role: created.role ?? 'player'
+          role: created.role ?? 'player',
+          isBRB: false
         };
 
         clients.set(ws, playerData);
@@ -879,6 +884,25 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'move') {
       if (!playerData) return;
+    
+      // Clear BRB state when player moves
+      if (playerData.isBRB) {
+        playerData.isBRB = false;
+        
+        const brbUpdate = {
+          type: 'player_brb_update',
+          id: playerData.id,
+          brb: false
+        };
+        
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify(brbUpdate));
+            }
+          }
+        }
+      }
     
       // Cancel any pickup animation when moving
       if (playerData.isPickingUp) {
@@ -978,6 +1002,25 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'attack') {
       if (!playerData) return;
+      
+      // Clear BRB state when player attacks
+      if (playerData.isBRB) {
+        playerData.isBRB = false;
+        
+        const brbUpdate = {
+          type: 'player_brb_update',
+          id: playerData.id,
+          brb: false
+        };
+        
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify(brbUpdate));
+            }
+          }
+        }
+      }
       
       console.log(`Attack attempt by ${playerData.username}: stamina ${playerData.stamina ?? 0}/10`);
       
@@ -1257,6 +1300,28 @@ wss.on('connection', (ws) => {
       });
     }
 
+    else if (msg.type === 'set_brb') {
+      if (!playerData || typeof msg.brb !== 'boolean') return;
+      
+      playerData.isBRB = msg.brb;
+      
+      // Broadcast BRB state update to all players on the same map
+      const brbUpdate = {
+        type: 'player_brb_update',
+        id: playerData.id,
+        brb: playerData.isBRB
+      };
+      
+      // Send to all players on the same map
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+          if (otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify(brbUpdate));
+          }
+        }
+      }
+    }
+    
     else if (msg.type === 'chat') {
       if (!playerData || typeof msg.text !== 'string') return;
       const t = msg.text.trim();
