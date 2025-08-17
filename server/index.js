@@ -324,9 +324,9 @@ async function loadPlayer(username) {
 async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
   const r = await pool.query(
-    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, is_picking_up, animation_frame, movement_sequence_index)
-     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [username, hashed, 'down', false, false, false, DIRECTION_IDLE.down, 0]
+    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, step, is_moving, is_attacking, is_picking_up, animation_frame, movement_sequence_index)
+     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+    [username, hashed, 'down', 2, false, false, false, DIRECTION_IDLE.down, 0]
   );
   
   // Initialize empty inventory for new player
@@ -344,6 +344,13 @@ async function updateAnimationState(playerId, direction, isMoving, isAttacking, 
   await pool.query(
     'UPDATE players SET direction=$1, is_moving=$2, is_attacking=$3, is_picking_up=$4, animation_frame=$5, movement_sequence_index=$6 WHERE id=$7',
     [direction, isMoving, isAttacking, isPickingUp, animationFrame, movementSequenceIndex, playerId]
+  );
+}
+
+async function updateDirectionAndStep(playerId, direction, step) {
+  await pool.query(
+    'UPDATE players SET direction=$1, step=$2 WHERE id=$3',
+    [direction, step, playerId]
   );
 }
 
@@ -783,6 +790,7 @@ async function initializeDatabase() {
     await pool.query(`
       ALTER TABLE players 
       ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'down',
+      ADD COLUMN IF NOT EXISTS step INTEGER DEFAULT 2,
       ADD COLUMN IF NOT EXISTS is_moving BOOLEAN DEFAULT false,
       ADD COLUMN IF NOT EXISTS is_attacking BOOLEAN DEFAULT false,
       ADD COLUMN IF NOT EXISTS animation_frame INTEGER DEFAULT 1,
