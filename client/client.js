@@ -1386,7 +1386,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
 
     // Handle chat scroll up click (135,382 to 151,390)
     if (connected && loggedIn && mx >= 135 && mx <= 151 && my >= 382 && my <= 390) {
-      const maxVisibleLines = Math.floor((CHAT.y2 - CHAT.y1 - CHAT.pad * 2) / 16);
+      const maxVisibleLines = 7;
       const maxScrollUp = Math.max(0, messages.length - maxVisibleLines);
       chatScrollOffset = Math.min(chatScrollOffset + 1, maxScrollUp);
       return;
@@ -1648,11 +1648,11 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
     const { x1,y1,x2,y2,pad } = CHAT;
     const w = x2 - x1;
     ctx.font = '12px monospace'; ctx.fillStyle = '#000'; ctx.textAlign = 'left';
-    const lineH = 14;
+    const lineH = 16;
     let y = y2 - pad;
     
     // Calculate visible messages based on scroll offset
-    const maxVisibleLines = Math.floor((y2 - y1 - pad * 2) / lineH);
+    const maxVisibleLines = 7;
     const startIndex = Math.max(0, messages.length - maxVisibleLines - chatScrollOffset);
     const endIndex = Math.max(0, messages.length - chatScrollOffset);
     
