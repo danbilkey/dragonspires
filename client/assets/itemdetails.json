@@ -282,6 +282,9 @@
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
+  ["Orange Shelled Snail","false","useable",0,0,"A strange, orange-shelled snail."],
+  ["","false","nothing",0,0,""],
+  ["Blue Shelled Snail","false","useable",0,0,"You see a blue shelled snail.. strange."],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
@@ -319,10 +322,7 @@
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
-  ["","false","nothing",0,0,""],
-  ["","false","nothing",0,0,""],
-  ["","false","nothing",0,0,""],
-  ["","false","nothing",0,0,""],
+  ["Snail Mastah","true","nothing",0,0,"The snail mastah!"],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
@@ -365,3 +365,4 @@
   ]
 
 }
+
