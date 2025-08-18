@@ -791,7 +791,8 @@ function stopPickupAnimation(playerData, ws) {
           step: playerData.step,
           isMoving: playerData.isMoving,
           isAttacking: playerData.isAttacking,
-          isPickingUp: false
+          isPickingUp: false,
+          animationFrame: 20 // 'stand' animation
         }));
       }
     }
