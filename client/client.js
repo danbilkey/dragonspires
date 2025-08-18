@@ -86,6 +86,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // Movement animation sequence: walk_1 -> walk_2 -> idle
   const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
 
+  // Direction and step to animation frame mapping
+  function getAnimationFrameFromDirectionAndStep(direction, step) {
+    const directionMappings = {
+      down: { 1: 0, 2: 1, 3: 2 },     // down_walk_1, down, down_walk_2
+      right: { 1: 5, 2: 6, 3: 7 },    // right_walk_1, right, right_walk_2
+      left: { 1: 10, 2: 11, 3: 12 },  // left_walk_1, left, left_walk_2
+      up: { 1: 15, 2: 16, 3: 17 }     // up_walk_1, up, up_walk_2
+    };
+    
+    return directionMappings[direction]?.[step] || directionMappings.down[2]; // Default to "down" idle
+  }
+
   // ---------- STATE ----------
   let ws = null;
   let connected = false;
@@ -124,7 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // NEW: Simplified direction and animation state system
   let playerDirection = 'down'; // Current facing direction
-  let movementAnimationState = 0; // 0=standing, 1=walk_1, 2=walk_2
+  let playerStep = 2; // Current step in movement sequence (1, 2, 3)
   let isLocallyAttacking = false; // Local attack state
   let localAttackState = 0; // 0 or 1 for attack_1 or attack_2
   let lastMoveTime = 0; // Prevent rapid movement through collision objects
@@ -491,23 +503,25 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---------- ANIMATION HELPERS ----------
   function getCurrentAnimationFrame(player, isLocal = false) {
   if (player.isPickingUp) {
-    return player.animationFrame || 21; // 'sit' animation
+    return 21; // 'sit' animation
   }
   
   if (player.isAttacking) {
     return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
   }
 
-  // If player is in stand animation from server, respect it
-  if (player.animationFrame === 20 && !player.isMoving) {
+  // Special handling for stand animation from pickup
+  if (shouldStayInStand && isLocal && !player.isMoving) {
     return 20; // 'stand' animation
   }
 
-  if (typeof player.animationFrame !== 'undefined') {
-    return player.animationFrame;
+  // Use the new direction and step system
+  if (isLocal) {
+    return getAnimationFrameFromDirectionAndStep(playerDirection, playerStep);
+  } else {
+    // For other players, use their direction and step
+    return getAnimationFrameFromDirectionAndStep(player.direction || 'down', player.step || 2);
   }
-
-  return DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
 }
 
   // ---------- WS ----------
@@ -585,11 +599,10 @@ document.addEventListener('DOMContentLoaded', () => {
         localPlayer = { 
           ...msg.player,
           direction: msg.player.direction || 'down',
+          step: msg.player.step || 2,
           isMoving: false,
           isAttacking: false,
           isPickingUp: false,
-          animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
-          movementSequenceIndex: msg.player.movementSequenceIndex || 0,
           weapon: msg.player.weapon || 0,
           armor: msg.player.armor || 0,
           hands: msg.player.hands || 0
@@ -597,7 +610,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Initialize local state variables
         playerDirection = localPlayer.direction;
-        movementAnimationState = 0;
+        playerStep = localPlayer.step;
         isLocallyAttacking = false;
         localAttackState = 0;
         
@@ -613,11 +626,12 @@ document.addEventListener('DOMContentLoaded', () => {
               otherPlayers[p.id] = {
                 ...p,
                 direction: p.direction || 'down',
+                step: p.step || 2,
                 isMoving: p.isMoving || false,
                 isAttacking: p.isAttacking || false,
                 isPickingUp: p.isPickingUp || false,
-                animationFrame: p.animationFrame || DIRECTION_IDLE.down,
-                movementSequenceIndex: p.movementSequenceIndex || 0
+                isBRB: p.isBRB || false,
+                temporarySprite: p.temporarySprite || 0
               };
             }
           });
@@ -635,10 +649,12 @@ document.addEventListener('DOMContentLoaded', () => {
           otherPlayers[msg.player.id] = {
             ...msg.player,
             direction: msg.player.direction || 'down',
+            step: msg.player.step || 2,
             isMoving: msg.player.isMoving || false,
             isAttacking: msg.player.isAttacking || false,
-            animationFrame: msg.player.animationFrame || DIRECTION_IDLE.down,
-            movementSequenceIndex: msg.player.movementSequenceIndex || 0
+            isPickingUp: msg.player.isPickingUp || false,
+            isBRB: msg.player.isBRB || false,
+            temporarySprite: msg.player.temporarySprite || 0
           };
           pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
         }
@@ -649,30 +665,28 @@ document.addEventListener('DOMContentLoaded', () => {
           localPlayer.pos_x = msg.x; 
           localPlayer.pos_y = msg.y;
           localPlayer.isMoving = msg.isMoving || false;
-          if (!localPlayer.isMoving) {
-            localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
-            localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
-          }
         } else {
           if (!otherPlayers[msg.id]) {
             otherPlayers[msg.id] = { 
               id: msg.id, 
-              username: `#${msg.id}`, 
+              username: msg.username || `#${msg.id}`, 
               pos_x: msg.x, 
               pos_y: msg.y,
               direction: msg.direction || 'down',
+              step: msg.step || 2,
               isMoving: msg.isMoving || false,
-              isAttacking: false,
-              animationFrame: msg.animationFrame || DIRECTION_IDLE.down,
-              movementSequenceIndex: msg.movementSequenceIndex || 0
+              isAttacking: msg.isAttacking || false,
+              isPickingUp: false,
+              isBRB: false,
+              temporarySprite: 0
             };
           } else { 
             otherPlayers[msg.id].pos_x = msg.x; 
             otherPlayers[msg.id].pos_y = msg.y;
             otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+            otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
             otherPlayers[msg.id].isMoving = msg.isMoving || false;
-            otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
-            otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
+            otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
           }
         }
         break;
@@ -680,18 +694,36 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'animation_update':
       if (localPlayer && msg.id === localPlayer.id) {
         localPlayer.direction = msg.direction || localPlayer.direction;
+        localPlayer.step = msg.step || localPlayer.step;
         localPlayer.isMoving = msg.isMoving || false;
         localPlayer.isAttacking = msg.isAttacking || false;
-        localPlayer.isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
-        localPlayer.animationFrame = msg.animationFrame || localPlayer.animationFrame;
-        localPlayer.movementSequenceIndex = msg.movementSequenceIndex || localPlayer.movementSequenceIndex;
+        localPlayer.isPickingUp = msg.isPickingUp || false;
+        // Update client state variables for local player
+        playerDirection = localPlayer.direction;
+        playerStep = localPlayer.step;
       } else if (otherPlayers[msg.id]) {
         otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+        otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
         otherPlayers[msg.id].isMoving = msg.isMoving || false;
         otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
-        otherPlayers[msg.id].isPickingUp = msg.isPickingUp || false; // ADD THIS LINE
-        otherPlayers[msg.id].animationFrame = msg.animationFrame || otherPlayers[msg.id].animationFrame;
-        otherPlayers[msg.id].movementSequenceIndex = msg.movementSequenceIndex || otherPlayers[msg.id].movementSequenceIndex;
+        otherPlayers[msg.id].isPickingUp = msg.isPickingUp || false;
+      }
+      break;
+      
+      case 'player_animation_update':
+      if (localPlayer && msg.id === localPlayer.id) {
+        localPlayer.direction = msg.direction || localPlayer.direction;
+        localPlayer.step = msg.step || localPlayer.step;
+        localPlayer.isMoving = msg.isMoving || false;
+        localPlayer.isAttacking = msg.isAttacking || false;
+        // Update client state variables for local player
+        playerDirection = localPlayer.direction;
+        playerStep = localPlayer.step;
+      } else if (otherPlayers[msg.id]) {
+        otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
+        otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
+        otherPlayers[msg.id].isMoving = msg.isMoving || false;
+        otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
       }
       break;
         
@@ -1012,7 +1044,9 @@ document.addEventListener('DOMContentLoaded', () => {
       localPickupTimeout = setTimeout(() => {
         isLocallyPickingUp = false;
         localPickupTimeout = null;
-        // shouldStayInStand remains true until movement
+        // Set step to 2 after pickup animation, shouldStayInStand remains true until movement
+        playerStep = 2;
+        localPlayer.step = playerStep;
       }, 700); // Slightly longer than server animation
       
       const itemId = getItemAtPosition(localPlayer.pos_x, localPlayer.pos_y);
@@ -1084,7 +1118,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const nextIndex = (currentIndex + 1) % directions.length;
       playerDirection = directions[nextIndex];
       
-      movementAnimationState = 0;
+      playerStep = 2; // Set step to 2 when rotating
       isLocallyAttacking = false;
       
       localPlayer.direction = playerDirection;
@@ -1130,10 +1164,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       localAttackTimeout = setTimeout(() => {
         isLocallyAttacking = false;
-        // Don't reset movementAnimationState to 0 if we should stay in stand
-        if (!shouldStayInStand) {
-          movementAnimationState = 0;
-        }
+        playerStep = 2; // Set step to 2 after attack concludes
+        localPlayer.step = playerStep;
         localAttackTimeout = null;
       }, 1000);
       
@@ -1288,7 +1320,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           
           // Update direction and position directly to final teleport destination
           playerDirection = newDirection;
-          movementAnimationState = 0;
+          // Don't update step for teleportation (as per requirements)
           
           localPlayer.direction = playerDirection;
           localPlayer.pos_x = currentX;
@@ -1311,10 +1343,12 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           }
           isLocallyAttacking = false;
           
+          // Update direction and increment step
           playerDirection = newDirection;
-          movementAnimationState = 1; // Always use walk_1 for consistency
+          playerStep = playerStep === 3 ? 1 : playerStep + 1;
           
           localPlayer.direction = playerDirection;
+          localPlayer.step = playerStep;
           localPlayer.pos_x = nx;
           localPlayer.pos_y = ny;
           localPlayer.isAttacking = false;
@@ -1330,13 +1364,19 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
-              movementAnimationState = 0;
             }
           }, 200);
         } else {
+          // Movement blocked - still increment step for visual feedback
           playerDirection = newDirection;
-          movementAnimationState = 1; // Always use walk_1 for consistency
+          playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          
+          localPlayer.direction = playerDirection;
+          localPlayer.step = playerStep;
+          
           lastMoveTime = currentTime;
+          
+          send({ type: 'move', dx, dy, direction: playerDirection });
         }
       }
     }
