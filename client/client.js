@@ -105,6 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let showLoginGUI = false;
   let loggedIn = false;
   let chatMode = false;
+  let connectionAttempted = false; // Track if we've started connecting
   // BRB/AFK state
   let isBRB = false;
 
@@ -140,6 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let isLocallyAttacking = false; // Local attack state
   let localAttackState = 0; // 0 or 1 for attack_1 or attack_2
   let lastMoveTime = 0; // Prevent rapid movement through collision objects
+  let justFinishedAttack = false; // Track if player just finished attacking
 
   // Chat
   let messages = [];
@@ -533,6 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function connectToServer() {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     
+    connectionAttempted = true; // Mark that we've started connecting
     console.log('Attempting to connect to:', WS_URL);
     ws = new WebSocket(WS_URL);
 
@@ -587,7 +590,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     };;
   }
-  connectToServer();
+  
+  // Wait a moment for title to load, then start connecting
+  setTimeout(connectToServer, 500);
 
   function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
   function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
@@ -1179,6 +1184,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isLocallyAttacking = false;
         playerStep = 2; // Set step to 2 after attack concludes
         localPlayer.step = playerStep;
+        justFinishedAttack = true; // Mark that we just finished attacking
         localAttackTimeout = null;
       }, 1000);
       
@@ -1358,7 +1364,14 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           
           // Update direction and increment step
           playerDirection = newDirection;
-          playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          
+          // Special case: if player just finished attacking, set step to 3
+          if (justFinishedAttack) {
+            playerStep = 3;
+            justFinishedAttack = false; // Clear the flag
+          } else {
+            playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          }
           
           localPlayer.direction = playerDirection;
           localPlayer.step = playerStep;
@@ -1382,7 +1395,14 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
         } else {
           // Movement blocked - still increment step for visual feedback
           playerDirection = newDirection;
-          playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          
+          // Special case: if player just finished attacking, set step to 3
+          if (justFinishedAttack) {
+            playerStep = 3;
+            justFinishedAttack = false; // Clear the flag
+          } else {
+            playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          }
           
           localPlayer.direction = playerDirection;
           localPlayer.step = playerStep;
@@ -1508,12 +1528,20 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           }
           isLocallyAttacking = false;
           
-          // Update direction and animation state
+          // Update direction and increment step
           playerDirection = newDirection;
-          movementAnimationState = (movementAnimationState + 1) % 3;
+          
+          // Special case: if player just finished attacking, set step to 3
+          if (justFinishedAttack) {
+            playerStep = 3;
+            justFinishedAttack = false; // Clear the flag
+          } else {
+            playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          }
           
           // Update local player object immediately
           localPlayer.direction = playerDirection;
+          localPlayer.step = playerStep;
           localPlayer.pos_x = nx;
           localPlayer.pos_y = ny;
           localPlayer.isAttacking = false;
@@ -1532,13 +1560,14 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           setTimeout(() => {
             if (localPlayer) {
               localPlayer.isMoving = false;
-              movementAnimationState = 0;
             }
           }, 200);
         } else {
           // Can't move but still update direction and animation for visual feedback
           playerDirection = newDirection;
-          movementAnimationState = (movementAnimationState + 1) % 3;
+          playerStep = playerStep === 3 ? 1 : playerStep + 1;
+          localPlayer.direction = playerDirection;
+          localPlayer.step = playerStep;
           lastMoveTime = currentTime;
         }
       }
@@ -1826,10 +1855,14 @@ function drawInventory() {
     if (!showLoginGUI) {
       if (imgTitle && imgTitle.complete) ctx.drawImage(imgTitle, 0, 0, CANVAS_W, CANVAS_H);
       else { ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
-      ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
-      if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
-      else if (connected) ctx.fillText('Connecting to server...', 47, 347);
-      else ctx.fillText('Connecting to server...', 47, 347);
+      
+      // Only show text after we've started connecting
+      if (connectionAttempted) {
+        ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
+        if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
+        else if (connected) ctx.fillText('Connecting to server...', 47, 347);
+        else ctx.fillText('Connecting to server...', 47, 347);
+      }
     } else {
       ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
