@@ -591,8 +591,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };;
   }
   
-  // Start connecting immediately after title loads
-  connectToServer();
+  // Wait 20ms for title to load, then start connecting
+  setTimeout(connectToServer, 20);
 
   function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
   function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
@@ -676,6 +676,15 @@ document.addEventListener('DOMContentLoaded', () => {
           localPlayer.pos_x = msg.x; 
           localPlayer.pos_y = msg.y;
           localPlayer.isMoving = msg.isMoving || false;
+          // Sync direction and step with server
+          if (msg.direction) {
+            playerDirection = msg.direction;
+            localPlayer.direction = msg.direction;
+          }
+          if (msg.step) {
+            playerStep = msg.step;
+            localPlayer.step = msg.step;
+          }
         } else {
           if (!otherPlayers[msg.id]) {
             otherPlayers[msg.id] = { 
