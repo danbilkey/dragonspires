@@ -95,19 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
       up: { 1: 15, 2: 16, 3: 17 }     // up_walk_1, up, up_walk_2
     };
     
-    // Debug logging for down movement specifically
-    if (direction === 'down') {
-      console.log(`Down movement: direction=${direction}, step=${step}, returning frame=${directionMappings[direction][step]}`);
-    }
-    
-    // Check if we have a valid mapping
-    if (directionMappings[direction] && directionMappings[direction][step] !== undefined) {
-      return directionMappings[direction][step];
-    }
-    
-    // Log when fallback is used for debugging
-    console.log(`Animation fallback used: direction=${direction}, step=${step}`);
-    return directionMappings.down[2]; // Default to "down" idle
+    return directionMappings[direction]?.[step] || directionMappings.down[2]; // Default to "down" idle
   }
 
   // ---------- STATE ----------
@@ -694,10 +682,6 @@ document.addEventListener('DOMContentLoaded', () => {
             localPlayer.direction = msg.direction;
           }
           if (msg.step) {
-            // Debug logging for down movement server sync
-            if (msg.direction === 'down') {
-              console.log(`Server sync down movement: step=${msg.step}`);
-            }
             playerStep = msg.step;
             localPlayer.step = msg.step;
           }
@@ -1400,12 +1384,7 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
             playerStep = 3;
             justFinishedAttack = false; // Clear the flag
           } else {
-            const oldStep = playerStep;
             playerStep = playerStep === 3 ? 1 : playerStep + 1;
-            // Debug logging for down movement
-            if (newDirection === 'down') {
-              console.log(`Client down movement: ${oldStep} -> ${playerStep}`);
-            }
           }
           
           localPlayer.direction = playerDirection;
