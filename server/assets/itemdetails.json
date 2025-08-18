@@ -222,7 +222,7 @@
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
-  ["","false","nothing",0,0,""],
+  ["Nezerath","true","nothing",0,0,"You see the dark mage Nezerath - RUN!!"],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
@@ -294,7 +294,7 @@
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
-  ["","false","nothing",0,0,""],
+  ["Demon Princess","true","nothing",0,0,"You see the demon princess in all her stunning beauty."],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
@@ -328,7 +328,7 @@
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
-  ["","false","nothing",0,0,""],
+  ["Alchemist Shelf","true","container",0,0,"You see a shelf full of strange potions."],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
@@ -365,4 +365,5 @@
   ]
 
 }
+
 
