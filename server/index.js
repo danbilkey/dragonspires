@@ -48,6 +48,18 @@ const ATTACK_SEQUENCES = {
 // Movement animation sequence: walk_1 -> walk_2 -> idle
 const MOVEMENT_SEQUENCE = ['walk_1', 'walk_2', 'idle'];
 
+// Direction and step to animation frame mapping
+function getAnimationFrameFromDirectionAndStep(direction, step) {
+  const directionMappings = {
+    down: { 1: 0, 2: 1, 3: 2 },     // down_walk_1, down, down_walk_2
+    right: { 1: 5, 2: 6, 3: 7 },    // right_walk_1, right, right_walk_2
+    left: { 1: 10, 2: 11, 3: 12 },  // left_walk_1, left, left_walk_2
+    up: { 1: 15, 2: 16, 3: 17 }     // up_walk_1, up, up_walk_2
+  };
+  
+  return directionMappings[direction]?.[step] || directionMappings.down[2]; // Default to "down" idle
+}
+
 const server = http.createServer((req, res) => {
   res.writeHead(200, {'Content-Type':'text/plain'});
   res.end('DragonSpires server is running\n');
@@ -324,9 +336,9 @@ async function loadPlayer(username) {
 async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
   const r = await pool.query(
-    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, is_moving, is_attacking, is_picking_up, animation_frame, movement_sequence_index)
-     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7, $8) RETURNING *`,
-    [username, hashed, 'down', false, false, false, DIRECTION_IDLE.down, 0]
+    `INSERT INTO players (username, password, map_id, pos_x, pos_y, direction, step, is_moving, is_attacking, is_picking_up, animation_frame, movement_sequence_index)
+     VALUES ($1, $2, 1, 33, 27, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+    [username, hashed, 'down', 2, false, false, false, DIRECTION_IDLE.down, 0]
   );
   
   // Initialize empty inventory for new player
@@ -344,6 +356,13 @@ async function updateAnimationState(playerId, direction, isMoving, isAttacking, 
   await pool.query(
     'UPDATE players SET direction=$1, is_moving=$2, is_attacking=$3, is_picking_up=$4, animation_frame=$5, movement_sequence_index=$6 WHERE id=$7',
     [direction, isMoving, isAttacking, isPickingUp, animationFrame, movementSequenceIndex, playerId]
+  );
+}
+
+async function updateDirectionAndStep(playerId, direction, step) {
+  await pool.query(
+    'UPDATE players SET direction=$1, step=$2 WHERE id=$3',
+    [direction, step, playerId]
   );
 }
 
@@ -678,30 +697,28 @@ function stopAttackAnimation(playerData, ws) {
   // Set back to appropriate animation based on current state
   playerData.isAttacking = false;
   
-  // If player is in stand state (from pickup), keep them in stand
-  // Otherwise return to directional idle
-  if (playerData.animationFrame === 20 && !playerData.isMoving) {
-    // Keep stand animation
-    playerData.animationFrame = 20;
-  } else {
-    // Return to directional idle
-    playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
-  }
+  // Reset step to 2 after attack concludes
+  playerData.step = 2;
   
   // Update database
-  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, false, playerData.animationFrame, playerData.movementSequenceIndex)
+  updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
     .catch(err => console.error('Attack stop DB error:', err));
 
-  // Broadcast attack stop
-  broadcast({
-    type: 'animation_update',
-    id: playerData.id,
-    direction: playerData.direction,
-    isMoving: playerData.isMoving,
-    isAttacking: false,
-    animationFrame: playerData.animationFrame,
-    movementSequenceIndex: playerData.movementSequenceIndex
-  });
+  // Broadcast attack stop to players on same map only
+  for (const [otherWs, otherPlayer] of clients.entries()) {
+    if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+      if (otherWs.readyState === WebSocket.OPEN) {
+        otherWs.send(JSON.stringify({
+          type: 'animation_update',
+          id: playerData.id,
+          direction: playerData.direction,
+          step: playerData.step,
+          isMoving: playerData.isMoving,
+          isAttacking: false
+        }));
+      }
+    }
+  }
 }
 
 // Start pickup animation for a player
@@ -755,25 +772,30 @@ function stopPickupAnimation(playerData, ws) {
     attackTimeouts.delete(playerData.id);
   }
 
-  // Set to 'stand' animation (index 20) - this will be overridden if player moves
+  // Set to 'stand' animation - this will be overridden if player moves
   playerData.isPickingUp = false;
-  playerData.animationFrame = 20; // 'stand' animation
+  playerData.step = 2; // Reset step to 2 after pickup
   
   // Update database
-  updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex, false)
+  updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
     .catch(err => console.error('Pickup stop DB error:', err));
 
-  // Broadcast stand animation
-  broadcast({
-    type: 'animation_update',
-    id: playerData.id,
-    direction: playerData.direction,
-    isMoving: playerData.isMoving,
-    isAttacking: playerData.isAttacking,
-    isPickingUp: false,
-    animationFrame: playerData.animationFrame,
-    movementSequenceIndex: playerData.movementSequenceIndex
-  });
+  // Broadcast stand animation to players on same map only
+  for (const [otherWs, otherPlayer] of clients.entries()) {
+    if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+      if (otherWs.readyState === WebSocket.OPEN) {
+        otherWs.send(JSON.stringify({
+          type: 'animation_update',
+          id: playerData.id,
+          direction: playerData.direction,
+          step: playerData.step,
+          isMoving: playerData.isMoving,
+          isAttacking: playerData.isAttacking,
+          isPickingUp: false
+        }));
+      }
+    }
+  }
 }
 
 // Initialize database with animation columns if they don't exist
@@ -870,6 +892,7 @@ wss.on('connection', (ws) => {
           armor: found.armor ?? 0,
           hands: found.hands ?? 0,
           direction: found.direction ?? 'down',
+          step: found.step ?? 2,
           isMoving: found.is_moving ?? false,
           isAttacking: found.is_attacking ?? false,
           animationFrame: found.animation_frame ?? DIRECTION_IDLE.down,
@@ -926,6 +949,7 @@ wss.on('connection', (ws) => {
           armor: created.armor ?? 0,
           hands: created.hands ?? 0,
           direction: created.direction ?? 'down',
+          step: created.step ?? 2,
           isMoving: created.is_moving ?? false,
           isAttacking: created.is_attacking ?? false,
           animationFrame: created.animation_frame ?? DIRECTION_IDLE.down,
@@ -1082,22 +1106,19 @@ wss.on('connection', (ws) => {
         return;
       }
       
+      // Always increment step and update direction (even if movement is blocked)
+      if (msg.direction) {
+        playerData.direction = msg.direction;
+      }
+      
+      // Increment step: 1 -> 2 -> 3 -> 1
+      playerData.step = playerData.step === 3 ? 1 : (playerData.step || 2) + 1;
+      
       if (canMoveTo(nx, ny, playerData.id)) {
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
         playerData.pos_y = ny;
-
-        // IMMEDIATELY update direction for consistent state
-        if (msg.direction) {
-          playerData.direction = msg.direction;
-        }
-
-        // Advance movement sequence index
-        playerData.movementSequenceIndex = (playerData.movementSequenceIndex + 1) % MOVEMENT_SEQUENCE.length;
-
-        // Calculate animation frame based on movement sequence
-        playerData.animationFrame = getMovementAnimationFrame(playerData.direction, playerData.movementSequenceIndex);
         playerData.isMoving = true;
         playerData.isAttacking = false; // Ensure attack state is cleared
 
@@ -1105,22 +1126,46 @@ wss.on('connection', (ws) => {
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
           updatePosition(playerData.id, nx, ny),
-          updateAnimationState(playerData.id, playerData.direction, playerData.isMoving, playerData.isAttacking, playerData.animationFrame, playerData.movementSequenceIndex)
+          updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
         ]).catch(()=>{});
 
-        // Broadcast the updated state immediately
-        broadcast({ 
-          type: 'player_moved', 
-          id: playerData.id, 
-          x: nx, 
-          y: ny, 
-          direction: playerData.direction,
-          isMoving: playerData.isMoving,
-          isAttacking: playerData.isAttacking,
-          animationFrame: playerData.animationFrame,
-          movementSequenceIndex: playerData.movementSequenceIndex
-        });
+        // Broadcast to players on same map only
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'player_moved', 
+                id: playerData.id, 
+                x: nx, 
+                y: ny, 
+                direction: playerData.direction,
+                step: playerData.step,
+                isMoving: playerData.isMoving,
+                isAttacking: playerData.isAttacking
+              }));
+            }
+          }
+        }
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+      } else {
+        // Movement blocked but still increment step for visual feedback
+        updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
+        
+        // Broadcast the direction and step change to same map only
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'player_animation_update', 
+                id: playerData.id, 
+                direction: playerData.direction,
+                step: playerData.step,
+                isMoving: false,
+                isAttacking: false
+              }));
+            }
+          }
+        }
       }
     }
 
@@ -1145,24 +1190,29 @@ wss.on('connection', (ws) => {
       // Update direction without moving
       if (msg.direction) {
         playerData.direction = msg.direction;
+        playerData.step = 2; // Set step to 2 when rotating
         playerData.isAttacking = false;
         playerData.isMoving = false;
-        playerData.animationFrame = DIRECTION_IDLE[playerData.direction] || DIRECTION_IDLE.down;
         
         // Update database
-        updateAnimationState(playerData.id, playerData.direction, false, false, playerData.animationFrame, playerData.movementSequenceIndex)
+        updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
           .catch(err => console.error('Rotation DB error:', err));
         
-        // Broadcast rotation to all clients
-        broadcast({
-          type: 'animation_update',
-          id: playerData.id,
-          direction: playerData.direction,
-          isMoving: false,
-          isAttacking: false,
-          animationFrame: playerData.animationFrame,
-          movementSequenceIndex: playerData.movementSequenceIndex
-        });
+        // Broadcast rotation to players on same map only
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'animation_update',
+                id: playerData.id,
+                direction: playerData.direction,
+                step: playerData.step,
+                isMoving: false,
+                isAttacking: false
+              }));
+            }
+          }
+        }
       }
     }
 
