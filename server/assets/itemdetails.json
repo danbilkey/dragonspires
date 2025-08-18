@@ -222,9 +222,9 @@
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
+  ["","false","nothing",0,0,""],
+  ["","false","nothing",0,0,""],
   ["Nezerath","true","nothing",0,0,"You see the dark mage Nezerath - RUN!!"],
-  ["","false","nothing",0,0,""],
-  ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
   ["","false","nothing",0,0,""],
@@ -365,5 +365,6 @@
   ]
 
 }
+
 
 
