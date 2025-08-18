@@ -536,11 +536,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     
     connectionAttempted = true; // Mark that we've started connecting
-    console.log('Attempting to connect to:', WS_URL);
     ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
-      console.log('WebSocket connected successfully');
       connected = true;
       connectionPaused = true;
       showLoginGUI = false;
@@ -2179,7 +2177,6 @@ function drawInventory() {
       if (data && Array.isArray(data.floor)) {
         floorCollision = data.floor;
         floorCollisionReady = true;
-        console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
       }
     })
     .catch(err => {
@@ -2190,7 +2187,6 @@ function drawInventory() {
           if (data && Array.isArray(data.floor)) {
             floorCollision = data.floor;
             floorCollisionReady = true;
-            console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
           }
         })
         .catch(err2 => {
@@ -2201,7 +2197,6 @@ function drawInventory() {
               if (data && Array.isArray(data.floor)) {
                 floorCollision = data.floor;
                 floorCollisionReady = true;
-                console.log(`Client loaded floor collision data: ${floorCollision.length} tiles`);
               }
             })
             .catch(err3 => {
@@ -2226,7 +2221,6 @@ function drawInventory() {
           description: item[5]
         }));
         itemDetailsReady = true;
-        console.log(`Client loaded ${itemDetails.length} item details`);
       }
     })
     .catch(err => {
@@ -2245,7 +2239,6 @@ function drawInventory() {
               description: item[5]
             }));
             itemDetailsReady = true;
-            console.log(`Client loaded ${itemDetails.length} item details`);
           }
         })
         .catch(err2 => {
@@ -2264,7 +2257,6 @@ function drawInventory() {
                   description: item[5]
                 }));
                 itemDetailsReady = true;
-                console.log(`Client loaded ${itemDetails.length} item details`);
               }
             })
             .catch(err3 => {
