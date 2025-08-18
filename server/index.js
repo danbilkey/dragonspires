@@ -684,7 +684,7 @@ function startAttackAnimation(playerData, ws) {
 }
 
 // Stop attack animation for a player
-function stopAttackAnimation(playerData, ws, resetStep = true) {
+function stopAttackAnimation(playerData, ws, resetStep = true, broadcast = true) {
   if (!playerData.isAttacking) return;
   
   // Clear timeout if it exists
@@ -706,18 +706,21 @@ function stopAttackAnimation(playerData, ws, resetStep = true) {
       .catch(err => console.error('Attack stop DB error:', err));
   }
 
-  // Broadcast attack stop to players on same map only
-  for (const [otherWs, otherPlayer] of clients.entries()) {
-    if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-      if (otherWs.readyState === WebSocket.OPEN) {
-        otherWs.send(JSON.stringify({
-          type: 'animation_update',
-          id: playerData.id,
-          direction: playerData.direction,
-          step: playerData.step,
-          isMoving: playerData.isMoving,
-          isAttacking: false
-        }));
+  // Only broadcast if requested (not when called from movement)
+  if (broadcast) {
+    // Broadcast attack stop to players on same map only
+    for (const [otherWs, otherPlayer] of clients.entries()) {
+      if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
+        if (otherWs.readyState === WebSocket.OPEN) {
+          otherWs.send(JSON.stringify({
+            type: 'animation_update',
+            id: playerData.id,
+            direction: playerData.direction,
+            step: playerData.step,
+            isMoving: playerData.isMoving,
+            isAttacking: false
+          }));
+        }
       }
     }
   }
@@ -1045,9 +1048,9 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      // Cancel any attack animation when moving (don't reset step/direction)
+      // Cancel any attack animation when moving (don't reset step/direction, don't broadcast)
       if (playerData.isAttacking) {
-        stopAttackAnimation(playerData, ws, false);
+        stopAttackAnimation(playerData, ws, false, false);
       }
 
       const dx = Number(msg.dx) || 0;
@@ -1115,7 +1118,7 @@ wss.on('connection', (ws) => {
       }
       
       // Increment step: 1 -> 2 -> 3 -> 1
-      playerData.step = playerData.step === 3 ? 1 : (playerData.step || 2) + 1;
+      playerData.step = playerData.step === 3 ? 1 : (playerData.step ?? 2) + 1;
       
       if (canMoveTo(nx, ny, playerData.id)) {
         // Decrement stamina by **1**
