@@ -684,7 +684,7 @@ function startAttackAnimation(playerData, ws) {
 }
 
 // Stop attack animation for a player
-function stopAttackAnimation(playerData, ws) {
+function stopAttackAnimation(playerData, ws, resetStep = true) {
   if (!playerData.isAttacking) return;
   
   // Clear timeout if it exists
@@ -697,12 +697,14 @@ function stopAttackAnimation(playerData, ws) {
   // Set back to appropriate animation based on current state
   playerData.isAttacking = false;
   
-  // Reset step to 2 after attack concludes
-  playerData.step = 2;
-  
-  // Update database
-  updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
-    .catch(err => console.error('Attack stop DB error:', err));
+  // Only reset step to 2 if requested (not when called from movement)
+  if (resetStep) {
+    playerData.step = 2;
+    
+    // Update database only if we're resetting step
+    updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
+      .catch(err => console.error('Attack stop DB error:', err));
+  }
 
   // Broadcast attack stop to players on same map only
   for (const [otherWs, otherPlayer] of clients.entries()) {
@@ -1043,9 +1045,9 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      // Cancel any attack animation when moving
+      // Cancel any attack animation when moving (don't reset step/direction)
       if (playerData.isAttacking) {
-        stopAttackAnimation(playerData, ws);
+        stopAttackAnimation(playerData, ws, false);
       }
 
       const dx = Number(msg.dx) || 0;
@@ -1993,10 +1995,15 @@ wss.on('connection', (ws) => {
         attackTimeouts.delete(playerData.id);
       }
       
+      // Set animation_frame to 6 (right idle) and reset direction/step when player disconnects
+      pool.query(
+        'UPDATE players SET animation_frame = $1, direction = $2, step = $3 WHERE id = $4',
+        [6, 'right', 2, playerData.id]
+      ).catch(err => console.error('Error updating player logout state:', err));
       
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
-      broadcast({ type: 'player_left', id: playerData.id });
+      broadcast({ type: 'player_left', id: playerData.id, username: playerData.username });
     }
   });
 
