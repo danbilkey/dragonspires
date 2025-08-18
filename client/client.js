@@ -591,8 +591,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };;
   }
   
-  // Wait a moment for title to load, then start connecting
-  setTimeout(connectToServer, 100);
+  // Start connecting immediately after title loads
+  connectToServer();
 
   function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
   function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
