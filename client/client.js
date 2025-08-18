@@ -95,7 +95,14 @@ document.addEventListener('DOMContentLoaded', () => {
       up: { 1: 15, 2: 16, 3: 17 }     // up_walk_1, up, up_walk_2
     };
     
-    return directionMappings[direction]?.[step] || directionMappings.down[2]; // Default to "down" idle
+    // Check if we have a valid mapping
+    if (directionMappings[direction] && directionMappings[direction][step] !== undefined) {
+      return directionMappings[direction][step];
+    }
+    
+    // Log when fallback is used for debugging
+    console.log(`Animation fallback used: direction=${direction}, step=${step}`);
+    return directionMappings.down[2]; // Default to "down" idle
   }
 
   // ---------- STATE ----------
