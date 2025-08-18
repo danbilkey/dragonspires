@@ -1607,14 +1607,10 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
         animFrame = attackSeq[localAttackState];
       } else {
         // Check if we should stay in stand animation (after pickup and not moving)
-        if (shouldStayInStand && !localPlayer.isMoving && movementAnimationState === 0) {
+        if (shouldStayInStand && !localPlayer.isMoving) {
           animFrame = 20; // Stay in 'stand' animation
-        } else if (movementAnimationState === 0) {
-          animFrame = DIRECTION_IDLE[playerDirection] || DIRECTION_IDLE.down;
         } else {
-          const walkIndex = movementAnimationState === 1 ? 0 : 2;
-          const directionOffsets = { down: 0, right: 5, left: 10, up: 15 };
-          animFrame = (directionOffsets[playerDirection] || 0) + walkIndex;
+          animFrame = getAnimationFrameFromDirectionAndStep(playerDirection, playerStep);
         }
       }
     } else {
