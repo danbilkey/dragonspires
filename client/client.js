@@ -592,7 +592,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
   // Wait a moment for title to load, then start connecting
-  setTimeout(connectToServer, 500);
+  setTimeout(connectToServer, 100);
 
   function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
   function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
@@ -661,10 +661,11 @@ document.addEventListener('DOMContentLoaded', () => {
             direction: msg.player.direction || 'down',
             step: msg.player.step || 2,
             isMoving: msg.player.isMoving || false,
-            isAttacking: msg.player.isAttacking || false,
+            isAttacking: false, // Force new players to not be attacking
             isPickingUp: msg.player.isPickingUp || false,
             isBRB: msg.player.isBRB || false,
-            temporarySprite: msg.player.temporarySprite || 0
+            temporarySprite: msg.player.temporarySprite || 0,
+            animationFrame: undefined // Clear any stale animation frame
           };
           pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
         }
@@ -1182,9 +1183,13 @@ document.addEventListener('DOMContentLoaded', () => {
       
       localAttackTimeout = setTimeout(() => {
         isLocallyAttacking = false;
-        playerStep = 2; // Set step to 2 after attack concludes
-        localPlayer.step = playerStep;
-        justFinishedAttack = true; // Mark that we just finished attacking
+        // Only reset step to 2 if player hasn't moved during attack
+        // (if they moved, their direction and step were already updated)
+        if (!localPlayer.isMoving) {
+          playerStep = 2; // Set step to 2 after attack concludes
+          localPlayer.step = playerStep;
+          justFinishedAttack = true; // Mark that we just finished attacking
+        }
         localAttackTimeout = null;
       }, 1000);
       
