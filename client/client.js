@@ -515,6 +515,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return 20; // 'stand' animation
   }
 
+  // For other players, check if they should be in stand animation
+  if (!isLocal && player.animationFrame === 20 && !player.isMoving) {
+    return 20; // 'stand' animation
+  }
+
   // Use the new direction and step system
   if (isLocal) {
     return getAnimationFrameFromDirectionAndStep(playerDirection, playerStep);
@@ -687,6 +692,10 @@ document.addEventListener('DOMContentLoaded', () => {
             otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
             otherPlayers[msg.id].isMoving = msg.isMoving || false;
             otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
+            // Clear animationFrame when player moves (so they exit stand animation)
+            if (msg.isMoving) {
+              otherPlayers[msg.id].animationFrame = undefined;
+            }
           }
         }
         break;
@@ -707,6 +716,10 @@ document.addEventListener('DOMContentLoaded', () => {
         otherPlayers[msg.id].isMoving = msg.isMoving || false;
         otherPlayers[msg.id].isAttacking = msg.isAttacking || false;
         otherPlayers[msg.id].isPickingUp = msg.isPickingUp || false;
+        // Store animationFrame for attack animations
+        if (typeof msg.animationFrame !== 'undefined') {
+          otherPlayers[msg.id].animationFrame = msg.animationFrame;
+        }
       }
       break;
       
@@ -1816,7 +1829,7 @@ function drawInventory() {
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
       if (connectionPaused) ctx.fillText('Press any key to enter!', 47, 347);
       else if (connected) ctx.fillText('Connecting to server...', 47, 347);
-      else ctx.fillText('Press any key to reconnect.', 47, 347);
+      else ctx.fillText('Connecting to server...', 47, 347);
     } else {
       ctx.fillStyle = '#222'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H);
       ctx.fillStyle = 'yellow'; ctx.font = '16px sans-serif';
@@ -1828,11 +1841,6 @@ function drawInventory() {
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else { ctx.fillStyle = '#233'; ctx.fillRect(0,0,CANVAS_W,CANVAS_H); }
-
-    // Draw stand sprite at position 13,198 after login border
-    if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
-      ctx.drawImage(playerSprites[20], 13, 198);
-    }
 
     if (activeField === null) {
       activeField = 'username';
@@ -1946,6 +1954,11 @@ function drawInventory() {
 
     if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
     else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
+
+    // Draw stand sprite at position 13,198 after game border
+    if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
+      ctx.drawImage(playerSprites[20], 13, 198);
+    }
 
     drawBarsAndStats();
     drawChatHistory();
