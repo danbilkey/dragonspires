@@ -667,6 +667,7 @@ function startAttackAnimation(playerData, ws) {
   broadcast({
     type: 'animation_update',
     id: playerData.id,
+    map_id: playerData.map_id,
     direction: playerData.direction,
     isMoving: playerData.isMoving,
     isAttacking: true,
@@ -684,7 +685,7 @@ function startAttackAnimation(playerData, ws) {
 }
 
 // Stop attack animation for a player
-function stopAttackAnimation(playerData, ws, resetStep = true, broadcast = true) {
+function stopAttackAnimation(playerData, ws, resetStep = true, shouldBroadcast = true) {
   if (!playerData.isAttacking) return;
   
   // Clear timeout if it exists
@@ -707,22 +708,17 @@ function stopAttackAnimation(playerData, ws, resetStep = true, broadcast = true)
   }
 
   // Only broadcast if requested (not when called from movement)
-  if (broadcast) {
-    // Broadcast attack stop to players on same map only
-    for (const [otherWs, otherPlayer] of clients.entries()) {
-      if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-        if (otherWs.readyState === WebSocket.OPEN) {
-          otherWs.send(JSON.stringify({
-            type: 'animation_update',
-            id: playerData.id,
-            direction: playerData.direction,
-            step: playerData.step,
-            isMoving: playerData.isMoving,
-            isAttacking: false
-          }));
-        }
-      }
-    }
+  if (shouldBroadcast) {
+    // Broadcast attack stop to all players (clients will filter by map)
+    broadcast({
+      type: 'animation_update',
+      id: playerData.id,
+      map_id: playerData.map_id,
+      direction: playerData.direction,
+      step: playerData.step,
+      isMoving: playerData.isMoving,
+      isAttacking: false
+    });
   }
 }
 
@@ -749,6 +745,7 @@ function startPickupAnimation(playerData, ws) {
   broadcast({
     type: 'animation_update',
     id: playerData.id,
+    map_id: playerData.map_id,
     direction: playerData.direction,
     isMoving: false,
     isAttacking: false,
@@ -785,23 +782,18 @@ function stopPickupAnimation(playerData, ws) {
   updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
     .catch(err => console.error('Pickup stop DB error:', err));
 
-  // Broadcast stand animation to players on same map only
-  for (const [otherWs, otherPlayer] of clients.entries()) {
-    if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-      if (otherWs.readyState === WebSocket.OPEN) {
-        otherWs.send(JSON.stringify({
-          type: 'animation_update',
-          id: playerData.id,
-          direction: playerData.direction,
-          step: playerData.step,
-          isMoving: playerData.isMoving,
-          isAttacking: playerData.isAttacking,
-          isPickingUp: false,
-          animationFrame: 20 // 'stand' animation
-        }));
-      }
-    }
-  }
+  // Broadcast stand animation to all players (clients will filter by map)
+  broadcast({
+    type: 'animation_update',
+    id: playerData.id,
+    map_id: playerData.map_id,
+    direction: playerData.direction,
+    step: playerData.step,
+    isMoving: playerData.isMoving,
+    isAttacking: playerData.isAttacking,
+    isPickingUp: false,
+    animationFrame: 20 // 'stand' animation
+  });
 }
 
 // Initialize database with animation columns if they don't exist
@@ -918,7 +910,7 @@ wss.on('connection', (ws) => {
           .filter(p => p.id !== playerData.id)
           .map(p => ({ ...p, isBRB: p.isBRB || false }));
         send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false } });
+        broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false, map_id: playerData.map_id } });
       } catch (e) {
         console.error('Login error', e);
         send(ws, { type: 'login_error', message: 'Server error' });
@@ -973,7 +965,7 @@ wss.on('connection', (ws) => {
 
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
         send(ws, { type: 'signup_success', player: playerData, players: others, items: mapItems, inventory: inventory });
-        broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0 } });
+        broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0, map_id: playerData.map_id } });
       } catch (e) {
         console.error('Signup error', e);
         send(ws, { type: 'signup_error', message: 'Server error' });
@@ -1135,43 +1127,33 @@ wss.on('connection', (ws) => {
           updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
         ]).catch(()=>{});
 
-        // Broadcast to players on same map only
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'player_moved', 
-                id: playerData.id, 
-                x: nx, 
-                y: ny, 
-                direction: playerData.direction,
-                step: playerData.step,
-                isMoving: playerData.isMoving,
-                isAttacking: playerData.isAttacking
-              }));
-            }
-          }
-        }
+        // Broadcast to all players (clients will filter by map)
+        broadcast({
+          type: 'player_moved', 
+          id: playerData.id, 
+          x: nx, 
+          y: ny, 
+          map_id: playerData.map_id,
+          direction: playerData.direction,
+          step: playerData.step,
+          isMoving: playerData.isMoving,
+          isAttacking: playerData.isAttacking
+        });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       } else {
         // Movement blocked but still increment step for visual feedback
         updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
         
-        // Broadcast the direction and step change to same map only
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'player_animation_update', 
-                id: playerData.id, 
-                direction: playerData.direction,
-                step: playerData.step,
-                isMoving: false,
-                isAttacking: false
-              }));
-            }
-          }
-        }
+        // Broadcast the direction and step change to all players (clients will filter by map)
+        broadcast({
+          type: 'player_animation_update', 
+          id: playerData.id, 
+          map_id: playerData.map_id,
+          direction: playerData.direction,
+          step: playerData.step,
+          isMoving: false,
+          isAttacking: false
+        });
       }
     }
 
@@ -1204,21 +1186,16 @@ wss.on('connection', (ws) => {
         updateDirectionAndStep(playerData.id, playerData.direction, playerData.step)
           .catch(err => console.error('Rotation DB error:', err));
         
-        // Broadcast rotation to players on same map only
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'animation_update',
-                id: playerData.id,
-                direction: playerData.direction,
-                step: playerData.step,
-                isMoving: false,
-                isAttacking: false
-              }));
-            }
-          }
-        }
+        // Broadcast rotation to all players (clients will filter by map)
+        broadcast({
+          type: 'animation_update',
+          id: playerData.id,
+          map_id: playerData.map_id,
+          direction: playerData.direction,
+          step: playerData.step,
+          isMoving: false,
+          isAttacking: false
+        });
       }
     }
 
@@ -1691,9 +1668,6 @@ wss.on('connection', (ws) => {
       // Reduce magic
       playerData.magic = Math.max(0, (playerData.magic || 0) - magicCost);
       
-      // Get old map for broadcasting player left
-      const oldMapId = playerData.map_id;
-      
       // Update player position and map
       playerData.pos_x = targetX;
       playerData.pos_y = targetY;
@@ -1706,30 +1680,11 @@ wss.on('connection', (ws) => {
         pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetMap, playerData.id])
       ]).catch(err => console.error('Error updating player after teleport:', err));
       
-      // Only broadcast player left if actually changing maps
-      if (oldMapId !== targetMap) {
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === oldMapId && otherPlayer.id !== playerData.id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'player_left',
-                id: playerData.id,
-                username: playerData.username
-              }));
-            }
-          }
-        }
-      }
-      
-      // Get players on target map
-      const playersOnTargetMap = Array.from(clients.values())
-        .filter(p => p.map_id === targetMap && p.id !== playerData.id)
+      // Send success response to teleporting player (with ALL players for filtering)
+      const allPlayers = Array.from(clients.values())
+        .filter(p => p.id !== playerData.id)
         .map(p => ({ ...p, isBRB: p.isBRB || false, temporarySprite: p.temporarySprite || 0 }));
       
-      // Get items for target map (you may need to implement per-map items if needed)
-      // For now, using the same mapItems for all maps
-      
-      // Send success response to teleporting player
       send(ws, {
         type: 'teleport_result',
         success: true,
@@ -1738,64 +1693,33 @@ wss.on('connection', (ws) => {
         x: targetX,
         y: targetY,
         mapId: targetMap,
-        players: playersOnTargetMap,
+        players: allPlayers,
         items: mapItems
+      });
+      
+      // Broadcast position/map update to ALL players (no player_left/player_joined)
+      broadcast({
+        type: 'player_moved',
+        id: playerData.id,
+        x: targetX,
+        y: targetY,
+        map_id: playerData.map_id,
+        direction: playerData.direction || 'down',
+        step: playerData.step || 2,
+        isMoving: false,
+        isAttacking: false
       });
       
       // Broadcast magic update to teleporting player
       send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
       
-      // Only broadcast player joined if actually changing maps
-      if (oldMapId !== targetMap) {
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'player_joined',
-                player: { 
-                  ...playerData, 
-                  direction: playerData.direction || 'down',
-                  step: playerData.step || 2,
-                  isBRB: playerData.isBRB || false, 
-                  temporarySprite: playerData.temporarySprite || 0 
-                }
-              }));
-            }
-          }
-        }
-      } else {
-        // Same map teleportation - just broadcast position update
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
-            if (otherWs.readyState === WebSocket.OPEN) {
-              otherWs.send(JSON.stringify({
-                type: 'player_moved',
-                id: playerData.id,
-                x: targetX,
-                y: targetY,
-                direction: playerData.direction || 'down',
-                step: playerData.step || 2,
-                username: playerData.username,
-                isMoving: false,
-                isAttacking: false
-              }));
-            }
-          }
-        }
-      }
-      
-      // Broadcast temporary sprite clear
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'temporary_sprite_update',
-              id: playerData.id,
-              temporarySprite: 0
-            }));
-          }
-        }
-      }
+      // Broadcast temporary sprite clear to all players
+      broadcast({
+        type: 'temporary_sprite_update',
+        id: playerData.id,
+        map_id: playerData.map_id,
+        temporarySprite: 0
+      });
     }
 
     else if (msg.type === 'attack_fountain') {
