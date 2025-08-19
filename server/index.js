@@ -1706,14 +1706,17 @@ wss.on('connection', (ws) => {
         pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetMap, playerData.id])
       ]).catch(err => console.error('Error updating player after teleport:', err));
       
-      // Broadcast player left to old map
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === oldMapId && otherPlayer.id !== playerData.id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'player_left',
-              id: playerData.id
-            }));
+      // Only broadcast player left if actually changing maps
+      if (oldMapId !== targetMap) {
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === oldMapId && otherPlayer.id !== playerData.id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'player_left',
+                id: playerData.id,
+                username: playerData.username
+              }));
+            }
           }
         }
       }
@@ -1742,14 +1745,41 @@ wss.on('connection', (ws) => {
       // Broadcast magic update to teleporting player
       send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
       
-      // Broadcast player joined to target map
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'player_joined',
-              player: { ...playerData, isBRB: playerData.isBRB || false, temporarySprite: playerData.temporarySprite || 0 }
-            }));
+      // Only broadcast player joined if actually changing maps
+      if (oldMapId !== targetMap) {
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'player_joined',
+                player: { 
+                  ...playerData, 
+                  direction: playerData.direction || 'down',
+                  step: playerData.step || 2,
+                  isBRB: playerData.isBRB || false, 
+                  temporarySprite: playerData.temporarySprite || 0 
+                }
+              }));
+            }
+          }
+        }
+      } else {
+        // Same map teleportation - just broadcast position update
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.map_id === targetMap && otherPlayer.id !== playerData.id) {
+            if (otherWs.readyState === WebSocket.OPEN) {
+              otherWs.send(JSON.stringify({
+                type: 'player_moved',
+                id: playerData.id,
+                x: targetX,
+                y: targetY,
+                direction: playerData.direction || 'down',
+                step: playerData.step || 2,
+                username: playerData.username,
+                isMoving: false,
+                isAttacking: false
+              }));
+            }
           }
         }
       }
