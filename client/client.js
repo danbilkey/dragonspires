@@ -690,6 +690,7 @@ document.addEventListener('DOMContentLoaded', () => {
               username: msg.username || `#${msg.id}`, 
               pos_x: msg.x, 
               pos_y: msg.y,
+              map_id: msg.map_id,
               direction: msg.direction || 'down',
               step: msg.step || 2,
               isMoving: msg.isMoving || false,
@@ -701,6 +702,7 @@ document.addEventListener('DOMContentLoaded', () => {
           } else { 
             otherPlayers[msg.id].pos_x = msg.x; 
             otherPlayers[msg.id].pos_y = msg.y;
+            otherPlayers[msg.id].map_id = msg.map_id;
             otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
             otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
             otherPlayers[msg.id].isMoving = msg.isMoving || false;
@@ -724,6 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
         playerDirection = localPlayer.direction;
         playerStep = localPlayer.step;
       } else if (otherPlayers[msg.id]) {
+        otherPlayers[msg.id].map_id = msg.map_id || otherPlayers[msg.id].map_id;
         otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
         otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
         otherPlayers[msg.id].isMoving = msg.isMoving || false;
@@ -746,6 +749,7 @@ document.addEventListener('DOMContentLoaded', () => {
         playerDirection = localPlayer.direction;
         playerStep = localPlayer.step;
       } else if (otherPlayers[msg.id]) {
+        otherPlayers[msg.id].map_id = msg.map_id || otherPlayers[msg.id].map_id;
         otherPlayers[msg.id].direction = msg.direction || otherPlayers[msg.id].direction;
         otherPlayers[msg.id].step = msg.step || otherPlayers[msg.id].step;
         otherPlayers[msg.id].isMoving = msg.isMoving || false;
@@ -795,10 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localPlayer.pos_y = msg.y;
             localPlayer.map_id = msg.mapId;
             
-            // Clear other players since we're on a new map
-            otherPlayers = {};
-            
-            // Update other players on new map
+            // Update all players (no need to clear since we get all players)
             if (msg.players) {
               msg.players.forEach(p => {
                 if (p.id !== localPlayer.id) {
@@ -1945,8 +1946,11 @@ function drawInventory() {
     }
     for (const id in otherPlayers) {
       const p = otherPlayers[id];
-      const k = `${p.pos_x},${p.pos_y}`;
-      (playersByTile[k] ||= []).push(p);
+      // Only render players on the same map as local player
+      if (p.map_id === localPlayer.map_id) {
+        const k = `${p.pos_x},${p.pos_y}`;
+        (playersByTile[k] ||= []).push(p);
+      }
     }
 
     if (tilesReady && mapReady && window.itemsReady()) {
@@ -1970,7 +1974,7 @@ function drawInventory() {
             let targetPlayer = null;
             if (localPlayer && localPlayer.id === effect.playerId) {
               targetPlayer = localPlayer;
-            } else if (otherPlayers[effect.playerId]) {
+            } else if (otherPlayers[effect.playerId] && otherPlayers[effect.playerId].map_id === localPlayer.map_id) {
               targetPlayer = otherPlayers[effect.playerId];
             }
             
