@@ -1630,18 +1630,13 @@ wss.on('connection', (ws) => {
       // Broadcast magic update
       send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
       
-      // Broadcast temporary sprite update to all players on same map
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'temporary_sprite_update',
-              id: playerData.id,
-              temporarySprite: playerData.temporarySprite
-            }));
-          }
-        }
-      }
+      // Broadcast temporary sprite update to all players (client will filter by map)
+      broadcast({
+        type: 'temporary_sprite_update',
+        id: playerData.id,
+        map_id: playerData.map_id,
+        temporarySprite: playerData.temporarySprite
+      });
     }
 
     else if (msg.type === 'use_teleport_item') {
