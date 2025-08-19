@@ -1933,9 +1933,10 @@ function drawInventory() {
     for (const id in otherPlayers) {
       const p = otherPlayers[id];
       // Debug logging for map filtering
-      console.log(`Player ${p.username || p.id}: map_id=${p.map_id}, localPlayer.map_id=${localPlayer.map_id}, match=${p.map_id === localPlayer.map_id}`);
+      console.log(`Player ${p.username || p.id}: map_id=${p.map_id}(${typeof p.map_id}), localPlayer.map_id=${localPlayer.map_id}(${typeof localPlayer.map_id}), oldMatch=${p.map_id === localPlayer.map_id}, newMatch=${Number(p.map_id) === Number(localPlayer.map_id)}`);
       // Only render players on the same map as local player
-      if (p.map_id === localPlayer.map_id) {
+      // Convert to numbers to ensure type consistency
+      if (Number(p.map_id) === Number(localPlayer.map_id)) {
         const k = `${p.pos_x},${p.pos_y}`;
         (playersByTile[k] ||= []).push(p);
       }
@@ -1962,7 +1963,7 @@ function drawInventory() {
             let targetPlayer = null;
             if (localPlayer && localPlayer.id === effect.playerId) {
               targetPlayer = localPlayer;
-            } else if (otherPlayers[effect.playerId] && otherPlayers[effect.playerId].map_id === localPlayer.map_id) {
+            } else if (otherPlayers[effect.playerId] && Number(otherPlayers[effect.playerId].map_id) === Number(localPlayer.map_id)) {
               targetPlayer = otherPlayers[effect.playerId];
             }
             
