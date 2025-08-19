@@ -2086,7 +2086,7 @@ function drawInventory() {
     pushChat("[*] DragonSpires - Controls [*]");
     pushChat("- WASD or Arrow Keys to Move");
     pushChat("- TAB key to Attack");
-    pushChat("- 'G' key to pick-up / drop an item");
+    pushChat("- 'G' key to pick-up / drop an item, 'U' to use an item");
     pushChat("- 'T' key to equip a weapon in your hand, 'Y' for armor");
     pushChat("- 'I' key to open / close your inventory");
     pushChat("- 'C' key to swap an item from your inventory to your hand");
