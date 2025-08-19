@@ -805,11 +805,13 @@ document.addEventListener('DOMContentLoaded', () => {
                   otherPlayers[p.id] = {
                     ...p,
                     direction: p.direction || 'down',
+                    step: p.step || 2,
                     isMoving: p.isMoving || false,
-                    isAttacking: p.isAttacking || false,
+                    isAttacking: false, // Force no attack on teleport
                     isPickingUp: p.isPickingUp || false,
-                    animationFrame: p.animationFrame || DIRECTION_IDLE.down,
-                    movementSequenceIndex: p.movementSequenceIndex || 0
+                    isBRB: p.isBRB || false,
+                    temporarySprite: p.temporarySprite || 0,
+                    animationFrame: undefined // Clear any stale animation frame
                   };
                 }
               });
@@ -870,7 +872,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
       case 'player_left':
         const p = otherPlayers[msg.id];
-        const name = p?.username ?? msg.id;
+        const name = msg.username || p?.username || `#${msg.id}`;
         if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
         delete otherPlayers[msg.id];
         break;
