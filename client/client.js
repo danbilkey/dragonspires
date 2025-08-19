@@ -799,24 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localPlayer.pos_y = msg.y;
             localPlayer.map_id = msg.mapId;
             
-            // Update all players (no need to clear since we get all players)
-            if (msg.players) {
-              msg.players.forEach(p => {
-                if (p.id !== localPlayer.id) {
-                  otherPlayers[p.id] = {
-                    ...p,
-                    direction: p.direction || 'down',
-                    step: p.step || 2,
-                    isMoving: p.isMoving || false,
-                    isAttacking: false, // Force no attack on teleport
-                    isPickingUp: p.isPickingUp || false,
-                    isBRB: p.isBRB || false,
-                    temporarySprite: p.temporarySprite || 0,
-                    animationFrame: undefined // Clear any stale animation frame
-                  };
-                }
-              });
-            }
+            // No need to update otherPlayers here - the server broadcasts position updates
             
             // Update map items
             if (msg.items) {
