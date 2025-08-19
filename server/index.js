@@ -1680,24 +1680,7 @@ wss.on('connection', (ws) => {
         pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetMap, playerData.id])
       ]).catch(err => console.error('Error updating player after teleport:', err));
       
-      // Send success response to teleporting player (with ALL players for filtering)
-      const allPlayers = Array.from(clients.values())
-        .filter(p => p.id !== playerData.id)
-        .map(p => ({ ...p, isBRB: p.isBRB || false, temporarySprite: p.temporarySprite || 0 }));
-      
-      send(ws, {
-        type: 'teleport_result',
-        success: true,
-        id: playerData.id,
-        newMagic: playerData.magic,
-        x: targetX,
-        y: targetY,
-        mapId: targetMap,
-        players: allPlayers,
-        items: mapItems
-      });
-      
-      // Broadcast position/map update to ALL players (no player_left/player_joined)
+      // Broadcast position/map update to ALL players FIRST
       broadcast({
         type: 'player_moved',
         id: playerData.id,
@@ -1708,6 +1691,18 @@ wss.on('connection', (ws) => {
         step: playerData.step || 2,
         isMoving: false,
         isAttacking: false
+      });
+      
+      // Then send success response to teleporting player
+      send(ws, {
+        type: 'teleport_result',
+        success: true,
+        id: playerData.id,
+        newMagic: playerData.magic,
+        x: targetX,
+        y: targetY,
+        mapId: targetMap,
+        items: mapItems
       });
       
       // Broadcast magic update to teleporting player
