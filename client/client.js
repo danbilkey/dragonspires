@@ -504,7 +504,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- ANIMATION HELPERS ----------
   function getCurrentAnimationFrame(player, isLocal = false) {
-  if (player.isPickingUp) {
+  // For local player, use local pickup state
+  if (isLocal && isLocallyPickingUp) {
+    return 21; // 'sit' animation
+  }
+  // For other players, use their pickup state
+  if (!isLocal && player.isPickingUp) {
     return 21; // 'sit' animation
   }
   
@@ -615,7 +620,7 @@ document.addEventListener('DOMContentLoaded', () => {
           armor: msg.player.armor || 0,
           hands: msg.player.hands || 0
         };
-        console.log(`LocalPlayer logged in: map_id=${localPlayer.map_id}, pos(${localPlayer.pos_x},${localPlayer.pos_y})`);
+
         
         // Initialize local state variables
         playerDirection = localPlayer.direction;
@@ -701,7 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
               temporarySprite: 0
             };
           } else { 
-            console.log(`Updating player ${msg.id}: pos(${msg.x},${msg.y}) map_id=${msg.map_id}`);
+
             otherPlayers[msg.id].pos_x = msg.x; 
             otherPlayers[msg.id].pos_y = msg.y;
             otherPlayers[msg.id].map_id = msg.map_id;
@@ -781,7 +786,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (localPlayer && msg.id === localPlayer.id) {
             localPlayer.temporarySprite = msg.temporarySprite || 0;
             temporarySprite = localPlayer.temporarySprite;
-          } else if (otherPlayers[msg.id]) {
+          } else if (otherPlayers[msg.id] && Number(msg.map_id) === Number(localPlayer.map_id)) {
             otherPlayers[msg.id].temporarySprite = msg.temporarySprite || 0;
           }
           break;
@@ -800,7 +805,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localPlayer.pos_x = msg.x;
             localPlayer.pos_y = msg.y;
             localPlayer.map_id = msg.mapId;
-            console.log(`LocalPlayer teleported: map_id=${localPlayer.map_id}, pos(${localPlayer.pos_x},${localPlayer.pos_y})`);
+
             
             // No need to update otherPlayers here - the server broadcasts position updates
             
@@ -1355,6 +1360,15 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           
           // Reset stand flag when teleporting
           shouldStayInStand = false;
+          
+          // Clear pickup animation when teleporting
+          if (isLocallyPickingUp) {
+            isLocallyPickingUp = false;
+            if (localPickupTimeout) {
+              clearTimeout(localPickupTimeout);
+              localPickupTimeout = null;
+            }
+          }
         } else if (canMoveTo(nx, ny, localPlayer.id)) {
           // Normal movement logic
           if (localAttackTimeout) {
@@ -1386,7 +1400,16 @@ if (loggedIn && localPlayer && inventoryVisible && e.key === 'c') {
           send({ type: 'move', dx, dy, direction: playerDirection });
         
           // Reset stand flag when actually moving
-          shouldStayInStand = false;          
+          shouldStayInStand = false;
+          
+          // Clear pickup animation when moving
+          if (isLocallyPickingUp) {
+            isLocallyPickingUp = false;
+            if (localPickupTimeout) {
+              clearTimeout(localPickupTimeout);
+              localPickupTimeout = null;
+            }
+          }
         
           setTimeout(() => {
             if (localPlayer) {
@@ -1932,10 +1955,7 @@ function drawInventory() {
     }
     for (const id in otherPlayers) {
       const p = otherPlayers[id];
-      // Debug logging for map filtering
-      console.log(`Player ${p.username || p.id}: map_id=${p.map_id}(${typeof p.map_id}), localPlayer.map_id=${localPlayer.map_id}(${typeof localPlayer.map_id}), oldMatch=${p.map_id === localPlayer.map_id}, newMatch=${Number(p.map_id) === Number(localPlayer.map_id)}`);
       // Only render players on the same map as local player
-      // Convert to numbers to ensure type consistency
       if (Number(p.map_id) === Number(localPlayer.map_id)) {
         const k = `${p.pos_x},${p.pos_y}`;
         (playersByTile[k] ||= []).push(p);
