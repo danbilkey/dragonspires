@@ -615,6 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
           armor: msg.player.armor || 0,
           hands: msg.player.hands || 0
         };
+        console.log(`LocalPlayer logged in: map_id=${localPlayer.map_id}, pos(${localPlayer.pos_x},${localPlayer.pos_y})`);
         
         // Initialize local state variables
         playerDirection = localPlayer.direction;
@@ -700,6 +701,7 @@ document.addEventListener('DOMContentLoaded', () => {
               temporarySprite: 0
             };
           } else { 
+            console.log(`Updating player ${msg.id}: pos(${msg.x},${msg.y}) map_id=${msg.map_id}`);
             otherPlayers[msg.id].pos_x = msg.x; 
             otherPlayers[msg.id].pos_y = msg.y;
             otherPlayers[msg.id].map_id = msg.map_id;
@@ -798,6 +800,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localPlayer.pos_x = msg.x;
             localPlayer.pos_y = msg.y;
             localPlayer.map_id = msg.mapId;
+            console.log(`LocalPlayer teleported: map_id=${localPlayer.map_id}, pos(${localPlayer.pos_x},${localPlayer.pos_y})`);
             
             // No need to update otherPlayers here - the server broadcasts position updates
             
@@ -1929,6 +1932,8 @@ function drawInventory() {
     }
     for (const id in otherPlayers) {
       const p = otherPlayers[id];
+      // Debug logging for map filtering
+      console.log(`Player ${p.username || p.id}: map_id=${p.map_id}, localPlayer.map_id=${localPlayer.map_id}, match=${p.map_id === localPlayer.map_id}`);
       // Only render players on the same map as local player
       if (p.map_id === localPlayer.map_id) {
         const k = `${p.pos_x},${p.pos_y}`;
