@@ -328,11 +328,13 @@ async function loadMapSpec() {
   }
 }
 
+// SQL injection safe: uses parameterized query with $1 placeholder
 async function loadPlayer(username) {
   const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
   return r.rows[0];
 }
 
+// SQL injection safe: uses parameterized query with $1, $2, etc. placeholders
 async function createPlayer(username, password) {
   const hashed = await bcrypt.hash(password, 10);
   const r = await pool.query(
@@ -860,6 +862,21 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'login') {
       try {
+        // Input validation and sanitization
+        if (!msg.username || !msg.password) {
+          return send(ws, { type: 'login_error', message: 'Username and password are required' });
+        }
+        
+        // Validate username format (alphanumeric + underscore, 3-20 chars)
+        if (typeof msg.username !== 'string' || !/^[a-zA-Z0-9_]{3,20}$/.test(msg.username)) {
+          return send(ws, { type: 'login_error', message: 'Invalid username format' });
+        }
+        
+        // Validate password length
+        if (typeof msg.password !== 'string' || msg.password.length < 1 || msg.password.length > 100) {
+          return send(ws, { type: 'login_error', message: 'Invalid password' });
+        }
+        
         const found = await loadPlayer(msg.username);
         if (!found) return send(ws, { type: 'login_error', message: 'User not found' });
 
@@ -919,6 +936,21 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'signup') {
       try {
+        // Input validation and sanitization
+        if (!msg.username || !msg.password) {
+          return send(ws, { type: 'signup_error', message: 'Username and password are required' });
+        }
+        
+        // Validate username format (alphanumeric + underscore, 3-20 chars)
+        if (typeof msg.username !== 'string' || !/^[a-zA-Z0-9_]{3,20}$/.test(msg.username)) {
+          return send(ws, { type: 'signup_error', message: 'Username must be 3-20 characters (letters, numbers, underscore only)' });
+        }
+        
+        // Validate password requirements
+        if (typeof msg.password !== 'string' || msg.password.length < 3 || msg.password.length > 100) {
+          return send(ws, { type: 'signup_error', message: 'Password must be 3-100 characters long' });
+        }
+        
         const existing = await loadPlayer(msg.username);
         if (existing) return send(ws, { type: 'signup_error', message: 'Username taken' });
 
