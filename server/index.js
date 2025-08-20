@@ -1152,20 +1152,15 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'rotate') {
       if (!playerData) return;
 
-      // Clear temporary sprite when picking up
+      // Clear temporary sprite when rotating
       playerData.temporarySprite = 0;
-      // Broadcast temporary sprite clear
-      for (const [otherWs, otherPlayer] of clients.entries()) {
-        if (otherPlayer && otherPlayer.map_id === playerData.map_id) {
-          if (otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({
-              type: 'temporary_sprite_update',
-              id: playerData.id,
-              temporarySprite: 0
-            }));
-          }
-        }
-      }
+      // Broadcast temporary sprite clear to all players (client will filter by map)
+      broadcast({
+        type: 'temporary_sprite_update',
+        id: playerData.id,
+        map_id: playerData.map_id,
+        temporarySprite: 0
+      });
       
       // Update direction without moving
       if (msg.direction) {
@@ -1193,6 +1188,16 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'attack') {
       if (!playerData) return;
+      
+      // Clear temporary sprite when attacking
+      playerData.temporarySprite = 0;
+      // Broadcast temporary sprite clear to all players (client will filter by map)
+      broadcast({
+        type: 'temporary_sprite_update',
+        id: playerData.id,
+        map_id: playerData.map_id,
+        temporarySprite: 0
+      });
       
       // Clear BRB state when player attacks
       if (playerData.isBRB) {
@@ -1292,6 +1297,16 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'pickup_item') {
       if (!playerData) return;
+      
+      // Clear temporary sprite when picking up
+      playerData.temporarySprite = 0;
+      // Broadcast temporary sprite clear to all players (client will filter by map)
+      broadcast({
+        type: 'temporary_sprite_update',
+        id: playerData.id,
+        map_id: playerData.map_id,
+        temporarySprite: 0
+      });
       
       // Start pickup animation immediately for ALL pickup attempts
       startPickupAnimation(playerData, ws);
