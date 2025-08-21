@@ -1350,10 +1350,38 @@ wss.on('connection', (ws) => {
         const handsItem = playerData.hands || 0;
         if (handsItem === 0) return; // Animation already started, just return
         
-        playerData.hands = 0;
         const key = `${x},${y}`;
-        mapItems[key] = handsItem;
-        saveItemToDatabase(x, y, handsItem);
+        const existingMapItem = getItemAtPosition(x, y, serverMapSpec);
+        
+        // Check if there's an existing item on the map at this position
+        if (existingMapItem && existingMapItem > 0) {
+          // Check if the existing item is pickupable
+          const existingItemDetails = getItemDetails(existingMapItem);
+          const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
+          
+          if (existingItemDetails && pickupableTypes.includes(existingItemDetails.type)) {
+            // SWAP: existing map item goes to hands, hands item goes to map
+            playerData.hands = existingMapItem;
+            mapItems[key] = handsItem;
+            saveItemToDatabase(x, y, handsItem);
+            
+            console.log(`Item swap: Player got ${existingMapItem} from map, placed ${handsItem} on map`);
+          } else {
+            // Existing item not pickupable, just drop hands item on top (overwrite)
+            playerData.hands = 0;
+            mapItems[key] = handsItem;
+            saveItemToDatabase(x, y, handsItem);
+            
+            console.log(`Dropped ${handsItem} on map, overwriting non-pickupable item ${existingMapItem}`);
+          }
+        } else {
+          // No existing item or empty space, just drop the hands item
+          playerData.hands = 0;
+          mapItems[key] = handsItem;
+          saveItemToDatabase(x, y, handsItem);
+          
+          console.log(`Dropped ${handsItem} on empty map space`);
+        }
         
         updateStatsInDb(playerData.id, { hands: playerData.hands })
           .catch(err => console.error('Error updating player hands:', err));
