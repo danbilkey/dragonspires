@@ -407,21 +407,8 @@ document.addEventListener('DOMContentLoaded', () => {
       await Promise.all(loadPromises);
       tilesReady = true;
 
-      fetch('map.json')
-        .then(r => r.json())
-        .then(m => {
-          if (m && m.width && m.height) {
-            const tiles = Array.isArray(m.tiles) ? m.tiles : (Array.isArray(m.tilemap) ? m.tilemap : null);
-            mapSpec = {
-              width: m.width,
-              height: m.height,
-              tiles: tiles || [],
-              items: Array.isArray(m.items) ? m.items : []
-            };
-          }
-        })
-        .catch(() => {})
-        .finally(() => { mapReady = true; });
+      // Map loading will be handled by loadMapForPlayer function
+      mapReady = true;
 
     } catch (e) {
       console.error("Floor tile extraction failed:", e);
@@ -501,6 +488,36 @@ document.addEventListener('DOMContentLoaded', () => {
     window.itemSpriteCount = () => itemSprites.length - 1;
     window.itemsReady = () => itemsReady;
   })();
+
+  // ---------- MAP LOADING ----------
+  async function loadMapForPlayer(mapId) {
+    try {
+      const mapFileName = `/maps/map${mapId}.json`;
+      const response = await fetch(mapFileName);
+      
+      if (!response.ok) {
+        console.error(`Failed to load map ${mapId}: ${response.status}`);
+        return false;
+      }
+      
+      const m = await response.json();
+      
+      if (m && m.width && m.height) {
+        const tiles = Array.isArray(m.tiles) ? m.tiles : (Array.isArray(m.tilemap) ? m.tilemap : null);
+        mapSpec = {
+          width: m.width,
+          height: m.height,
+          tiles: tiles || [],
+          items: Array.isArray(m.items) ? m.items : []
+        };
+        console.log(`Client loaded map ${mapId}: ${mapSpec.width}x${mapSpec.height}`);
+        return true;
+      }
+    } catch (error) {
+      console.error(`Error loading map ${mapId}:`, error);
+    }
+    return false;
+  }
 
   // ---------- ANIMATION HELPERS ----------
   function getCurrentAnimationFrame(player, isLocal = false) {
@@ -621,6 +638,8 @@ document.addEventListener('DOMContentLoaded', () => {
           hands: msg.player.hands || 0
         };
 
+        // Load the correct map for the player
+        loadMapForPlayer(localPlayer.map_id || 1);
         
         // Initialize local state variables
         playerDirection = localPlayer.direction;
@@ -804,8 +823,14 @@ document.addEventListener('DOMContentLoaded', () => {
             localPlayer.magic = msg.newMagic;
             localPlayer.pos_x = msg.x;
             localPlayer.pos_y = msg.y;
-            localPlayer.map_id = msg.mapId;
-
+            
+            // Check if map changed and reload if necessary
+            if (localPlayer.map_id !== msg.mapId) {
+              localPlayer.map_id = msg.mapId;
+              loadMapForPlayer(msg.mapId);
+            } else {
+              localPlayer.map_id = msg.mapId;
+            }
             
             // No need to update otherPlayers here - the server broadcasts position updates
             
