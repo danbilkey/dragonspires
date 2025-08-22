@@ -1022,7 +1022,13 @@ wss.on('connection', (ws) => {
         const inventory = await loadPlayerInventory(playerData.id);
 
         // Load items for the player's current map
-        const playerMapItems = await loadItemsFromDatabase(playerData.map_id);
+        let playerMapItems = {};
+        try {
+          playerMapItems = await loadItemsFromDatabase(playerData.map_id);
+        } catch (itemError) {
+          console.error(`Error loading items for map ${playerData.map_id}:`, itemError);
+          playerMapItems = {}; // Fallback to empty items
+        }
 
         const others = Array.from(clients.values())
           .filter(p => p.id !== playerData.id)
@@ -1097,7 +1103,13 @@ wss.on('connection', (ws) => {
         const inventory = await loadPlayerInventory(playerData.id);
 
         // Load items for the player's current map
-        const playerMapItems = await loadItemsFromDatabase(playerData.map_id);
+        let playerMapItems = {};
+        try {
+          playerMapItems = await loadItemsFromDatabase(playerData.map_id);
+        } catch (itemError) {
+          console.error(`Error loading items for map ${playerData.map_id}:`, itemError);
+          playerMapItems = {}; // Fallback to empty items
+        }
 
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
         send(ws, { type: 'signup_success', player: playerData, players: others, items: playerMapItems, inventory: inventory });
