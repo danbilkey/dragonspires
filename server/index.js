@@ -1959,7 +1959,8 @@ wss.on('connection', (ws) => {
       startAttackAnimation(playerData, ws);
       
       // Verify the fountain item is still there
-      const targetItemId = getItemAtPosition(msg.x, msg.y, serverMapSpec);
+      const playerMapSpec = getMapSpec(playerData.map_id);
+      const targetItemId = getItemAtPosition(msg.x, msg.y, playerMapSpec, playerData.map_id);
       if (targetItemId === 60) {
         // Heal the player
         playerData.stamina = playerData.max_stamina ?? 10;
@@ -2093,12 +2094,12 @@ wss.on('connection', (ws) => {
         if (itemId === 0) {
           delete mapItems[key];
           // Remove from database
-          pool.query('DELETE FROM map_items WHERE x=$1 AND y=$2', [adjacentPos.x, adjacentPos.y])
+          pool.query('DELETE FROM map_items WHERE x=$1 AND y=$2 AND map_id=$3', [adjacentPos.x, adjacentPos.y, playerData.map_id])
             .catch(err => console.error('Error removing item from database:', err));
         } else {
           mapItems[key] = itemId;
           // Save to database
-          saveItemToDatabase(adjacentPos.x, adjacentPos.y, itemId);
+          saveItemToDatabase(adjacentPos.x, adjacentPos.y, itemId, playerData.map_id);
         }
 
         // Broadcast item update to all clients
