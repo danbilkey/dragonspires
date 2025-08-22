@@ -2100,6 +2100,7 @@ wss.on('connection', (ws) => {
           send(ws, {
             type: 'teleport_result',
             success: true,
+            id: playerData.id,
             x: playerData.pos_x,
             y: playerData.pos_y,
             mapId: targetMapId,
