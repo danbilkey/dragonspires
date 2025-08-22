@@ -632,7 +632,7 @@ function getAdjacentPosition(x, y, direction) {
 }
 
 // Check if movement to position is allowed
-function canMoveTo(x, y, excludePlayerId = null) {
+function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1) {
   // Check map bounds
   if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) {
     return false;
@@ -644,7 +644,7 @@ function canMoveTo(x, y, excludePlayerId = null) {
   }
   
   // Check item collision
-  const targetItemId = getItemAtPosition(x, y, serverMapSpec);
+  const targetItemId = getItemAtPosition(x, y, mapSpec, mapId);
   const targetItemDetails = getItemDetails(targetItemId);
   if (targetItemDetails && targetItemDetails.collision) {
     return false;
@@ -898,11 +898,24 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS map_items (
         x INTEGER,
         y INTEGER,
-        map_id INTEGER DEFAULT 1,
         item_id INTEGER,
-        PRIMARY KEY (x, y, map_id)
+        PRIMARY KEY (x, y)
       )
     `);
+
+    // Add map_id column if it doesn't exist (migration)
+    try {
+      await pool.query(`ALTER TABLE map_items ADD COLUMN IF NOT EXISTS map_id INTEGER DEFAULT 1`);
+      // Update the primary key to include map_id (this might fail on existing data, that's okay)
+      try {
+        await pool.query(`ALTER TABLE map_items DROP CONSTRAINT IF EXISTS map_items_pkey`);
+        await pool.query(`ALTER TABLE map_items ADD PRIMARY KEY (x, y, map_id)`);
+      } catch (pkError) {
+        console.log('Primary key update skipped (existing data may prevent this)');
+      }
+    } catch (alterError) {
+      console.error('Error adding map_id column:', alterError);
+    }
 
     // Create player_inventory table if it doesn't exist
     await pool.query(`
@@ -918,9 +931,15 @@ async function initializeDatabase() {
 
     console.log('Database tables initialized');
     
-    // Load existing items
-    mapItems = await loadItemsFromDatabase();
-    console.log(`Loaded ${Object.keys(mapItems).length} items from database`);
+    // Load existing items (with error handling for schema migration)
+    try {
+      mapItems = await loadItemsFromDatabase();
+      console.log(`Loaded ${Object.keys(mapItems).length} items from database`);
+    } catch (itemLoadError) {
+      console.error('Error loading items from database:', itemLoadError);
+      mapItems = {}; // Initialize empty if loading fails
+      console.log('Initialized empty items due to database migration');
+    }
   } catch (error) {
     console.error('Error initializing database:', error);
   }
@@ -1160,10 +1179,11 @@ wss.on('connection', (ws) => {
       const ny = playerData.pos_y + dy;
 
      // Check for teleportation items first
-      const targetItemId = getItemAtPosition(nx, ny, serverMapSpec);
+      const playerMapSpec = getMapSpec(playerData.map_id);
+      const targetItemId = getItemAtPosition(nx, ny, playerMapSpec, playerData.map_id);
       if (targetItemId === 42 || targetItemId === 338) {
         // Handle chain teleportation
-        const finalDestination = calculateChainTeleportation(nx, ny, serverMapSpec);
+        const finalDestination = calculateChainTeleportation(nx, ny, playerMapSpec);
         
         // Check if final destination is within bounds (should be, but double-check)
         if (finalDestination.x < 0 || finalDestination.y < 0 || 
@@ -1221,7 +1241,7 @@ wss.on('connection', (ws) => {
       // Increment step: 1 -> 2 -> 3 -> 1
       playerData.step = playerData.step === 3 ? 1 : (playerData.step ?? 2) + 1;
       
-      if (canMoveTo(nx, ny, playerData.id)) {
+      if (canMoveTo(nx, ny, playerData.id, playerMapSpec, playerData.map_id)) {
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
