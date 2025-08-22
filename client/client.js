@@ -1074,22 +1074,24 @@ document.addEventListener('DOMContentLoaded', () => {
       
       console.log(`Pickup attempt: position (${localPlayer.pos_x},${localPlayer.pos_y}), itemId: ${itemId}, itemDetails:`, itemDetails);
       
-      if (itemDetails && isItemPickupable(itemDetails)) {
+      // Priority: If player has something in hands, always drop/swap (even if there's an item on ground)
+      if (localPlayer.hands && localPlayer.hands > 0) {
+        console.log(`Dropping item from hands: ${localPlayer.hands} ${itemDetails ? '(will swap with ' + itemId + ')' : '(empty ground)'}`);
+        send({
+          type: 'pickup_item',
+          x: localPlayer.pos_x,
+          y: localPlayer.pos_y,
+          itemId: 0
+        });
+      }
+      // Only pick up if hands are empty
+      else if (itemDetails && isItemPickupable(itemDetails)) {
         console.log(`Sending pickup request for item ${itemId}`);
         send({
           type: 'pickup_item',
           x: localPlayer.pos_x,
           y: localPlayer.pos_y,
           itemId: itemId
-        });
-      }
-      else if ((!itemDetails || !isItemPickupable(itemDetails)) && localPlayer.hands && localPlayer.hands > 0) {
-        console.log(`Dropping item from hands: ${localPlayer.hands}`);
-        send({
-          type: 'pickup_item',
-          x: localPlayer.pos_x,
-          y: localPlayer.pos_y,
-          itemId: 0
         });
       } else {
         console.log(`No action taken - no pickupable item and no hands item to drop`);
