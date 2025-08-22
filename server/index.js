@@ -249,11 +249,11 @@ function getRandomItemByTypes(types) {
   return randomItem.id;
 }
 
-function getItemAtPosition(x, y, mapSpec) {
+function getItemAtPosition(x, y, mapSpec, mapId = 1) {
   // Check both map items and placed items
   const mapItem = (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
     ? mapSpec.items[y][x] : 0;
-  const placedItem = mapItems[`${x},${y}`];
+  const placedItem = mapItems[`${x},${y}`]; // For now, still use old format for backwards compatibility
   
   // If there's a placed item entry (but not -1 which means "picked up"), it overrides the map item
   if (placedItem !== undefined && placedItem !== -1) {
@@ -275,23 +275,41 @@ function getNaturalMapItem(x, y, mapSpec) {
     ? mapSpec.items[y][x] : 0;
 }
 
-// We need to load the map spec on server for proper item detection
-let serverMapSpec = null;
+// Multi-map system
+let serverMaps = {}; // { mapId: mapSpec }
+let serverMapData = {}; // { mapId: mapData }
 
-async function loadMapSpec() {
+async function loadAllMaps() {
   try {
     const fs = require('fs').promises;
     const path = require('path');
-    // Try multiple possible paths for map.json including /maps/ directory
+    
+    // Try to load maps 1-4
+    for (let mapId = 1; mapId <= 4; mapId++) {
+      await loadSingleMap(mapId);
+      await loadSingleMapData(mapId);
+    }
+    
+    console.log(`Server loaded ${Object.keys(serverMaps).length} maps`);
+  } catch (error) {
+    console.error('Failed to load maps on server:', error);
+  }
+}
+
+async function loadSingleMap(mapId) {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const mapFileName = `map${mapId}.json`;
+    
+    // Try multiple possible paths for map files
     const possiblePaths = [
-      path.join(__dirname, '..', 'maps', 'map.json'),
-      path.join(__dirname, 'maps', 'map.json'),
-      path.join(__dirname, '..', '..', 'maps', 'map.json'),
-      path.join(process.cwd(), 'maps', 'map.json'),
-      path.join(__dirname, '..', 'map.json'),
-      path.join(__dirname, 'map.json'),
-      path.join(__dirname, '..', '..', 'map.json'),
-      path.join(process.cwd(), 'map.json')
+      path.join(__dirname, '..', 'maps', mapFileName),
+      path.join(__dirname, 'maps', mapFileName),
+      path.join(__dirname, '..', '..', 'maps', mapFileName),
+      path.join(process.cwd(), 'maps', mapFileName),
+      path.join(__dirname, '..', 'server', 'maps', mapFileName),
+      path.join(process.cwd(), 'server', 'maps', mapFileName)
     ];
     
     let data = null;
@@ -309,29 +327,73 @@ async function loadMapSpec() {
     }
     
     if (!data) {
-      console.error('Could not find map.json in any of the expected paths:', possiblePaths);
+      console.log(`Could not find ${mapFileName} in any of the expected paths`);
       return;
     }
     
     const parsed = JSON.parse(data);
     
     if (parsed && parsed.width && parsed.height) {
-      serverMapSpec = {
+      serverMaps[mapId] = {
         width: parsed.width,
         height: parsed.height,
         tiles: Array.isArray(parsed.tiles) ? parsed.tiles : (Array.isArray(parsed.tilemap) ? parsed.tilemap : []),
         items: Array.isArray(parsed.items) ? parsed.items : []
       };
-      console.log(`Server loaded map spec from: ${usedPath}`);
-      console.log(`Map dimensions: ${serverMapSpec.width}x${serverMapSpec.height}`);
-      console.log(`Map has ${serverMapSpec.items.length} item rows`);
-      if (serverMapSpec.items.length > 0) {
-        console.log(`Sample items row 0:`, serverMapSpec.items[0]);
-      }
+      console.log(`Server loaded map ${mapId} from: ${usedPath}`);
+      console.log(`Map ${mapId} dimensions: ${serverMaps[mapId].width}x${serverMaps[mapId].height}`);
     }
   } catch (error) {
-    console.error('Failed to load map spec on server:', error);
+    console.error(`Failed to load map ${mapId}:`, error);
   }
+}
+
+async function loadSingleMapData(mapId) {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const mapDataFileName = `map${mapId}data.json`;
+    
+    // Try multiple possible paths for map data files
+    const possiblePaths = [
+      path.join(__dirname, '..', 'maps', mapDataFileName),
+      path.join(__dirname, 'maps', mapDataFileName),
+      path.join(__dirname, '..', '..', 'maps', mapDataFileName),
+      path.join(process.cwd(), 'maps', mapDataFileName),
+      path.join(__dirname, '..', 'server', 'maps', mapDataFileName),
+      path.join(process.cwd(), 'server', 'maps', mapDataFileName)
+    ];
+    
+    let data = null;
+    let usedPath = null;
+    
+    for (const mapDataPath of possiblePaths) {
+      try {
+        data = await fs.readFile(mapDataPath, 'utf8');
+        usedPath = mapDataPath;
+        break;
+      } catch (err) {
+        // Try next path
+        continue;
+      }
+    }
+    
+    if (!data) {
+      console.log(`Could not find ${mapDataFileName} (optional)`);
+      return;
+    }
+    
+    const parsed = JSON.parse(data);
+    serverMapData[mapId] = parsed;
+    console.log(`Server loaded map ${mapId} data from: ${usedPath}`);
+  } catch (error) {
+    console.error(`Failed to load map ${mapId} data:`, error);
+  }
+}
+
+// Helper function to get map spec by ID (backwards compatibility)
+function getMapSpec(mapId) {
+  return serverMaps[mapId] || null;
 }
 
 // SQL injection safe: uses parameterized query with $1 placeholder
@@ -387,24 +449,34 @@ async function updateStatsInDb(id, fields) {
   await pool.query(sql, vals);
 }
 
-async function saveItemToDatabase(x, y, itemId) {
+async function saveItemToDatabase(x, y, itemId, mapId = 1) {
   try {
     await pool.query(
-      'INSERT INTO map_items (x, y, item_id) VALUES ($1, $2, $3) ON CONFLICT (x, y) DO UPDATE SET item_id = $3',
-      [x, y, itemId]
+      'INSERT INTO map_items (x, y, map_id, item_id) VALUES ($1, $2, $3, $4) ON CONFLICT (x, y, map_id) DO UPDATE SET item_id = $4',
+      [x, y, mapId, itemId]
     );
   } catch (error) {
     console.error('Error saving item to database:', error);
   }
 }
 
-async function loadItemsFromDatabase() {
+async function loadItemsFromDatabase(mapId = null) {
   try {
-    const result = await pool.query('SELECT x, y, item_id FROM map_items');
+    let query = 'SELECT x, y, map_id, item_id FROM map_items';
+    let params = [];
+    
+    if (mapId !== null) {
+      query += ' WHERE map_id = $1';
+      params = [mapId];
+    }
+    
+    const result = await pool.query(query, params);
     const items = {};
     result.rows.forEach(row => {
       // Include all entries, including -1 (picked up map items)
-      items[`${row.x},${row.y}`] = row.item_id;
+      // Key format: "x,y" for single map or "mapId:x,y" for multi-map
+      const key = mapId !== null ? `${row.x},${row.y}` : `${row.map_id}:${row.x},${row.y}`;
+      items[key] = row.item_id;
     });
     return items;
   } catch (error) {
@@ -826,8 +898,9 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS map_items (
         x INTEGER,
         y INTEGER,
+        map_id INTEGER DEFAULT 1,
         item_id INTEGER,
-        PRIMARY KEY (x, y)
+        PRIMARY KEY (x, y, map_id)
       )
     `);
 
@@ -856,7 +929,7 @@ async function initializeDatabase() {
 // Initialize database on startup
 initializeDatabase();
 loadItemDetails();
-loadMapSpec();
+loadAllMaps();
 loadFloorCollision();
 
 wss.on('connection', (ws) => {
@@ -929,10 +1002,13 @@ wss.on('connection', (ws) => {
         // Load player inventory
         const inventory = await loadPlayerInventory(playerData.id);
 
+        // Load items for the player's current map
+        const playerMapItems = await loadItemsFromDatabase(playerData.map_id);
+
         const others = Array.from(clients.values())
           .filter(p => p.id !== playerData.id)
           .map(p => ({ ...p, isBRB: p.isBRB || false }));
-        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: mapItems, inventory: inventory });
+        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: playerMapItems, inventory: inventory });
         broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false, map_id: playerData.map_id } });
       } catch (e) {
         console.error('Login error', e);
@@ -1001,8 +1077,11 @@ wss.on('connection', (ws) => {
         // Load player inventory
         const inventory = await loadPlayerInventory(playerData.id);
 
+        // Load items for the player's current map
+        const playerMapItems = await loadItemsFromDatabase(playerData.map_id);
+
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
-        send(ws, { type: 'signup_success', player: playerData, players: others, items: mapItems, inventory: inventory });
+        send(ws, { type: 'signup_success', player: playerData, players: others, items: playerMapItems, inventory: inventory });
         broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0, map_id: playerData.map_id } });
       } catch (e) {
         console.error('Signup error', e);
@@ -1357,7 +1436,8 @@ wss.on('connection', (ws) => {
         if (handsItem === 0) return; // Animation already started, just return
         
         const key = `${x},${y}`;
-        const existingMapItem = getItemAtPosition(x, y, serverMapSpec);
+        const playerMapSpec = getMapSpec(playerData.map_id);
+        const existingMapItem = getItemAtPosition(x, y, playerMapSpec, playerData.map_id);
         
         console.log(`Drop check at (${x},${y}): mapItems[${key}]=${mapItems[key]}, getItemAtPosition=${existingMapItem}`);
         
@@ -1371,14 +1451,14 @@ wss.on('connection', (ws) => {
             // SWAP: existing map item goes to hands, hands item goes to map
             playerData.hands = existingMapItem;
             mapItems[key] = handsItem;
-            saveItemToDatabase(x, y, handsItem);
+            saveItemToDatabase(x, y, handsItem, playerData.map_id);
             
             console.log(`Item swap: Player got ${existingMapItem} from map, placed ${handsItem} on map`);
           } else {
             // Existing item not pickupable, just drop hands item on top (overwrite)
             playerData.hands = 0;
             mapItems[key] = handsItem;
-            saveItemToDatabase(x, y, handsItem);
+            saveItemToDatabase(x, y, handsItem, playerData.map_id);
             
             console.log(`Dropped ${handsItem} on map, overwriting non-pickupable item ${existingMapItem}`);
           }
@@ -1386,7 +1466,7 @@ wss.on('connection', (ws) => {
           // No existing visible item, just drop the hands item
           playerData.hands = 0;
           mapItems[key] = handsItem;
-          saveItemToDatabase(x, y, handsItem);
+          saveItemToDatabase(x, y, handsItem, playerData.map_id);
           
           console.log(`Dropped ${handsItem} on empty map space`);
         }
@@ -1411,7 +1491,8 @@ wss.on('connection', (ws) => {
       }
       
       // Verify item exists (but animation already started)
-      const actualItemId = getItemAtPosition(x, y, serverMapSpec);
+      const playerMapSpec = getMapSpec(playerData.map_id);
+      const actualItemId = getItemAtPosition(x, y, playerMapSpec, playerData.map_id);
       if (actualItemId !== itemId) {
         console.log(`ERROR: Item mismatch! Expected ${itemId}, found ${actualItemId}`);
         return; // Animation continues even if pickup fails
@@ -1440,7 +1521,7 @@ wss.on('connection', (ws) => {
       
       // Mark as picked up with -1 (this should make it disappear)
       mapItems[key] = -1;
-      saveItemToDatabase(x, y, -1);
+      saveItemToDatabase(x, y, -1, playerData.map_id);
       
       // Update player
       updateStatsInDb(playerData.id, { hands: playerData.hands })
@@ -2088,4 +2169,5 @@ setInterval(async () => {
 }, 30000);
 
 const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
 server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
