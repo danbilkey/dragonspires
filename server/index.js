@@ -133,16 +133,16 @@ async function loadFloorCollision() {
   }
 }
 
-function hasFloorCollision(x, y) {
-  if (!floorCollisionReady || !floorCollision || !serverMapSpec || 
+function hasFloorCollision(x, y, mapSpec = null) {
+  if (!floorCollisionReady || !floorCollision || !mapSpec || 
       x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT) {
     return false; // No collision data, no map spec, or out of bounds
   }
   
   // Get the floor tile ID at this position
-  const tileId = (serverMapSpec.tiles && serverMapSpec.tiles[y] && 
-                  typeof serverMapSpec.tiles[y][x] !== 'undefined') 
-                  ? serverMapSpec.tiles[y][x] : 0;
+  const tileId = (mapSpec.tiles && mapSpec.tiles[y] && 
+                  typeof mapSpec.tiles[y][x] !== 'undefined') 
+                  ? mapSpec.tiles[y][x] : 0;
   
   // If no tile (ID 0) or tile ID is out of range, no collision
   if (tileId <= 0 || tileId > floorCollision.length) {
@@ -639,7 +639,7 @@ function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1) {
   }
   
   // Check floor collision
-  if (hasFloorCollision(x, y)) {
+  if (hasFloorCollision(x, y, mapSpec)) {
     return false;
   }
   
