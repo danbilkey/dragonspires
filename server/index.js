@@ -1358,42 +1358,32 @@ wss.on('connection', (ws) => {
         
         const key = `${x},${y}`;
         const existingMapItem = getItemAtPosition(x, y, serverMapSpec);
-        const naturalMapItem = getNaturalMapItem(x, y, serverMapSpec);
-        const placedItemStatus = mapItems[key];
         
-        console.log(`Drop check at (${x},${y}): mapItems[${key}]=${placedItemStatus}, getItemAtPosition=${existingMapItem}, naturalMapItem=${naturalMapItem}`);
+        console.log(`Drop check at (${x},${y}): mapItems[${key}]=${mapItems[key]}, getItemAtPosition=${existingMapItem}`);
         
-        // Check if there's an existing item on the map at this position
-        // If the location has a picked-up item (-1), check if there's a natural map item to restore
-        let itemToSwapWith = existingMapItem;
-        if (existingMapItem === 0 && placedItemStatus === -1 && naturalMapItem > 0) {
-          // There's a natural map item that was picked up, we can restore it
-          itemToSwapWith = naturalMapItem;
-          console.log(`Found natural map item ${naturalMapItem} to restore at (${x},${y})`);
-        }
-        
-        if (itemToSwapWith && itemToSwapWith > 0) {
-          // Check if the item to swap with is pickupable
-          const swapItemDetails = getItemDetails(itemToSwapWith);
+        // Check if there's an existing item on the map at this position that we can see
+        if (existingMapItem && existingMapItem > 0) {
+          // Check if the existing item is pickupable
+          const existingItemDetails = getItemDetails(existingMapItem);
           const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
           
-          if (swapItemDetails && pickupableTypes.includes(swapItemDetails.type)) {
-            // SWAP: item goes to hands, hands item goes to map
-            playerData.hands = itemToSwapWith;
+          if (existingItemDetails && pickupableTypes.includes(existingItemDetails.type)) {
+            // SWAP: existing map item goes to hands, hands item goes to map
+            playerData.hands = existingMapItem;
             mapItems[key] = handsItem;
             saveItemToDatabase(x, y, handsItem);
             
-            console.log(`Item swap: Player got ${itemToSwapWith} from map, placed ${handsItem} on map`);
+            console.log(`Item swap: Player got ${existingMapItem} from map, placed ${handsItem} on map`);
           } else {
-            // Item not pickupable, just drop hands item on top (overwrite)
+            // Existing item not pickupable, just drop hands item on top (overwrite)
             playerData.hands = 0;
             mapItems[key] = handsItem;
             saveItemToDatabase(x, y, handsItem);
             
-            console.log(`Dropped ${handsItem} on map, overwriting non-pickupable item ${itemToSwapWith}`);
+            console.log(`Dropped ${handsItem} on map, overwriting non-pickupable item ${existingMapItem}`);
           }
         } else {
-          // No existing item or empty space, just drop the hands item
+          // No existing visible item, just drop the hands item
           playerData.hands = 0;
           mapItems[key] = handsItem;
           saveItemToDatabase(x, y, handsItem);
