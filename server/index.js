@@ -560,8 +560,8 @@ async function clearAllMapItems() {
 // Function to reload map and item data
 async function reloadGameData() {
   try {
-    // Reload map specification
-    await loadMapSpec();
+    // Reload all maps
+    await loadAllMaps();
     
     // Reload item details
     await loadItemDetails();
@@ -2046,6 +2046,71 @@ wss.on('connection', (ws) => {
         } catch (error) {
           console.error('Error during server reset:', error);
           send(ws, { type: 'chat', text: '~ Error: Server reset failed.' });
+        }
+        return;
+      }
+
+      // Check for -gotomap admin command
+      const gotoMapMatch = t.match(/^-gotomap\s+(\d+)$/i);
+      if (gotoMapMatch) {
+        // Validate admin role
+        if (playerData.role !== 'admin') {
+          // Do nothing for non-admin users
+          return;
+        }
+
+        const targetMapId = parseInt(gotoMapMatch[1]);
+        if (targetMapId < 1 || targetMapId > 4) {
+          send(ws, { type: 'chat', text: '~ Invalid map ID. Valid maps: 1-4' });
+          return;
+        }
+
+        // Check if target map exists
+        if (!getMapSpec(targetMapId)) {
+          send(ws, { type: 'chat', text: `~ Map ${targetMapId} not found.` });
+          return;
+        }
+
+        // Update player's map_id in database
+        try {
+          await pool.query(
+            'UPDATE players SET map_id = $1 WHERE id = $2',
+            [targetMapId, playerData.id]
+          );
+          
+          // Update player data
+          const oldMapId = playerData.map_id;
+          playerData.map_id = targetMapId;
+          
+          // Broadcast player moved to all clients (they will filter by map)
+          broadcast({
+            type: 'player_moved',
+            id: playerData.id,
+            x: playerData.pos_x,
+            y: playerData.pos_y,
+            map_id: playerData.map_id,
+            direction: playerData.direction,
+            step: playerData.step,
+            isMoving: false,
+            isAttacking: false
+          });
+          
+          // Send map change result to the admin
+          const mapItems = await loadItemsFromDatabase(targetMapId);
+          send(ws, {
+            type: 'teleport_result',
+            success: true,
+            x: playerData.pos_x,
+            y: playerData.pos_y,
+            mapId: targetMapId,
+            items: mapItems
+          });
+          
+          send(ws, { type: 'chat', text: `~ Teleported to map ${targetMapId}` });
+          
+        } catch (error) {
+          console.error('Error changing player map:', error);
+          send(ws, { type: 'chat', text: '~ Error changing map.' });
         }
         return;
       }
