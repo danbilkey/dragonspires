@@ -43,6 +43,7 @@
         <p>R - Increase selected tile/item | E - Decrease selected tile/item</p>
         <p>Space - Place selected tile/item at current position</p>
         <p>G - Pick up (copy) the floor tile or item at current position</p>
+        <p>N - Clear map (set all floors to tile 6, all items to 0)</p>
         <p>P - Save map as newmap.json</p>
         <p>I - Import/Load a JSON map file</p>
     </div>
@@ -346,6 +347,34 @@
                 } else {
                     pushChat(statusMsg);
                 }
+            }
+
+            function clearMap() {
+                if (!mapReady) return;
+                
+                // Set all floor tiles to 6 (default grass)
+                for (let y = 0; y < mapSpec.height; y++) {
+                    if (!mapSpec.tiles[y]) {
+                        mapSpec.tiles[y] = new Array(mapSpec.width).fill(6);
+                    } else {
+                        for (let x = 0; x < mapSpec.width; x++) {
+                            mapSpec.tiles[y][x] = 6;
+                        }
+                    }
+                }
+                
+                // Set all items to 0 (empty)
+                for (let y = 0; y < mapSpec.height; y++) {
+                    if (!mapSpec.items[y]) {
+                        mapSpec.items[y] = new Array(mapSpec.width).fill(0);
+                    } else {
+                        for (let x = 0; x < mapSpec.width; x++) {
+                            mapSpec.items[y][x] = 0;
+                        }
+                    }
+                }
+                
+                pushChat(`Map cleared: all floors set to tile 6, all items removed`);
             }
 
             function loadMapFile() {
@@ -670,6 +699,12 @@
                         pushChat(`Picked up item ${selectedItem} from (${playerX}, ${playerY})`);
                         updateStatusMessage();
                     }
+                    e.preventDefault();
+                }
+                
+                // Clear map
+                else if (k === 'n') {
+                    clearMap();
                     e.preventDefault();
                 }
                 
