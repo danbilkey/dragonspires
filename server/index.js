@@ -591,6 +591,19 @@ function getOnlinePlayersList() {
   return playerNames.sort(); // Sort alphabetically
 }
 
+// Async function to log chat messages (non-blocking)
+async function logChatMessage(playerId, username, messageType, message, mapId = null) {
+  try {
+    await pool.query(
+      'INSERT INTO chat_log (player_id, username, message_type, message, map_id) VALUES ($1, $2, $3, $4, $5)',
+      [playerId, username, messageType, message, mapId]
+    );
+  } catch (error) {
+    // Silently fail - chat logging is non-critical
+    console.error('Chat logging error (non-critical):', error);
+  }
+}
+
 function broadcast(obj) {
   const s = JSON.stringify(obj);
   for (const [ws] of clients.entries()) {
@@ -903,6 +916,19 @@ async function initializeDatabase() {
       )
     `);
 
+    // Create chat_log table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS chat_log (
+        id SERIAL PRIMARY KEY,
+        player_id INTEGER,
+        username VARCHAR(50),
+        message_type VARCHAR(20) NOT NULL,
+        message TEXT NOT NULL,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        map_id INTEGER
+      )
+    `);
+
     // Add map_id column if it doesn't exist (migration)
     try {
       await pool.query(`ALTER TABLE map_items ADD COLUMN IF NOT EXISTS map_id INTEGER DEFAULT 1`);
@@ -1035,6 +1061,14 @@ wss.on('connection', (ws) => {
           .map(p => ({ ...p, isBRB: p.isBRB || false }));
         send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: playerMapItems, inventory: inventory });
         broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false, map_id: playerData.map_id } });
+        
+        // Send global chat about player joining and log it
+        const joinMessage = `${playerData.username} enters DragonSpires.`;
+        broadcast({ type: 'chat', text: joinMessage });
+        
+        // Log the login message (non-blocking)
+        logChatMessage(playerData.id, playerData.username, 'login', joinMessage, playerData.map_id)
+          .catch(() => {}); // Silently ignore logging errors
       } catch (e) {
         console.error('Login error', e);
         send(ws, { type: 'login_error', message: 'Server error' });
@@ -1114,6 +1148,14 @@ wss.on('connection', (ws) => {
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
         send(ws, { type: 'signup_success', player: playerData, players: others, items: playerMapItems, inventory: inventory });
         broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0, map_id: playerData.map_id } });
+        
+        // Send global chat about player joining and log it
+        const joinMessage = `${playerData.username} enters DragonSpires.`;
+        broadcast({ type: 'chat', text: joinMessage });
+        
+        // Log the login message (non-blocking)
+        logChatMessage(playerData.id, playerData.username, 'login', joinMessage, playerData.map_id)
+          .catch(() => {}); // Silently ignore logging errors
       } catch (e) {
         console.error('Signup error', e);
         send(ws, { type: 'signup_error', message: 'Server error' });
@@ -2186,7 +2228,12 @@ wss.on('connection', (ws) => {
       }
 
       // Regular chat message
-      broadcast({ type: 'chat', text: `${playerData.username}: ${t}` });
+      const chatMessage = `${playerData.username}: ${t}`;
+      broadcast({ type: 'chat', text: chatMessage });
+      
+      // Log the chat message (non-blocking)
+      logChatMessage(playerData.id, playerData.username, 'chat', chatMessage, playerData.map_id)
+        .catch(() => {}); // Silently ignore logging errors
     }
   });
 
@@ -2207,7 +2254,15 @@ wss.on('connection', (ws) => {
       
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
+      
+      // Send global chat about player leaving and log it
+      const leaveMessage = `${playerData.username} has left DragonSpires.`;
+      broadcast({ type: 'chat', text: leaveMessage });
       broadcast({ type: 'player_left', id: playerData.id, username: playerData.username });
+      
+      // Log the logout message (non-blocking)
+      logChatMessage(playerData.id, playerData.username, 'logout', leaveMessage, playerData.map_id)
+        .catch(() => {}); // Silently ignore logging errors
     }
   });
 
