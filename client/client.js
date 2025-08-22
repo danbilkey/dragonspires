@@ -115,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let playerSpritesReady = false;
   let itemDetailsReady = false;
   let floorCollisionReady = false;
+  let currentlyLoadingMap = false;
 
   // Map
   let mapSpec = { width: 64, height: 64, tiles: [] };
@@ -408,7 +409,8 @@ document.addEventListener('DOMContentLoaded', () => {
       tilesReady = true;
 
       // Map loading will be handled by loadMapForPlayer function
-      mapReady = true;
+      // Don't set mapReady to true here - let loadMapForPlayer handle it
+      // mapReady will be set when a specific map is loaded
 
     } catch (e) {
       console.error("Floor tile extraction failed:", e);
@@ -491,12 +493,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---------- MAP LOADING ----------
   async function loadMapForPlayer(mapId) {
+    if (currentlyLoadingMap) {
+      console.log('Map already loading, skipping duplicate request');
+      return false;
+    }
+    
+    currentlyLoadingMap = true;
+    mapReady = false; // Prevent rendering while loading
+    
     try {
       const mapFileName = `/maps/map${mapId}.json`;
       const response = await fetch(mapFileName);
       
       if (!response.ok) {
         console.error(`Failed to load map ${mapId}: ${response.status}`);
+        mapReady = true; // Allow rendering even if map load failed
+        currentlyLoadingMap = false;
         return false;
       }
       
@@ -511,11 +523,16 @@ document.addEventListener('DOMContentLoaded', () => {
           items: Array.isArray(m.items) ? m.items : []
         };
         console.log(`Client loaded map ${mapId}: ${mapSpec.width}x${mapSpec.height}`);
+        mapReady = true; // Map is now ready for rendering
+        currentlyLoadingMap = false;
         return true;
       }
     } catch (error) {
       console.error(`Error loading map ${mapId}:`, error);
     }
+    
+    mapReady = true; // Allow rendering even if failed
+    currentlyLoadingMap = false;
     return false;
   }
 
@@ -639,7 +656,9 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // Load the correct map for the player
-        loadMapForPlayer(localPlayer.map_id || 1);
+        loadMapForPlayer(localPlayer.map_id || 1).catch(error => {
+          console.error('Failed to load map during login:', error);
+        });
         
         // Initialize local state variables
         playerDirection = localPlayer.direction;
@@ -827,7 +846,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // Check if map changed and reload if necessary
             if (localPlayer.map_id !== msg.mapId) {
               localPlayer.map_id = msg.mapId;
-              loadMapForPlayer(msg.mapId);
+              loadMapForPlayer(msg.mapId).catch(error => {
+                console.error('Failed to load map during teleport:', error);
+              });
             } else {
               localPlayer.map_id = msg.mapId;
             }
