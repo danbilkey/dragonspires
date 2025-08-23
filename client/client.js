@@ -97,6 +97,20 @@
       
       return directionMappings[direction]?.[step] || directionMappings.down[2]; // Default to "down" idle
     }
+    
+    // Get enemy sprite ID based on enemy type, direction, and step
+    function getEnemySpriteId(enemyType, direction, step) {
+      // For now, return a simple calculation based on enemy type and animation
+      // This will need to be enhanced once we load enemy details on client side
+      const stepSuffix = (step === 1) ? '_1' : '_2';
+      
+      // Simple mapping for now - will be improved when we have full enemy details
+      const baseId = (enemyType - 1) * 8; // Each enemy has 8 sprites
+      const directionOffsets = { up: 0, right: 2, down: 4, left: 6 };
+      const stepOffset = (step === 1) ? 0 : 1;
+      
+      return baseId + (directionOffsets[direction] || 0) + stepOffset + 1; // +1 for 1-based indexing
+    }
 
     // ---------- STATE ----------
     let ws = null;
@@ -135,6 +149,7 @@
     // Players
     let localPlayer = null;
     let otherPlayers = {};
+    let enemies = {}; // Store enemies by ID
 
     // NEW: Simplified direction and animation state system
     let playerDirection = 'down'; // Current facing direction
@@ -659,6 +674,7 @@
         chatMode = false;
         localPlayer = null;
         otherPlayers = {};
+        enemies = {};
         mapItems = {};
         
         // Add disconnection message to chat
@@ -746,6 +762,16 @@
                 };
               }
             });
+          }
+          
+          // Initialize enemies
+          enemies = {};
+          if (msg.enemies) {
+            for (const [enemyId, enemy] of Object.entries(msg.enemies)) {
+              enemies[enemyId] = {
+                ...enemy
+              };
+            }
           }
 
           if (msg.items) {
@@ -1807,6 +1833,33 @@
       }
     }
 
+    function drawEnemy(enemy, screenX, screenY) {
+      if (!enemy || !enemySpritesReady) return;
+      
+      // Get the sprite ID for this enemy's current animation
+      const spriteId = getEnemySpriteId(enemy.enemy_type, enemy.direction || 'down', enemy.step || 1);
+      
+      if (enemySprites[spriteId] && enemySprites[spriteId].complete && enemySpriteMeta[spriteId]) {
+        const sprite = enemySprites[spriteId];
+        const meta = enemySpriteMeta[spriteId];
+        
+        // Calculate offsets as specified in requirements
+        const x_offset = (62 - meta.w) / 2;
+        const y_offset = (32 - meta.h);
+        
+        const drawX = screenX + x_offset;
+        const drawY = screenY + y_offset;
+        
+        ctx.drawImage(sprite, drawX, drawY, meta.w, meta.h);
+      } else {
+        // Fallback: draw a simple colored circle for enemies
+        ctx.fillStyle = '#FF4500'; // Orange color for enemies
+        ctx.beginPath();
+        ctx.ellipse(screenX + TILE_W/2, screenY + TILE_H/2 - 6, 10, 12, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+    }
+
     function drawBarsAndStats() {
       if (!loggedIn || !localPlayer) return;
       const topY = 19, bottomY = 135, span = bottomY - topY;
@@ -2058,6 +2111,13 @@
             
             if (effectiveItemId > 0) {
               drawItemAtTile(screenX, screenY, effectiveItemId);
+            }
+
+            // Draw enemies after items but before players
+            for (const [enemyId, enemy] of Object.entries(enemies)) {
+              if (enemy.pos_x === x && enemy.pos_y === y) {
+                drawEnemy(enemy, screenX, screenY);
+              }
             }
 
         // Draw fountain healing effects on players
