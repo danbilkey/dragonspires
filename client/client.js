@@ -358,6 +358,65 @@
       });
     });
 
+    // Enemy sprites: extract individual enemy animations from enemies.png using enemy.json
+    const imgEnemySrc = new Image();
+    imgEnemySrc.src = "/assets/enemies.png";
+    let enemySprites = []; // Array of Image objects for each enemy sprite
+    let enemySpriteMeta = []; // Array of {w, h} for each sprite
+    let enemySpritesReady = false;
+
+    Promise.all([
+      new Promise(resolve => {
+        if (imgEnemySrc.complete) resolve();
+        else { imgEnemySrc.onload = resolve; imgEnemySrc.onerror = () => { console.error('Failed to load enemies.png'); resolve(); }; }
+      }),
+      fetch('/assets/enemy.json').then(r => r.json()).catch(() => { console.error('Failed to load enemy.json'); return null; })
+    ]).then(([_, enemyJson]) => {
+      if (!enemyJson || !enemyJson.enemycoords) {
+        console.error('Failed to load enemy.json or enemycoords data');
+        enemySpritesReady = true;
+        return;
+      }
+
+      const enemyCoords = enemyJson.enemycoords;
+      const loadPromises = [];
+
+      enemyCoords.forEach(([sx, sy, sw, sh], index) => {
+        try {
+          const off = document.createElement('canvas');
+          off.width = sw;
+          off.height = sh;
+          const octx = off.getContext('2d');
+          octx.drawImage(imgEnemySrc, sx, sy, sw, sh, 0, 0, sw, sh);
+
+          // Make magenta transparent
+          const data = octx.getImageData(0, 0, sw, sh);
+          const d = data.data;
+          for (let i = 0; i < d.length; i += 4) {
+            if (d[i] === 255 && d[i+1] === 0 && d[i+2] === 255) d[i+3] = 0;
+          }
+          octx.putImageData(data, 0, 0);
+
+          const sprite = new Image();
+          const promise = new Promise(resolve => {
+            sprite.onload = resolve;
+            sprite.onerror = resolve;
+          });
+          sprite.src = off.toDataURL();
+          
+          enemySprites[index + 1] = sprite; // 1-based indexing to match server
+          enemySpriteMeta[index + 1] = { w: sw, h: sh };
+          loadPromises.push(promise);
+        } catch (e) {
+          console.error(`Failed to process enemy sprite ${index}:`, e);
+        }
+      });
+
+      Promise.all(loadPromises).then(() => {
+        enemySpritesReady = true;
+      });
+    });
+
     // Floor tiles from /assets/floor.png: 9 columns x 11 rows, each 62x32, with 1px overlapping border
     const imgFloor = new Image();
     imgFloor.src = "/assets/floor.png";
