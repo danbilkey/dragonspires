@@ -1394,6 +1394,61 @@ wss.on('connection', (ws) => {
         playerData.isMoving = true;
         playerData.isAttacking = false; // Ensure attack state is cleared
 
+        // Check for portals after moving to the new position
+        const mapData = getMapData(playerData.map_id);
+        if (mapData && mapData.portals) {
+          for (const portal of mapData.portals) {
+            const [portalX, portalY, newMapId, newX, newY] = portal.split(',').map(Number);
+            
+            if (playerData.pos_x === portalX && playerData.pos_y === portalY) {
+              // Player stepped on a portal - teleport them
+              const oldMapId = playerData.map_id;
+              playerData.map_id = newMapId;
+              playerData.pos_x = newX;
+              playerData.pos_y = newY;
+              
+              // Save to database immediately with new position and map
+              Promise.allSettled([
+                updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
+                updatePosition(playerData.id, newX, newY),
+                updateDirectionAndStep(playerData.id, playerData.direction, playerData.step),
+                pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [newMapId, playerData.id])
+              ]).catch(()=>{});
+
+              // Broadcast player moved with new map and position to all clients
+              broadcast({
+                type: 'player_moved',
+                id: playerData.id,
+                x: newX,
+                y: newY,
+                map_id: newMapId,
+                direction: playerData.direction,
+                step: playerData.step,
+                isMoving: false,
+                isAttacking: false
+              });
+              
+              // If map changed, send teleport result to client (same as item#58 logic)
+              if (oldMapId !== newMapId) {
+                const newMapItems = await loadItemsFromDatabase(newMapId);
+                send(ws, {
+                  type: 'teleport_result',
+                  success: true,
+                  id: playerData.id,
+                  x: newX,
+                  y: newY,
+                  mapId: newMapId,
+                  items: newMapItems
+                });
+              }
+              
+              send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+              return; // Exit early, portal teleportation handled
+            }
+          }
+        }
+
+        // No portal found, proceed with normal movement
         // Save to database immediately
         Promise.allSettled([
           updateStatsInDb(playerData.id, { stamina: playerData.stamina }),
