@@ -2056,6 +2056,10 @@ wss.on('connection', (ws) => {
       // Get the adjacent position based on player's facing direction
       const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
       
+      // Debug logging
+      console.log(`[LOOK DEBUG] Player ${playerData.username} at (${playerData.pos_x},${playerData.pos_y}) facing ${playerData.direction}`);
+      console.log(`[LOOK DEBUG] Looking at tile (${adjacentPos.x},${adjacentPos.y})`);
+      
       // Check bounds
       if (adjacentPos.x < 0 || adjacentPos.x >= MAP_WIDTH || adjacentPos.y < 0 || adjacentPos.y >= MAP_HEIGHT) {
         send(ws, { type: 'chat', text: '~ You see nothing interesting.' });
@@ -2064,14 +2068,23 @@ wss.on('connection', (ws) => {
       
       // Get map data for readables
       const mapData = getMapData(playerData.map_id);
+      console.log(`[LOOK DEBUG] Map data exists: ${!!mapData}`);
+      console.log(`[LOOK DEBUG] Readables exist: ${!!(mapData && mapData.readables)}`);
+      if (mapData && mapData.readables) {
+        console.log(`[LOOK DEBUG] Number of readables: ${mapData.readables.length}`);
+        console.log(`[LOOK DEBUG] Readables:`, mapData.readables.map(r => r.coordinates));
+      }
       
       // Check for readables first
       if (mapData && mapData.readables) {
         const coordinateString = `${adjacentPos.x},${adjacentPos.y}`;
+        console.log(`[LOOK DEBUG] Looking for coordinate string: "${coordinateString}"`);
         const readable = mapData.readables.find(r => r.coordinates === coordinateString);
+        console.log(`[LOOK DEBUG] Found readable: ${!!readable}`);
         
         if (readable) {
           // Found a readable - send its message and stop here
+          console.log(`[LOOK DEBUG] Sending readable message: "${readable.message}"`);
           send(ws, { type: 'chat', text: readable.message });
           return;
         }
@@ -2080,10 +2093,12 @@ wss.on('connection', (ws) => {
       // No readable found, check for item description
       const playerMapSpec = getMapSpec(playerData.map_id);
       const itemId = getItemAtPosition(adjacentPos.x, adjacentPos.y, playerMapSpec, playerData.map_id);
+      console.log(`[LOOK DEBUG] Item ID at position: ${itemId}`);
       
       if (itemId > 0) {
         const itemDetails = getItemDetails(itemId);
         if (itemDetails && itemDetails.description) {
+          console.log(`[LOOK DEBUG] Sending item description: "${itemDetails.description}"`);
           send(ws, { type: 'chat', text: itemDetails.description });
         } else {
           send(ws, { type: 'chat', text: '~ You see something interesting.' });
