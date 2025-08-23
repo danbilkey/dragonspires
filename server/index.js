@@ -1145,9 +1145,13 @@ wss.on('connection', (ws) => {
         send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: playerMapItems, inventory: inventory });
         broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false, map_id: playerData.map_id } });
         
-        // Send global chat about player joining and log it
+        // Send global chat about player joining to OTHER players only
         const joinMessage = `${playerData.username} enters DragonSpires.`;
-        broadcast({ type: 'chat', text: joinMessage });
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.id !== playerData.id && otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({ type: 'chat', text: joinMessage }));
+          }
+        }
         
         // Log the login message (non-blocking)
         logChatMessage(playerData.id, playerData.username, 'login', joinMessage, playerData.map_id)
@@ -1232,9 +1236,13 @@ wss.on('connection', (ws) => {
         send(ws, { type: 'signup_success', player: playerData, players: others, items: playerMapItems, inventory: inventory });
         broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0, map_id: playerData.map_id } });
         
-        // Send global chat about player joining and log it
+        // Send global chat about player joining to OTHER players only
         const joinMessage = `${playerData.username} enters DragonSpires.`;
-        broadcast({ type: 'chat', text: joinMessage });
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && otherPlayer.id !== playerData.id && otherWs.readyState === WebSocket.OPEN) {
+            otherWs.send(JSON.stringify({ type: 'chat', text: joinMessage }));
+          }
+        }
         
         // Log the login message (non-blocking)
         logChatMessage(playerData.id, playerData.username, 'login', joinMessage, playerData.map_id)
@@ -1496,6 +1504,26 @@ wss.on('connection', (ws) => {
               
               // Mark container as empty
               await updateContainerItem(adjacentPos.x, adjacentPos.y, playerData.map_id, -1);
+              
+              // Check if there's item#15 on the map at the same coordinates - change it to item#31
+              const playerMapSpec = getMapSpec(playerData.map_id);
+              const currentMapItem = getItemAtPosition(adjacentPos.x, adjacentPos.y, playerMapSpec, playerData.map_id);
+              if (currentMapItem === 15) {
+                // Change item#15 to item#31 on the map
+                const key = `${adjacentPos.x},${adjacentPos.y}`;
+                mapItems[key] = 31;
+                
+                // Save to database
+                saveItemToDatabase(adjacentPos.x, adjacentPos.y, 31, playerData.map_id);
+                
+                // Broadcast item update to all clients
+                broadcast({
+                  type: 'item_placed',
+                  x: adjacentPos.x,
+                  y: adjacentPos.y,
+                  itemId: 31
+                });
+              }
               
               // Update player in database
               updateStatsInDb(playerData.id, { hands: playerData.hands })
