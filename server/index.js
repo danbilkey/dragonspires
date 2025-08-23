@@ -969,6 +969,7 @@ function isEnemyAtPosition(x, y, mapId) {
         enemy.pos_x === x && 
         enemy.pos_y === y && 
         !enemy.is_dead) {
+      console.log(`Enemy collision detected: Enemy ${enemyId} at (${x}, ${y}) on map ${mapId}`);
       return true;
     }
   }
@@ -1187,6 +1188,7 @@ function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1) {
   
   // Check enemy collision
   if (isEnemyAtPosition(x, y, mapId)) {
+    console.log(`canMoveTo: Blocked by enemy at (${x}, ${y}) on map ${mapId}`);
     return false;
   }
   
@@ -1874,7 +1876,9 @@ wss.on('connection', (ws) => {
       // Increment step: 1 -> 2 -> 3 -> 1
       playerData.step = playerData.step === 3 ? 1 : (playerData.step ?? 2) + 1;
       
+      console.log(`Player ${playerData.id} trying to move to (${nx}, ${ny}) on map ${playerData.map_id}`);
       if (canMoveTo(nx, ny, playerData.id, playerMapSpec, playerData.map_id)) {
+        console.log(`Movement allowed to (${nx}, ${ny})`);
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
@@ -1958,6 +1962,7 @@ wss.on('connection', (ws) => {
         });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       } else {
+        console.log(`Movement blocked to (${nx}, ${ny})`);
         // Movement blocked but still increment step for visual feedback
         updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
         
