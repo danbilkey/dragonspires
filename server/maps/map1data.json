@@ -28,8 +28,7 @@
     },
     {
       "coordinates": "51,26",
-      "message": "The sign reads: Magical Graffiti Board (the magic seems to be lost)
-."
+      "message": "The sign reads: Magical Graffiti Board (the magic seems to be lost)."
     }
   ],
   "holders": [
@@ -64,4 +63,5 @@
       "coordinates": "20,39"
     }
   ]
+
 }
