@@ -1875,23 +1875,6 @@ wss.on('connection', (ws) => {
       playerData.step = playerData.step === 3 ? 1 : (playerData.step ?? 2) + 1;
       
       if (canMoveTo(nx, ny, playerData.id, playerMapSpec, playerData.map_id)) {
-        // Double-check collision right before moving (in case enemy moved)
-        if (!canMoveTo(nx, ny, playerData.id, playerMapSpec, playerData.map_id)) {
-          // Movement blocked by enemy that just moved - send correction
-          broadcast({
-            type: 'player_moved',
-            id: playerData.id,
-            x: playerData.pos_x,
-            y: playerData.pos_y,
-            direction: playerData.direction,
-            step: playerData.step,
-            isMoving: false,
-            isAttacking: false,
-            map_id: playerData.map_id
-          });
-          return;
-        }
-        
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
@@ -1978,12 +1961,10 @@ wss.on('connection', (ws) => {
         // Movement blocked but still increment step for visual feedback
         updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
         
-        // Send position correction to ensure client is in sync
+        // Only send animation update (direction/step change) without position change
         broadcast({
-          type: 'player_moved',
+          type: 'player_animation_update',
           id: playerData.id,
-          x: playerData.pos_x,
-          y: playerData.pos_y,
           direction: playerData.direction,
           step: playerData.step,
           isMoving: false,
@@ -2805,7 +2786,22 @@ wss.on('connection', (ws) => {
         }
       }
       
-      // No readable found, check for item description
+      // No readable found, check for enemy
+      const enemyAtPosition = Object.values(enemies).find(enemy => 
+        Number(enemy.map_id) === Number(playerData.map_id) &&
+        enemy.pos_x === adjacentPos.x &&
+        enemy.pos_y === adjacentPos.y &&
+        !enemy.is_dead
+      );
+      
+      if (enemyAtPosition) {
+        const enemyDetails = getEnemyDetails(enemyAtPosition.enemy_type);
+        const enemyName = enemyDetails ? enemyDetails.name : `Enemy ${enemyAtPosition.enemy_type}`;
+        send(ws, { type: 'chat', text: `~ You see ${enemyName}.` });
+        return;
+      }
+      
+      // No enemy found, check for item description
       const playerMapSpec = getMapSpec(playerData.map_id);
       const itemId = getItemAtPosition(adjacentPos.x, adjacentPos.y, playerMapSpec, playerData.map_id);
       
@@ -2866,6 +2862,17 @@ wss.on('connection', (ws) => {
           if (!enemiesSuccess) {
             send(ws, { type: 'chat', text: '~ Error: Failed to reload enemies.' });
             return;
+          }
+
+          // Send new enemies to all clients
+          for (const [clientWs, clientPlayer] of clients.entries()) {
+            if (clientPlayer && clientWs.readyState === WebSocket.OPEN) {
+              const clientEnemies = getEnemiesForMap(clientPlayer.map_id);
+              clientWs.send(JSON.stringify({
+                type: 'enemies_reloaded',
+                enemies: clientEnemies
+              }));
+            }
           }
 
           // Broadcast the reset to all players
