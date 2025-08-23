@@ -34,23 +34,23 @@
   "holders": [
     {
       "coordinates": "22,16",
-      "item": 110
+      "item": 1
     },
     {
       "coordinates": "16,39",
-      "item": 65
+      "item": 20
     },
     {
       "coordinates": "16,40",
-      "item": 103
+      "item": 32
     },
     {
       "coordinates": "16,41",
-      "item": 82
+      "item": 50
     },
     {
       "coordinates": "16,42",
-      "item": 48
+      "item": 119
     }
   ],
   "enemies": [
@@ -64,4 +64,3 @@
     }
   ]
 }
-
