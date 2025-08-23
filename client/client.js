@@ -132,11 +132,35 @@
           enemy_image_down_1: 25, enemy_image_down_2: 26,
           enemy_image_left_1: 29, enemy_image_left_2: 30
         },
-        4: { // An OgRe (assuming this is enemy type 4)
+        4: { // An OgRe
           enemy_image_up_1: 39, enemy_image_up_2: 40,
           enemy_image_right_1: 35, enemy_image_right_2: 36,
           enemy_image_down_1: 33, enemy_image_down_2: 34,
           enemy_image_left_1: 37, enemy_image_left_2: 38
+        },
+        5: { // Enemy type 5 (add more as needed)
+          enemy_image_up_1: 47, enemy_image_up_2: 48,
+          enemy_image_right_1: 43, enemy_image_right_2: 44,
+          enemy_image_down_1: 41, enemy_image_down_2: 42,
+          enemy_image_left_1: 45, enemy_image_left_2: 46
+        },
+        6: { // Enemy type 6
+          enemy_image_up_1: 55, enemy_image_up_2: 56,
+          enemy_image_right_1: 51, enemy_image_right_2: 52,
+          enemy_image_down_1: 49, enemy_image_down_2: 50,
+          enemy_image_left_1: 53, enemy_image_left_2: 54
+        },
+        7: { // Enemy type 7
+          enemy_image_up_1: 63, enemy_image_up_2: 64,
+          enemy_image_right_1: 59, enemy_image_right_2: 60,
+          enemy_image_down_1: 57, enemy_image_down_2: 58,
+          enemy_image_left_1: 61, enemy_image_left_2: 62
+        },
+        8: { // Enemy type 8
+          enemy_image_up_1: 71, enemy_image_up_2: 72,
+          enemy_image_right_1: 67, enemy_image_right_2: 68,
+          enemy_image_down_1: 65, enemy_image_down_2: 66,
+          enemy_image_left_1: 69, enemy_image_left_2: 70
         }
       };
       
@@ -1009,6 +1033,18 @@
         case 'enemies_cleared':
           // Clear all enemies from client
           enemies = {};
+          break;
+          
+        case 'enemies_reloaded':
+          // Reload enemies after server reset
+          enemies = {};
+          if (msg.enemies) {
+            for (const [enemyId, enemy] of Object.entries(msg.enemies)) {
+              enemies[enemyId] = {
+                ...enemy
+              };
+            }
+          }
           break;
           
         case 'fountain_heal':
