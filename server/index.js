@@ -963,13 +963,13 @@ function getAdjacentPosition(x, y, direction) {
 }
 
 // Check if an enemy is at the specified position
-function isEnemyAtPosition(x, y, mapId) {
+function isEnemyAtPosition(x, y, mapId, excludeEnemyId = null) {
   for (const [enemyId, enemy] of Object.entries(enemies)) {
     if (Number(enemy.map_id) === Number(mapId) && 
         enemy.pos_x === x && 
         enemy.pos_y === y && 
-        !enemy.is_dead) {
-      console.log(`Enemy collision detected: Enemy ${enemyId} at (${x}, ${y}) on map ${mapId}`);
+        !enemy.is_dead &&
+        enemyId !== excludeEnemyId) {
       return true;
     }
   }
@@ -1066,14 +1066,15 @@ async function moveEnemyToward(enemy, targetX, targetY) {
   }
   
   // Always increment step and update direction (even if blocked)
-  const newStep = enemy.step >= 3 ? 1 : enemy.step + 1;
+  // Enemies only use steps 1 and 2, alternating between them
+  const newStep = enemy.step === 1 ? 2 : 1;
   enemy.direction = newDirection;
   enemy.step = newStep;
   enemy.last_move_time = Date.now();
   
-  // Check if the move is valid
+  // Check if the move is valid (exclude this enemy from collision check)
   const mapSpec = getMapSpec(enemy.map_id);
-  if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id)) {
+  if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id, enemy.id)) {
     // Update position
     enemy.pos_x = newX;
     enemy.pos_y = newY;
@@ -1097,24 +1098,32 @@ async function moveEnemyToward(enemy, targetX, targetY) {
     // Can't move to optimal position, but still update direction and step
     await updateEnemyDirectionAndStep(enemy.id, newDirection, newStep);
     
-    // Broadcast animation update (direction/step change without position change)
-    broadcast({
-      type: 'enemy_moved',
-      id: enemy.id,
-      pos_x: currentX,
-      pos_y: currentY,
-      direction: newDirection,
-      step: newStep,
-      map_id: enemy.map_id
-    });
+    // Check if we're adjacent to the target player - if so, just face them and animate
+    const dx = Math.abs(targetX - currentX);
+    const dy = Math.abs(targetY - currentY);
+    const isAdjacent = (dx <= 1 && dy <= 1) && (dx + dy === 1); // Only orthogonally adjacent
     
-    // Try other directions for actual movement
+    if (isAdjacent) {
+      // We're next to the player, just face them and animate in place
+      broadcast({
+        type: 'enemy_moved',
+        id: enemy.id,
+        pos_x: currentX,
+        pos_y: currentY,
+        direction: newDirection,
+        step: newStep,
+        map_id: enemy.map_id
+      });
+      return false; // Didn't move but did animate
+    }
+    
+    // Not adjacent to player, try other directions for actual movement
     const directions = ['up', 'down', 'left', 'right'];
     for (const direction of directions) {
       if (direction === newDirection) continue; // Already tried this
       
       const pos = getAdjacentPosition(currentX, currentY, direction);
-      if (canMoveTo(pos.x, pos.y, null, mapSpec, enemy.map_id)) {
+      if (canMoveTo(pos.x, pos.y, null, mapSpec, enemy.map_id, enemy.id)) {
         enemy.pos_x = pos.x;
         enemy.pos_y = pos.y;
         enemy.direction = direction;
@@ -1134,6 +1143,17 @@ async function moveEnemyToward(enemy, targetX, targetY) {
         return true;
       }
     }
+    
+    // Couldn't move anywhere, just animate in place facing the player
+    broadcast({
+      type: 'enemy_moved',
+      id: enemy.id,
+      pos_x: currentX,
+      pos_y: currentY,
+      direction: newDirection,
+      step: newStep,
+      map_id: enemy.map_id
+    });
     
     return false; // Couldn't move but did update animation
   }
@@ -1163,7 +1183,7 @@ async function processEnemyAI() {
 }
 
 // Check if movement to position is allowed
-function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1) {
+function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1, excludeEnemyId = null) {
   // Check map bounds
   if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) {
     return false;
@@ -1187,8 +1207,7 @@ function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1) {
   }
   
   // Check enemy collision
-  if (isEnemyAtPosition(x, y, mapId)) {
-    console.log(`canMoveTo: Blocked by enemy at (${x}, ${y}) on map ${mapId}`);
+  if (isEnemyAtPosition(x, y, mapId, excludeEnemyId)) {
     return false;
   }
   
@@ -1876,9 +1895,7 @@ wss.on('connection', (ws) => {
       // Increment step: 1 -> 2 -> 3 -> 1
       playerData.step = playerData.step === 3 ? 1 : (playerData.step ?? 2) + 1;
       
-      console.log(`Player ${playerData.id} trying to move to (${nx}, ${ny}) on map ${playerData.map_id}`);
       if (canMoveTo(nx, ny, playerData.id, playerMapSpec, playerData.map_id)) {
-        console.log(`Movement allowed to (${nx}, ${ny})`);
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
@@ -1962,7 +1979,6 @@ wss.on('connection', (ws) => {
         });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
       } else {
-        console.log(`Movement blocked to (${nx}, ${ny})`);
         // Movement blocked but still increment step for visual feedback
         updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
         
@@ -2944,6 +2960,7 @@ wss.on('connection', (ws) => {
           
           // Send map change result to the admin
           const mapItems = await loadItemsFromDatabase(targetMapId);
+          const mapEnemies = getEnemiesForMap(targetMapId);
           send(ws, {
             type: 'teleport_result',
             success: true,
@@ -2951,7 +2968,8 @@ wss.on('connection', (ws) => {
             x: playerData.pos_x,
             y: playerData.pos_y,
             mapId: targetMapId,
-            items: mapItems
+            items: mapItems,
+            enemies: mapEnemies
           });
           
           send(ws, { type: 'chat', text: `~ Teleported to map ${targetMapId}` });
