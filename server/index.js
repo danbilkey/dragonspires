@@ -1982,10 +1982,12 @@ wss.on('connection', (ws) => {
         // Movement blocked but still increment step for visual feedback
         updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
         
-        // Only send animation update (direction/step change) without position change
+        // Send position correction to ensure client stays in sync
         broadcast({
-          type: 'player_animation_update',
+          type: 'player_moved',
           id: playerData.id,
+          x: playerData.pos_x,
+          y: playerData.pos_y,
           direction: playerData.direction,
           step: playerData.step,
           isMoving: false,
