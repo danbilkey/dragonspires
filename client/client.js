@@ -767,11 +767,15 @@
           // Initialize enemies
           enemies = {};
           if (msg.enemies) {
+            console.log('Received enemies from server:', msg.enemies);
             for (const [enemyId, enemy] of Object.entries(msg.enemies)) {
               enemies[enemyId] = {
                 ...enemy
               };
             }
+            console.log('Loaded enemies on client:', enemies);
+          } else {
+            console.log('No enemies received from server');
           }
 
           if (msg.items) {
@@ -2116,6 +2120,7 @@
             // Draw enemies after items but before players
             for (const [enemyId, enemy] of Object.entries(enemies)) {
               if (enemy.pos_x === x && enemy.pos_y === y) {
+                console.log(`Drawing enemy ${enemyId} at (${x}, ${y}):`, enemy);
                 drawEnemy(enemy, screenX, screenY);
               }
             }
