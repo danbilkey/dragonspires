@@ -1030,6 +1030,16 @@
                 mapItems = { ...msg.items };
               }
               
+              // Update enemies for new map
+              if (msg.enemies) {
+                enemies = {};
+                for (const [enemyId, enemy] of Object.entries(msg.enemies)) {
+                  enemies[enemyId] = {
+                    ...enemy
+                  };
+                }
+              }
+              
               pushChat("~ You have been teleported!");
             } else if (!msg.success && msg.message) {
               pushChat(msg.message);
