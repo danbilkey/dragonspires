@@ -55,12 +55,12 @@
   ],
   "enemies": [
     {
-      "type": 1,
-      "coordinates": "20,41"
+      "type": 3,
+      "coordinates": "38,24"
     },
     {
-      "type": 2,
-      "coordinates": "20,39"
+      "type": 3,
+      "coordinates": "43,25"
     }
   ]
 }
