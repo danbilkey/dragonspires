@@ -28,25 +28,26 @@
     },
     {
       "coordinates": "51,26",
-      "message": "The sign reads: Magical Graffiti Board (the magic seems to be lost)."
+      "message": "The sign reads: Magical Graffiti Board (the magic seems to be lost)
+."
     }
   ],
   "holders": [
     {
-      "coordinates": "32,16",
+      "coordinates": "22,16",
       "item": 110
     },
     {
       "coordinates": "16,39",
-      "item": 25
+      "item": 65
     },
     {
       "coordinates": "16,40",
-      "item": 12
+      "item": 103
     },
     {
       "coordinates": "16,41",
-      "item": 109
+      "item": 82
     },
     {
       "coordinates": "16,42",
@@ -63,5 +64,4 @@
       "coordinates": "20,39"
     }
   ]
-
 }
