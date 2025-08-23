@@ -617,6 +617,65 @@ async function logChatMessage(playerId, username, messageType, message, mapId = 
   }
 }
 
+// Function to clear all map containers and reload from map data
+async function reloadMapContainers() {
+  try {
+    // Clear existing containers
+    await pool.query('DELETE FROM map_containers');
+    console.log('Cleared all map containers');
+    
+    // Reload containers from all map data files
+    for (let mapId = 1; mapId <= 4; mapId++) {
+      const mapData = getMapData(mapId);
+      if (mapData && mapData.holders) {
+        for (const holder of mapData.holders) {
+          const [x, y] = holder.coordinates.split(',').map(Number);
+          const itemId = holder.item;
+          
+          await pool.query(
+            'INSERT INTO map_containers (x, y, map_id, item_id) VALUES ($1, $2, $3, $4)',
+            [x, y, mapId, itemId]
+          );
+        }
+        console.log(`Loaded ${mapData.holders.length} containers for map ${mapId}`);
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error reloading map containers:', error);
+    return false;
+  }
+}
+
+// Function to get container item at position
+async function getContainerItem(x, y, mapId) {
+  try {
+    const result = await pool.query(
+      'SELECT item_id FROM map_containers WHERE x = $1 AND y = $2 AND map_id = $3',
+      [x, y, mapId]
+    );
+    return result.rows[0] ? result.rows[0].item_id : null;
+  } catch (error) {
+    console.error('Error getting container item:', error);
+    return null;
+  }
+}
+
+// Function to update container item
+async function updateContainerItem(x, y, mapId, itemId) {
+  try {
+    await pool.query(
+      'UPDATE map_containers SET item_id = $1 WHERE x = $2 AND y = $3 AND map_id = $4',
+      [itemId, x, y, mapId]
+    );
+    return true;
+  } catch (error) {
+    console.error('Error updating container item:', error);
+    return false;
+  }
+}
+
 function broadcast(obj) {
   const s = JSON.stringify(obj);
   for (const [ws] of clients.entries()) {
@@ -939,6 +998,17 @@ async function initializeDatabase() {
         message TEXT NOT NULL,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         map_id INTEGER
+      )
+    `);
+
+    // Create map_containers table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS map_containers (
+        x INTEGER,
+        y INTEGER,
+        map_id INTEGER,
+        item_id INTEGER,
+        PRIMARY KEY (x, y, map_id)
       )
     `);
 
@@ -1392,6 +1462,66 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'attack') {
       if (!playerData) return;
+      
+      // Get the adjacent position based on player's facing direction
+      const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+      
+      // Check bounds
+      if (adjacentPos.x >= 0 && adjacentPos.x < MAP_WIDTH && adjacentPos.y >= 0 && adjacentPos.y < MAP_HEIGHT) {
+        // Check if attacking a container first
+        const mapData = getMapData(playerData.map_id);
+        if (mapData && mapData.holders) {
+          const coordinateString = `${adjacentPos.x},${adjacentPos.y}`;
+          const holder = mapData.holders.find(h => h.coordinates === coordinateString);
+          
+          if (holder) {
+            // Found a container - check if it has an item
+            const containerItem = await getContainerItem(adjacentPos.x, adjacentPos.y, playerData.map_id);
+            
+            if (containerItem === -1) {
+              // Container is empty, do nothing
+              return;
+            }
+            
+            if (containerItem !== null && containerItem > 0) {
+              // Container has an item
+              if (playerData.hands && playerData.hands > 0) {
+                // Player hands are full
+                send(ws, { type: 'chat', text: "~ You can't hold the item in the chest, your hands are full!" });
+                return;
+              }
+              
+              // Player hands are empty, take the item
+              playerData.hands = containerItem;
+              
+              // Mark container as empty
+              await updateContainerItem(adjacentPos.x, adjacentPos.y, playerData.map_id, -1);
+              
+              // Update player in database
+              updateStatsInDb(playerData.id, { hands: playerData.hands })
+                .catch(err => console.error('Error updating player hands after container:', err));
+              
+              // Get item name for success message
+              const itemDetails = getItemDetails(containerItem);
+              const itemName = itemDetails ? itemDetails.name : `Item ${containerItem}`;
+              
+              // Send success message
+              send(ws, { type: 'chat', text: `~ You found a ${itemName}!` });
+              
+              // Broadcast equipment update
+              broadcast({
+                type: 'player_equipment_update',
+                id: playerData.id,
+                hands: playerData.hands
+              });
+              
+              return;
+            }
+          }
+        }
+      }
+      
+      // No container found or container interaction, proceed with normal attack
       
       // Clear temporary sprite when attacking
       playerData.temporarySprite = 0;
@@ -2128,6 +2258,13 @@ wss.on('connection', (ws) => {
           const reloadSuccess = await reloadGameData();
           if (!reloadSuccess) {
             send(ws, { type: 'chat', text: '~ Error: Failed to reload game data.' });
+            return;
+          }
+
+          // Reload map containers
+          const containersSuccess = await reloadMapContainers();
+          if (!containersSuccess) {
+            send(ws, { type: 'chat', text: '~ Error: Failed to reload map containers.' });
             return;
           }
 
