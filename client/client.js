@@ -100,16 +100,53 @@
     
     // Get enemy sprite ID based on enemy type, direction, and step
     function getEnemySpriteId(enemyType, direction, step) {
-      // For now, return a simple calculation based on enemy type and animation
-      // This will need to be enhanced once we load enemy details on client side
-      const stepSuffix = (step === 1) ? '_1' : '_2';
+      // We need to get the sprite ID from the enemy details that were sent from server
+      // For now, we'll use a simple mapping that matches the server's enemiesdetails.json structure
       
-      // Simple mapping for now - will be improved when we have full enemy details
-      const baseId = (enemyType - 1) * 8; // Each enemy has 8 sprites
-      const directionOffsets = { up: 0, right: 2, down: 4, left: 6 };
-      const stepOffset = (step === 1) ? 0 : 1;
+      // Map direction and step to the correct sprite field name
+      let spriteField;
+      if (step === 1) {
+        spriteField = `enemy_image_${direction}_1`;
+      } else {
+        spriteField = `enemy_image_${direction}_2`;
+      }
       
-      return baseId + (directionOffsets[direction] || 0) + stepOffset + 1; // +1 for 1-based indexing
+      // For now, we'll use a hardcoded mapping based on the enemy details structure
+      // This should ideally be loaded from the server, but for immediate fix:
+      const enemySpriteMappings = {
+        1: { // A rabid dog
+          enemy_image_up_1: 14, enemy_image_up_2: 15,
+          enemy_image_right_1: 6, enemy_image_right_2: 7,
+          enemy_image_down_1: 2, enemy_image_down_2: 3,
+          enemy_image_left_1: 10, enemy_image_left_2: 11
+        },
+        2: { // A giant wasp
+          enemy_image_up_1: 23, enemy_image_up_2: 24,
+          enemy_image_right_1: 19, enemy_image_right_2: 20,
+          enemy_image_down_1: 17, enemy_image_down_2: 18,
+          enemy_image_left_1: 21, enemy_image_left_2: 22
+        },
+        3: { // A Swamp Dweller
+          enemy_image_up_1: 31, enemy_image_up_2: 32,
+          enemy_image_right_1: 27, enemy_image_right_2: 28,
+          enemy_image_down_1: 25, enemy_image_down_2: 26,
+          enemy_image_left_1: 29, enemy_image_left_2: 30
+        },
+        4: { // An OgRe (assuming this is enemy type 4)
+          enemy_image_up_1: 39, enemy_image_up_2: 40,
+          enemy_image_right_1: 35, enemy_image_right_2: 36,
+          enemy_image_down_1: 33, enemy_image_down_2: 34,
+          enemy_image_left_1: 37, enemy_image_left_2: 38
+        }
+      };
+      
+      const enemyMapping = enemySpriteMappings[enemyType];
+      if (enemyMapping && enemyMapping[spriteField]) {
+        return enemyMapping[spriteField];
+      }
+      
+      // Fallback to a default sprite if mapping not found
+      return 1;
     }
 
     // ---------- STATE ----------
@@ -967,6 +1004,11 @@
               ...msg.enemy
             };
           }
+          break;
+          
+        case 'enemies_cleared':
+          // Clear all enemies from client
+          enemies = {};
           break;
           
         case 'fountain_heal':
@@ -1864,7 +1906,7 @@
         
         // Calculate offsets as specified in requirements
         const x_offset = (62 - meta.w) / 2;
-        const y_offset = (32 - meta.h);
+        const y_offset = (32 - meta.h) - 5; // Render 5 pixels higher
         
         const drawX = screenX + x_offset;
         const drawY = screenY + y_offset;
