@@ -25,6 +25,10 @@
     {
       "coordinates": "21,45",
       "message": "The sign reads: Welcome to the Inn."
+    },
+    {
+      "coordinates": "51,26",
+      "message": "The sign reads: Magical Graffiti Board (the magic seems to be lost)."
     }
   ],
   "holders": [
@@ -59,4 +63,5 @@
       "coordinates": "20,39"
     }
   ]
+
 }
