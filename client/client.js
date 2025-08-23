@@ -1011,28 +1011,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loggedIn && localPlayer && e.key === 'l') {
       e.preventDefault();
       
-      let lookX = localPlayer.pos_x;
-      let lookY = localPlayer.pos_y;
-      
-      switch (playerDirection) {
-        case 'up': lookY -= 1; break;
-        case 'down': lookY += 1; break;
-        case 'left': lookX -= 1; break;
-        case 'right': lookX += 1; break;
-      }
-      
-      if (lookX >= 0 && lookX < mapSpec.width && lookY >= 0 && lookY < mapSpec.height) {
-        const itemId = getItemAtPosition(lookX, lookY);
-        const itemDetails = getItemDetails(itemId);
-        
-        if (itemDetails && itemDetails.description && itemDetails.description.trim()) {
-          pushChat(`~ ${itemDetails.description}`);
-        } else {
-          pushChat("~ You see nothing.");
-        }
-      } else {
-        pushChat("~ You see nothing.");
-      }
+      // Send look request to server
+      send({ type: 'look' });
       
       return;
     }
