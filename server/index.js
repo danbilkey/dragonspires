@@ -1064,20 +1064,20 @@ async function moveEnemyToward(enemy, targetX, targetY) {
     }
   }
   
+  // Always increment step and update direction (even if blocked)
+  const newStep = enemy.step >= 3 ? 1 : enemy.step + 1;
+  enemy.direction = newDirection;
+  enemy.step = newStep;
+  enemy.last_move_time = Date.now();
+  
   // Check if the move is valid
   const mapSpec = getMapSpec(enemy.map_id);
   if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id)) {
-    // Increment step (1,2,3,1,2,3...)
-    const newStep = enemy.step >= 3 ? 1 : enemy.step + 1;
-    
-    // Update enemy object
+    // Update position
     enemy.pos_x = newX;
     enemy.pos_y = newY;
-    enemy.direction = newDirection;
-    enemy.step = newStep;
-    enemy.last_move_time = Date.now();
     
-    // Update database
+    // Update database with new position
     await updateEnemyPosition(enemy.id, newX, newY, newDirection, newStep);
     
     // Broadcast movement to all clients
@@ -1092,38 +1092,50 @@ async function moveEnemyToward(enemy, targetX, targetY) {
     });
     
     return true;
-  }
-  
-  // If can't move in optimal direction, try other directions
-  const directions = ['up', 'down', 'left', 'right'];
-  for (const direction of directions) {
-    const pos = getAdjacentPosition(currentX, currentY, direction);
-    if (canMoveTo(pos.x, pos.y, null, mapSpec, enemy.map_id)) {
-      const newStep = enemy.step >= 3 ? 1 : enemy.step + 1;
+  } else {
+    // Can't move to optimal position, but still update direction and step
+    await updateEnemyDirectionAndStep(enemy.id, newDirection, newStep);
+    
+    // Broadcast animation update (direction/step change without position change)
+    broadcast({
+      type: 'enemy_moved',
+      id: enemy.id,
+      pos_x: currentX,
+      pos_y: currentY,
+      direction: newDirection,
+      step: newStep,
+      map_id: enemy.map_id
+    });
+    
+    // Try other directions for actual movement
+    const directions = ['up', 'down', 'left', 'right'];
+    for (const direction of directions) {
+      if (direction === newDirection) continue; // Already tried this
       
-      enemy.pos_x = pos.x;
-      enemy.pos_y = pos.y;
-      enemy.direction = direction;
-      enemy.step = newStep;
-      enemy.last_move_time = Date.now();
-      
-      await updateEnemyPosition(enemy.id, pos.x, pos.y, direction, newStep);
-      
-      broadcast({
-        type: 'enemy_moved',
-        id: enemy.id,
-        pos_x: pos.x,
-        pos_y: pos.y,
-        direction: direction,
-        step: newStep,
-        map_id: enemy.map_id
-      });
-      
-      return true;
+      const pos = getAdjacentPosition(currentX, currentY, direction);
+      if (canMoveTo(pos.x, pos.y, null, mapSpec, enemy.map_id)) {
+        enemy.pos_x = pos.x;
+        enemy.pos_y = pos.y;
+        enemy.direction = direction;
+        
+        await updateEnemyPosition(enemy.id, pos.x, pos.y, direction, newStep);
+        
+        broadcast({
+          type: 'enemy_moved',
+          id: enemy.id,
+          pos_x: pos.x,
+          pos_y: pos.y,
+          direction: direction,
+          step: newStep,
+          map_id: enemy.map_id
+        });
+        
+        return true;
+      }
     }
+    
+    return false; // Couldn't move but did update animation
   }
-  
-  return false; // Couldn't move
 }
 
 // Main enemy AI processing function
@@ -1863,6 +1875,23 @@ wss.on('connection', (ws) => {
       playerData.step = playerData.step === 3 ? 1 : (playerData.step ?? 2) + 1;
       
       if (canMoveTo(nx, ny, playerData.id, playerMapSpec, playerData.map_id)) {
+        // Double-check collision right before moving (in case enemy moved)
+        if (!canMoveTo(nx, ny, playerData.id, playerMapSpec, playerData.map_id)) {
+          // Movement blocked by enemy that just moved - send correction
+          broadcast({
+            type: 'player_moved',
+            id: playerData.id,
+            x: playerData.pos_x,
+            y: playerData.pos_y,
+            direction: playerData.direction,
+            step: playerData.step,
+            isMoving: false,
+            isAttacking: false,
+            map_id: playerData.map_id
+          });
+          return;
+        }
+        
         // Decrement stamina by **1**
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         playerData.pos_x = nx;
@@ -1949,15 +1978,17 @@ wss.on('connection', (ws) => {
         // Movement blocked but still increment step for visual feedback
         updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
         
-        // Broadcast the direction and step change to all players (clients will filter by map)
+        // Send position correction to ensure client is in sync
         broadcast({
-          type: 'player_animation_update', 
-          id: playerData.id, 
-          map_id: playerData.map_id,
+          type: 'player_moved',
+          id: playerData.id,
+          x: playerData.pos_x,
+          y: playerData.pos_y,
           direction: playerData.direction,
           step: playerData.step,
           isMoving: false,
-          isAttacking: false
+          isAttacking: false,
+          map_id: playerData.map_id
         });
       }
     }
@@ -2827,6 +2858,9 @@ wss.on('connection', (ws) => {
             return;
           }
 
+          // Clear client-side enemies first
+          broadcast({ type: 'enemies_cleared' });
+          
           // Reload enemies
           const enemiesSuccess = await reloadEnemies();
           if (!enemiesSuccess) {
