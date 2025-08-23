@@ -767,15 +767,11 @@
           // Initialize enemies
           enemies = {};
           if (msg.enemies) {
-            console.log('Received enemies from server:', msg.enemies);
             for (const [enemyId, enemy] of Object.entries(msg.enemies)) {
               enemies[enemyId] = {
                 ...enemy
               };
             }
-            console.log('Loaded enemies on client:', enemies);
-          } else {
-            console.log('No enemies received from server');
           }
 
           if (msg.items) {
@@ -954,6 +950,25 @@
               pushChat(msg.message);
             }
             break;
+        case 'enemy_moved':
+          // Update enemy position and animation
+          if (enemies[msg.id]) {
+            enemies[msg.id].pos_x = msg.pos_x;
+            enemies[msg.id].pos_y = msg.pos_y;
+            enemies[msg.id].direction = msg.direction;
+            enemies[msg.id].step = msg.step;
+          }
+          break;
+          
+        case 'enemy_spawned':
+          // Add new enemy to the client
+          if (msg.enemy) {
+            enemies[msg.enemy.id] = {
+              ...msg.enemy
+            };
+          }
+          break;
+          
         case 'fountain_heal':
             if (localPlayer && msg.id === localPlayer.id) {
               localPlayer.stamina = msg.stamina;
@@ -2120,7 +2135,6 @@
             // Draw enemies after items but before players
             for (const [enemyId, enemy] of Object.entries(enemies)) {
               if (enemy.pos_x === x && enemy.pos_y === y) {
-                console.log(`Drawing enemy ${enemyId} at (${x}, ${y}):`, enemy);
                 drawEnemy(enemy, screenX, screenY);
               }
             }
