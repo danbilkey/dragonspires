@@ -322,9 +322,12 @@ async function loadEnemyDetails() {
 
 function getEnemyDetails(enemyType) {
   if (!enemyDetailsReady || !enemyDetails || enemyType < 1 || enemyType > enemyDetails.length) {
+    console.log(`getEnemyDetails: Cannot get details for enemy type ${enemyType}. Ready: ${enemyDetailsReady}, Details length: ${enemyDetails ? enemyDetails.length : 'null'}`);
     return null;
   }
-  return enemyDetails[enemyType - 1];
+  const details = enemyDetails[enemyType - 1];
+  console.log(`getEnemyDetails: Found details for enemy type ${enemyType}:`, details ? details.name : 'null');
+  return details;
 }
 
 function getRandomItemByTypes(types) {
@@ -782,6 +785,7 @@ async function reloadEnemies() {
         for (const enemy of mapData.enemies) {
           const [spawnX, spawnY] = enemy.coordinates.split(',').map(Number);
           const enemyType = enemy.type;
+          console.log(`Loading enemy type ${enemyType} at (${spawnX}, ${spawnY}) for map ${mapId}`);
           const enemyDetails = getEnemyDetails(enemyType);
           
           if (enemyDetails) {
@@ -1419,6 +1423,7 @@ wss.on('connection', (ws) => {
         
         // Get enemies for the player's map
         const mapEnemies = getEnemiesForMap(playerData.map_id);
+        console.log(`Login: Sending ${Object.keys(mapEnemies).length} enemies for map ${playerData.map_id}:`, mapEnemies);
         
         send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: playerMapItems, inventory: inventory, enemies: mapEnemies });
         broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false, map_id: playerData.map_id } });
