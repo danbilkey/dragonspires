@@ -396,6 +396,11 @@ function getMapSpec(mapId) {
   return serverMaps[mapId] || null;
 }
 
+// Helper function to get map data by ID
+function getMapData(mapId) {
+  return serverMapData[mapId] || null;
+}
+
 // SQL injection safe: uses parameterized query with $1 placeholder
 async function loadPlayer(username) {
   const r = await pool.query('SELECT * FROM players WHERE username=$1', [username]);
@@ -2043,6 +2048,49 @@ wss.on('connection', (ws) => {
       }
       
       send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+    }
+
+    else if (msg.type === 'look') {
+      if (!playerData) return;
+      
+      // Get the adjacent position based on player's facing direction
+      const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+      
+      // Check bounds
+      if (adjacentPos.x < 0 || adjacentPos.x >= MAP_WIDTH || adjacentPos.y < 0 || adjacentPos.y >= MAP_HEIGHT) {
+        send(ws, { type: 'chat', text: '~ You see nothing interesting.' });
+        return;
+      }
+      
+      // Get map data for readables
+      const mapData = getMapData(playerData.map_id);
+      
+      // Check for readables first
+      if (mapData && mapData.readables) {
+        const coordinateString = `${adjacentPos.x},${adjacentPos.y}`;
+        const readable = mapData.readables.find(r => r.coordinates === coordinateString);
+        
+        if (readable) {
+          // Found a readable - send its message and stop here
+          send(ws, { type: 'chat', text: readable.message });
+          return;
+        }
+      }
+      
+      // No readable found, check for item description
+      const playerMapSpec = getMapSpec(playerData.map_id);
+      const itemId = getItemAtPosition(adjacentPos.x, adjacentPos.y, playerMapSpec, playerData.map_id);
+      
+      if (itemId > 0) {
+        const itemDetails = getItemDetails(itemId);
+        if (itemDetails && itemDetails.description) {
+          send(ws, { type: 'chat', text: itemDetails.description });
+        } else {
+          send(ws, { type: 'chat', text: '~ You see something interesting.' });
+        }
+      } else {
+        send(ws, { type: 'chat', text: '~ You see nothing interesting.' });
+      }
     }
 
     else if (msg.type === 'chat') {
