@@ -902,6 +902,25 @@ async function loadEnemiesFromDatabase() {
   }
 }
 
+// Function to get enemies for a specific map (for sending to clients)
+function getEnemiesForMap(mapId) {
+  const mapEnemies = {};
+  for (const [enemyId, enemy] of Object.entries(enemies)) {
+    if (enemy.map_id === mapId && !enemy.is_dead) {
+      mapEnemies[enemyId] = {
+        id: enemy.id,
+        enemy_type: enemy.enemy_type,
+        pos_x: enemy.pos_x,
+        pos_y: enemy.pos_y,
+        direction: enemy.direction,
+        step: enemy.step,
+        hp: enemy.hp
+      };
+    }
+  }
+  return mapEnemies;
+}
+
 function broadcast(obj) {
   const s = JSON.stringify(obj);
   for (const [ws] of clients.entries()) {
@@ -1397,7 +1416,11 @@ wss.on('connection', (ws) => {
         const others = Array.from(clients.values())
           .filter(p => p.id !== playerData.id)
           .map(p => ({ ...p, isBRB: p.isBRB || false }));
-        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: playerMapItems, inventory: inventory });
+        
+        // Get enemies for the player's map
+        const mapEnemies = getEnemiesForMap(playerData.map_id);
+        
+        send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: playerMapItems, inventory: inventory, enemies: mapEnemies });
         broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false, map_id: playerData.map_id } });
         
         // Send global chat about player joining to OTHER players only
@@ -1488,7 +1511,11 @@ wss.on('connection', (ws) => {
         }
 
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
-        send(ws, { type: 'signup_success', player: playerData, players: others, items: playerMapItems, inventory: inventory });
+        
+        // Get enemies for the player's map
+        const mapEnemies = getEnemiesForMap(playerData.map_id);
+        
+        send(ws, { type: 'signup_success', player: playerData, players: others, items: playerMapItems, inventory: inventory, enemies: mapEnemies });
         broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0, map_id: playerData.map_id } });
         
         // Send global chat about player joining to OTHER players only
