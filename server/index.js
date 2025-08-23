@@ -322,12 +322,9 @@ async function loadEnemyDetails() {
 
 function getEnemyDetails(enemyType) {
   if (!enemyDetailsReady || !enemyDetails || enemyType < 1 || enemyType > enemyDetails.length) {
-    console.log(`getEnemyDetails: Cannot get details for enemy type ${enemyType}. Ready: ${enemyDetailsReady}, Details length: ${enemyDetails ? enemyDetails.length : 'null'}`);
     return null;
   }
-  const details = enemyDetails[enemyType - 1];
-  console.log(`getEnemyDetails: Found details for enemy type ${enemyType}:`, details ? details.name : 'null');
-  return details;
+  return enemyDetails[enemyType - 1];
 }
 
 function getRandomItemByTypes(types) {
@@ -785,7 +782,6 @@ async function reloadEnemies() {
         for (const enemy of mapData.enemies) {
           const [spawnX, spawnY] = enemy.coordinates.split(',').map(Number);
           const enemyType = enemy.type;
-          console.log(`Loading enemy type ${enemyType} at (${spawnX}, ${spawnY}) for map ${mapId}`);
           const enemyDetails = getEnemyDetails(enemyType);
           
           if (enemyDetails) {
@@ -814,7 +810,7 @@ async function reloadEnemies() {
               is_admin_spawned: false,
               details: enemyDetails
             };
-            console.log(`reloadEnemies: Added enemy ${enemyId} to memory:`, enemies[enemyId]);
+
           }
         }
         console.log(`Loaded ${mapData.enemies.length} enemies for map ${mapId}`);
@@ -909,15 +905,8 @@ async function loadEnemiesFromDatabase() {
 
 // Function to get enemies for a specific map (for sending to clients)
 function getEnemiesForMap(mapId) {
-  console.log(`getEnemiesForMap: Looking for enemies on map ${mapId}`);
-  console.log(`getEnemiesForMap: Total enemies in memory:`, Object.keys(enemies).length);
-  console.log(`getEnemiesForMap: All enemies:`, enemies);
-  
   const mapEnemies = {};
   for (const [enemyId, enemy] of Object.entries(enemies)) {
-    console.log(`getEnemiesForMap: Checking enemy ${enemyId}: map_id=${enemy.map_id} (${typeof enemy.map_id}), is_dead=${enemy.is_dead}`);
-    console.log(`getEnemiesForMap: Comparing with mapId=${mapId} (${typeof mapId})`);
-    console.log(`getEnemiesForMap: Strict equality: ${enemy.map_id === mapId}, Loose equality: ${enemy.map_id == mapId}`);
     if (Number(enemy.map_id) === Number(mapId) && !enemy.is_dead) {
       mapEnemies[enemyId] = {
         id: enemy.id,
@@ -928,10 +917,8 @@ function getEnemiesForMap(mapId) {
         step: enemy.step,
         hp: enemy.hp
       };
-      console.log(`getEnemiesForMap: Added enemy ${enemyId} to map ${mapId}`);
     }
   }
-  console.log(`getEnemiesForMap: Returning ${Object.keys(mapEnemies).length} enemies for map ${mapId}`);
   return mapEnemies;
 }
 
@@ -975,6 +962,193 @@ function getAdjacentPosition(x, y, direction) {
   }
 }
 
+// Check if an enemy is at the specified position
+function isEnemyAtPosition(x, y, mapId) {
+  for (const [enemyId, enemy] of Object.entries(enemies)) {
+    if (Number(enemy.map_id) === Number(mapId) && 
+        enemy.pos_x === x && 
+        enemy.pos_y === y && 
+        !enemy.is_dead) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Calculate Euclidean distance between two points
+function getDistance(x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// Find the closest player to an enemy on the same map
+function findClosestPlayer(enemy) {
+  let closestPlayer = null;
+  let closestDistance = Infinity;
+  
+  for (const [ws, playerData] of clients.entries()) {
+    if (playerData && 
+        Number(playerData.map_id) === Number(enemy.map_id) && 
+        !playerData.is_dead) {
+      const distance = getDistance(
+        enemy.pos_x, enemy.pos_y, 
+        playerData.pos_x, playerData.pos_y
+      );
+      
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestPlayer = playerData;
+      }
+    }
+  }
+  
+  return closestPlayer;
+}
+
+// Update enemy direction and step in database
+async function updateEnemyDirectionAndStep(enemyId, direction, step) {
+  try {
+    await pool.query(
+      'UPDATE enemies SET direction = $1, step = $2 WHERE id = $3',
+      [direction, step, enemyId]
+    );
+  } catch (error) {
+    console.error('Error updating enemy direction and step:', error);
+  }
+}
+
+// Update enemy position in database
+async function updateEnemyPosition(enemyId, x, y, direction, step) {
+  try {
+    await pool.query(
+      'UPDATE enemies SET pos_x = $1, pos_y = $2, direction = $3, step = $4, last_move_time = NOW() WHERE id = $5',
+      [x, y, direction, step, enemyId]
+    );
+  } catch (error) {
+    console.error('Error updating enemy position:', error);
+  }
+}
+
+// Move an enemy toward a target position
+async function moveEnemyToward(enemy, targetX, targetY) {
+  const currentX = enemy.pos_x;
+  const currentY = enemy.pos_y;
+  
+  // Calculate direction to move
+  let newX = currentX;
+  let newY = currentY;
+  let newDirection = enemy.direction;
+  
+  // Simple AI: move in the direction that reduces distance most
+  const dx = targetX - currentX;
+  const dy = targetY - currentY;
+  
+  if (Math.abs(dx) > Math.abs(dy)) {
+    // Move horizontally
+    if (dx > 0) {
+      newX = currentX + 1;
+      newDirection = 'right';
+    } else {
+      newX = currentX - 1;
+      newDirection = 'left';
+    }
+  } else {
+    // Move vertically
+    if (dy > 0) {
+      newY = currentY + 1;
+      newDirection = 'down';
+    } else {
+      newY = currentY - 1;
+      newDirection = 'up';
+    }
+  }
+  
+  // Check if the move is valid
+  const mapSpec = getMapSpec(enemy.map_id);
+  if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id)) {
+    // Increment step (1,2,3,1,2,3...)
+    const newStep = enemy.step >= 3 ? 1 : enemy.step + 1;
+    
+    // Update enemy object
+    enemy.pos_x = newX;
+    enemy.pos_y = newY;
+    enemy.direction = newDirection;
+    enemy.step = newStep;
+    enemy.last_move_time = Date.now();
+    
+    // Update database
+    await updateEnemyPosition(enemy.id, newX, newY, newDirection, newStep);
+    
+    // Broadcast movement to all clients
+    broadcast({
+      type: 'enemy_moved',
+      id: enemy.id,
+      pos_x: newX,
+      pos_y: newY,
+      direction: newDirection,
+      step: newStep,
+      map_id: enemy.map_id
+    });
+    
+    return true;
+  }
+  
+  // If can't move in optimal direction, try other directions
+  const directions = ['up', 'down', 'left', 'right'];
+  for (const direction of directions) {
+    const pos = getAdjacentPosition(currentX, currentY, direction);
+    if (canMoveTo(pos.x, pos.y, null, mapSpec, enemy.map_id)) {
+      const newStep = enemy.step >= 3 ? 1 : enemy.step + 1;
+      
+      enemy.pos_x = pos.x;
+      enemy.pos_y = pos.y;
+      enemy.direction = direction;
+      enemy.step = newStep;
+      enemy.last_move_time = Date.now();
+      
+      await updateEnemyPosition(enemy.id, pos.x, pos.y, direction, newStep);
+      
+      broadcast({
+        type: 'enemy_moved',
+        id: enemy.id,
+        pos_x: pos.x,
+        pos_y: pos.y,
+        direction: direction,
+        step: newStep,
+        map_id: enemy.map_id
+      });
+      
+      return true;
+    }
+  }
+  
+  return false; // Couldn't move
+}
+
+// Main enemy AI processing function
+async function processEnemyAI() {
+  const currentTime = Date.now();
+  
+  for (const [enemyId, enemy] of Object.entries(enemies)) {
+    if (enemy.is_dead) continue;
+    
+    // Check if enough time has passed since last move (based on enemy's move_delay)
+    const timeSinceLastMove = currentTime - enemy.last_move_time;
+    const moveDelayMs = (enemy.details.move_delay || 1) * 1000; // Convert seconds to milliseconds
+    
+    if (timeSinceLastMove < moveDelayMs) continue;
+    
+    // Find closest player on the same map
+    const closestPlayer = findClosestPlayer(enemy);
+    
+    if (closestPlayer) {
+      // Try to move toward the closest player
+      await moveEnemyToward(enemy, closestPlayer.pos_x, closestPlayer.pos_y);
+    }
+  }
+}
+
 // Check if movement to position is allowed
 function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1) {
   // Check map bounds
@@ -996,6 +1170,11 @@ function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1) {
   
   // Check player collision
   if (isPlayerAtPosition(x, y, excludePlayerId)) {
+    return false;
+  }
+  
+  // Check enemy collision
+  if (isEnemyAtPosition(x, y, mapId)) {
     return false;
   }
   
@@ -2737,6 +2916,69 @@ wss.on('connection', (ws) => {
         }
         return;
       }
+      
+      // Check for -spawn admin command
+      const spawnMatch = t.match(/^-spawn\s+(\d+)$/i);
+      if (spawnMatch) {
+        // Validate admin role
+        if (playerData.role !== 'admin') {
+          // Do nothing for non-admin users
+          return;
+        }
+
+        const enemyType = parseInt(spawnMatch[1]);
+        
+        // Validate enemy type
+        const enemyDetails = getEnemyDetails(enemyType);
+        if (!enemyDetails) {
+          send(ws, { type: 'chat', text: `~ Invalid enemy type ${enemyType}. Check enemiesdetails.json for valid types.` });
+          return;
+        }
+
+        // Get position in front of player
+        const spawnPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+        
+        // Check if position is valid
+        const playerMapSpec = getMapSpec(playerData.map_id);
+        if (!canMoveTo(spawnPos.x, spawnPos.y, null, playerMapSpec, playerData.map_id)) {
+          send(ws, { type: 'chat', text: '~ Cannot spawn enemy there - position blocked.' });
+          return;
+        }
+
+        try {
+          // Spawn the enemy (admin spawned = true, so it won't respawn)
+          const newEnemy = await spawnEnemy(enemyType, playerData.map_id, spawnPos.x, spawnPos.y, true);
+          
+          if (newEnemy) {
+            send(ws, { type: 'chat', text: `~ Spawned ${enemyDetails.name} at (${spawnPos.x}, ${spawnPos.y})` });
+            
+            // Broadcast the new enemy to all clients on the same map
+            const enemyData = {
+              [newEnemy.id]: {
+                id: newEnemy.id,
+                enemy_type: newEnemy.enemy_type,
+                pos_x: newEnemy.pos_x,
+                pos_y: newEnemy.pos_y,
+                direction: newEnemy.direction,
+                step: newEnemy.step,
+                hp: newEnemy.hp
+              }
+            };
+            
+            // Send to all clients so they can add the enemy if they're on the same map
+            broadcast({
+              type: 'enemy_spawned',
+              enemy: enemyData[newEnemy.id]
+            });
+          } else {
+            send(ws, { type: 'chat', text: '~ Failed to spawn enemy.' });
+          }
+        } catch (error) {
+          console.error('Error spawning enemy:', error);
+          send(ws, { type: 'chat', text: '~ Error spawning enemy.' });
+        }
+        return;
+      }
 
       // Check for -players command (available to all players)
       if (t.toLowerCase() === '-players') {
@@ -2901,6 +3143,15 @@ setInterval(async () => {
     try { await updateStatsInDb(u.id, { magic: u.magic }); } catch(e){ console.error('magic regen db', e); }
   }
 }, 30000);
+
+// Enemy AI loop - process every 500ms
+setInterval(async () => {
+  try {
+    await processEnemyAI();
+  } catch (error) {
+    console.error('Enemy AI processing error:', error);
+  }
+}, 500);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
