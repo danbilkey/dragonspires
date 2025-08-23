@@ -239,6 +239,94 @@ function getItemDetails(itemId) {
   return itemDetails[itemId - 1];
 }
 
+// Enemy details loading and management
+let enemyDetails = [];
+let enemyDetailsReady = false;
+
+async function loadEnemyDetails() {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    
+    const possiblePaths = [
+      path.join(__dirname, 'assets', 'enemiesdetails.json'),
+      path.join(__dirname, '..', 'assets', 'enemiesdetails.json'),
+      path.join(__dirname, '..', 'client', 'assets', 'enemiesdetails.json'),
+      path.join(__dirname, '..', 'server', 'assets', 'enemiesdetails.json'),
+      path.join(process.cwd(), 'assets', 'enemiesdetails.json'),
+      path.join(process.cwd(), 'client', 'assets', 'enemiesdetails.json'),
+      path.join(process.cwd(), 'server', 'assets', 'enemiesdetails.json'),
+      // Additional paths for potential Render deployment structure
+      path.join(process.cwd(), 'src', 'server', 'assets', 'enemiesdetails.json'),
+      path.join(process.cwd(), 'src', 'assets', 'enemiesdetails.json'),
+      path.join(process.cwd(), 'src', 'client', 'assets', 'enemiesdetails.json')
+    ];
+    
+    let data = null;
+    let usedPath = null;
+    
+    for (const enemyDetailsPath of possiblePaths) {
+      try {
+        data = await fs.readFile(enemyDetailsPath, 'utf8');
+        usedPath = enemyDetailsPath;
+        break;
+      } catch (err) {
+        // Try next path
+        continue;
+      }
+    }
+    
+    if (!data) {
+      console.error('Could not find enemiesdetails.json in any of the expected paths');
+      enemyDetailsReady = true; // Don't block server startup
+      return;
+    }
+    
+    const parsed = JSON.parse(data);
+    
+    if (parsed && Array.isArray(parsed)) {
+      enemyDetails = parsed.map((enemy, index) => ({
+        id: index + 1,
+        name: enemy.name,
+        attack_text: enemy.attack_text,
+        drop_item: enemy.drop_item,
+        drop_chance: enemy.drop_chance,
+        drop_gold_min: enemy.drop_gold_min,
+        drop_gold_max: enemy.drop_gold_max,
+        hp: enemy.hp,
+        move_delay: enemy.move_delay,
+        attack_min: enemy.attack_min,
+        attack_max: enemy.attack_max,
+        defense_min: enemy.defense_min,
+        defense_max: enemy.defense_max,
+        projectile: enemy.projectile,
+        spell_item_id: enemy.spell_item_id,
+        spell_distance: enemy.spell_distance,
+        enemy_image_up_1: enemy.enemy_image_up_1,
+        enemy_image_up_2: enemy.enemy_image_up_2,
+        enemy_image_right_1: enemy.enemy_image_right_1,
+        enemy_image_right_2: enemy.enemy_image_right_2,
+        enemy_image_down_1: enemy.enemy_image_down_1,
+        enemy_image_down_2: enemy.enemy_image_down_2,
+        enemy_image_left_1: enemy.enemy_image_left_1,
+        enemy_image_left_2: enemy.enemy_image_left_2
+      }));
+      enemyDetailsReady = true;
+      console.log(`Server loaded ${enemyDetails.length} enemy details from: ${usedPath}`);
+    }
+  } catch (error) {
+    console.error('Failed to load server enemy details:', error);
+    enemyDetailsReady = true; // Don't block server startup
+  }
+}
+
+function getEnemyDetails(enemyType) {
+  if (!enemyDetailsReady || !enemyDetails || enemyType < 1 || enemyType > enemyDetails.length) {
+    return null;
+  }
+  return enemyDetails[enemyType - 1];
+}
+
 function getRandomItemByTypes(types) {
   if (!itemDetailsReady || !itemDetails) return 0;
   
@@ -676,6 +764,144 @@ async function updateContainerItem(x, y, mapId, itemId) {
   }
 }
 
+// Enemy management functions
+let enemies = {}; // Store enemies in memory by ID for quick access
+
+// Function to clear all enemies and reload from map data
+async function reloadEnemies() {
+  try {
+    // Clear existing enemies
+    await pool.query('DELETE FROM enemies');
+    enemies = {};
+    console.log('Cleared all enemies');
+    
+    // Reload enemies from all map data files
+    for (let mapId = 1; mapId <= 4; mapId++) {
+      const mapData = getMapData(mapId);
+      if (mapData && mapData.enemies) {
+        for (const enemy of mapData.enemies) {
+          const [spawnX, spawnY] = enemy.coordinates.split(',').map(Number);
+          const enemyType = enemy.type;
+          const enemyDetails = getEnemyDetails(enemyType);
+          
+          if (enemyDetails) {
+            const result = await pool.query(
+              `INSERT INTO enemies (enemy_type, map_id, pos_x, pos_y, spawn_x, spawn_y, hp, direction, step, is_admin_spawned) 
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+              [enemyType, mapId, spawnX, spawnY, spawnX, spawnY, enemyDetails.hp, 'down', 1, false]
+            );
+            
+            const enemyId = result.rows[0].id;
+            enemies[enemyId] = {
+              id: enemyId,
+              enemy_type: enemyType,
+              map_id: mapId,
+              pos_x: spawnX,
+              pos_y: spawnY,
+              spawn_x: spawnX,
+              spawn_y: spawnY,
+              hp: enemyDetails.hp,
+              max_hp: enemyDetails.hp,
+              direction: 'down',
+              step: 1,
+              last_move_time: Date.now(),
+              is_dead: false,
+              respawn_time: null,
+              is_admin_spawned: false,
+              details: enemyDetails
+            };
+          }
+        }
+        console.log(`Loaded ${mapData.enemies.length} enemies for map ${mapId}`);
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error reloading enemies:', error);
+    return false;
+  }
+}
+
+// Function to spawn a single enemy (for admin commands)
+async function spawnEnemy(enemyType, mapId, x, y, isAdminSpawned = false) {
+  try {
+    const enemyDetails = getEnemyDetails(enemyType);
+    if (!enemyDetails) {
+      return null;
+    }
+    
+    const result = await pool.query(
+      `INSERT INTO enemies (enemy_type, map_id, pos_x, pos_y, spawn_x, spawn_y, hp, direction, step, is_admin_spawned) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      [enemyType, mapId, x, y, x, y, enemyDetails.hp, 'down', 1, isAdminSpawned]
+    );
+    
+    const enemyId = result.rows[0].id;
+    enemies[enemyId] = {
+      id: enemyId,
+      enemy_type: enemyType,
+      map_id: mapId,
+      pos_x: x,
+      pos_y: y,
+      spawn_x: x,
+      spawn_y: y,
+      hp: enemyDetails.hp,
+      max_hp: enemyDetails.hp,
+      direction: 'down',
+      step: 1,
+      last_move_time: Date.now(),
+      is_dead: false,
+      respawn_time: null,
+      is_admin_spawned: isAdminSpawned,
+      details: enemyDetails
+    };
+    
+    return enemies[enemyId];
+  } catch (error) {
+    console.error('Error spawning enemy:', error);
+    return null;
+  }
+}
+
+// Function to load enemies from database on server startup
+async function loadEnemiesFromDatabase() {
+  try {
+    const result = await pool.query('SELECT * FROM enemies');
+    enemies = {};
+    
+    for (const row of result.rows) {
+      const enemyDetails = getEnemyDetails(row.enemy_type);
+      if (enemyDetails) {
+        enemies[row.id] = {
+          id: row.id,
+          enemy_type: row.enemy_type,
+          map_id: row.map_id,
+          pos_x: row.pos_x,
+          pos_y: row.pos_y,
+          spawn_x: row.spawn_x,
+          spawn_y: row.spawn_y,
+          hp: row.hp,
+          max_hp: enemyDetails.hp,
+          direction: row.direction,
+          step: row.step,
+          last_move_time: new Date(row.last_move_time).getTime(),
+          is_dead: row.is_dead,
+          respawn_time: row.respawn_time ? new Date(row.respawn_time).getTime() : null,
+          is_admin_spawned: row.is_admin_spawned,
+          details: enemyDetails
+        };
+      }
+    }
+    
+    console.log(`Loaded ${Object.keys(enemies).length} enemies from database`);
+    return true;
+  } catch (error) {
+    console.error('Error loading enemies from database:', error);
+    return false;
+  }
+}
+
 function broadcast(obj) {
   const s = JSON.stringify(obj);
   for (const [ws] of clients.entries()) {
@@ -1012,6 +1238,26 @@ async function initializeDatabase() {
       )
     `);
 
+    // Create enemies table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS enemies (
+        id SERIAL PRIMARY KEY,
+        enemy_type INTEGER NOT NULL,
+        map_id INTEGER NOT NULL,
+        pos_x INTEGER NOT NULL,
+        pos_y INTEGER NOT NULL,
+        spawn_x INTEGER NOT NULL,
+        spawn_y INTEGER NOT NULL,
+        hp INTEGER NOT NULL,
+        direction VARCHAR(10) DEFAULT 'down',
+        step INTEGER DEFAULT 1,
+        last_move_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        is_dead BOOLEAN DEFAULT false,
+        respawn_time TIMESTAMP,
+        is_admin_spawned BOOLEAN DEFAULT false
+      )
+    `);
+
     // Add map_id column if it doesn't exist (migration)
     try {
       await pool.query(`ALTER TABLE map_items ADD COLUMN IF NOT EXISTS map_id INTEGER DEFAULT 1`);
@@ -1049,6 +1295,14 @@ async function initializeDatabase() {
       mapItems = {}; // Initialize empty if loading fails
       console.log('Initialized empty items due to database migration');
     }
+
+    // Load existing enemies
+    try {
+      await loadEnemiesFromDatabase();
+    } catch (enemyLoadError) {
+      console.error('Error loading enemies from database:', enemyLoadError);
+      enemies = {}; // Initialize empty if loading fails
+    }
   } catch (error) {
     console.error('Error initializing database:', error);
   }
@@ -1057,6 +1311,7 @@ async function initializeDatabase() {
 // Initialize database on startup
 initializeDatabase();
 loadItemDetails();
+loadEnemyDetails();
 loadAllMaps();
 loadFloorCollision();
 
@@ -2348,6 +2603,13 @@ wss.on('connection', (ws) => {
           const containersSuccess = await reloadMapContainers();
           if (!containersSuccess) {
             send(ws, { type: 'chat', text: '~ Error: Failed to reload map containers.' });
+            return;
+          }
+
+          // Reload enemies
+          const enemiesSuccess = await reloadEnemies();
+          if (!enemiesSuccess) {
+            send(ws, { type: 'chat', text: '~ Error: Failed to reload enemies.' });
             return;
           }
 
