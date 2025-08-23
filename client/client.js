@@ -1587,13 +1587,12 @@
             }
             isLocallyAttacking = false;
             
-            // Update direction and position directly to final teleport destination
+            // Update direction for teleportation
             playerDirection = newDirection;
             // Don't update step for teleportation (as per requirements)
             
             localPlayer.direction = playerDirection;
-            localPlayer.pos_x = currentX;
-            localPlayer.pos_y = currentY;
+            // Don't update position optimistically - let server be authoritative
             localPlayer.isAttacking = false;
             localPlayer.isMoving = false;
             
@@ -1634,8 +1633,7 @@
             
             localPlayer.direction = playerDirection;
             localPlayer.step = playerStep;
-            localPlayer.pos_x = nx;
-            localPlayer.pos_y = ny;
+            // Don't update position optimistically - let server be authoritative
             localPlayer.isAttacking = false;
             localPlayer.isMoving = true;
             
