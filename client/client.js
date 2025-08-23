@@ -161,6 +161,30 @@
           enemy_image_right_1: 67, enemy_image_right_2: 68,
           enemy_image_down_1: 65, enemy_image_down_2: 66,
           enemy_image_left_1: 69, enemy_image_left_2: 70
+        },
+        9: { // Enemy type 9
+          enemy_image_up_1: 79, enemy_image_up_2: 80,
+          enemy_image_right_1: 75, enemy_image_right_2: 76,
+          enemy_image_down_1: 73, enemy_image_down_2: 74,
+          enemy_image_left_1: 77, enemy_image_left_2: 78
+        },
+        10: { // Enemy type 10
+          enemy_image_up_1: 87, enemy_image_up_2: 88,
+          enemy_image_right_1: 83, enemy_image_right_2: 84,
+          enemy_image_down_1: 81, enemy_image_down_2: 82,
+          enemy_image_left_1: 85, enemy_image_left_2: 86
+        },
+        11: { // Enemy type 11
+          enemy_image_up_1: 95, enemy_image_up_2: 96,
+          enemy_image_right_1: 91, enemy_image_right_2: 92,
+          enemy_image_down_1: 89, enemy_image_down_2: 90,
+          enemy_image_left_1: 93, enemy_image_left_2: 94
+        },
+        12: { // Enemy type 12
+          enemy_image_up_1: 103, enemy_image_up_2: 104,
+          enemy_image_right_1: 99, enemy_image_right_2: 100,
+          enemy_image_down_1: 97, enemy_image_down_2: 98,
+          enemy_image_left_1: 101, enemy_image_left_2: 102
         }
       };
       
