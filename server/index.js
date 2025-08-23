@@ -915,8 +915,10 @@ function getEnemiesForMap(mapId) {
   
   const mapEnemies = {};
   for (const [enemyId, enemy] of Object.entries(enemies)) {
-    console.log(`getEnemiesForMap: Checking enemy ${enemyId}: map_id=${enemy.map_id}, is_dead=${enemy.is_dead}`);
-    if (enemy.map_id === mapId && !enemy.is_dead) {
+    console.log(`getEnemiesForMap: Checking enemy ${enemyId}: map_id=${enemy.map_id} (${typeof enemy.map_id}), is_dead=${enemy.is_dead}`);
+    console.log(`getEnemiesForMap: Comparing with mapId=${mapId} (${typeof mapId})`);
+    console.log(`getEnemiesForMap: Strict equality: ${enemy.map_id === mapId}, Loose equality: ${enemy.map_id == mapId}`);
+    if (Number(enemy.map_id) === Number(mapId) && !enemy.is_dead) {
       mapEnemies[enemyId] = {
         id: enemy.id,
         enemy_type: enemy.enemy_type,
