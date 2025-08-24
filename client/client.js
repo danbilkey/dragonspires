@@ -736,6 +736,25 @@
     }
   }
 
+    // ---------- HEARTBEAT ----------
+    let heartbeatInterval = null;
+    
+    function startHeartbeat() {
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      heartbeatInterval = setInterval(() => {
+        if (loggedIn && ws && ws.readyState === WebSocket.OPEN) {
+          send({ type: 'heartbeat' });
+        }
+      }, 30000); // Send heartbeat every 30 seconds
+    }
+    
+    function stopHeartbeat() {
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+    }
+
     // ---------- WS ----------
     function connectToServer() {
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
@@ -747,6 +766,9 @@
         connected = true;
         connectionPaused = true;
         showLoginGUI = false;
+        
+        // Start heartbeat to keep server alive
+        startHeartbeat();
       };
       ws.onmessage = (ev) => {
         const data = safeParse(ev.data);
@@ -787,6 +809,9 @@
         playerInventory = {};
         inventoryVisible = false;
       
+        // Stop heartbeat on close
+        stopHeartbeat();
+        
         // Auto-reconnect after 3 seconds if not manually closed
         if (e.code !== 1000) { // 1000 = normal closure
           console.log('Attempting to reconnect in 3 seconds...');
@@ -800,7 +825,10 @@
 
     function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
     function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
-    function pushChat(line) { messages.push(String(line)); if (messages.length > 200) messages.shift(); }
+    function pushChat(line, color = 'black') { 
+      messages.push({ text: String(line), color: color }); 
+      if (messages.length > 200) messages.shift(); 
+    }
 
     function handleServerMessage(msg) {
       switch (msg.type) {
@@ -886,7 +914,7 @@
               temporarySprite: msg.player.temporarySprite || 0,
               animationFrame: undefined // Clear any stale animation frame
             };
-            pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`);
+            pushChat(`${msg.player.username || msg.player.id} has entered DragonSpires!`, 'grey');
           }
           break;
           
@@ -1155,12 +1183,15 @@
         case 'player_left':
           const p = otherPlayers[msg.id];
           const name = msg.username || p?.username || `#${msg.id}`;
-          if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`);
+          if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`, 'grey');
           delete otherPlayers[msg.id];
           break;
           
         case 'chat':
-          if (typeof msg.text === 'string') pushChat(msg.text);
+          if (typeof msg.text === 'string') {
+            const color = msg.color || 'black';
+            pushChat(msg.text, color);
+          }
           break;
           
         case 'chat_error':
@@ -1389,6 +1420,13 @@
       if (loggedIn && localPlayer && e.key === 'y') {
         e.preventDefault();
         send({ type: 'equip_armor' });
+        return;
+      }
+
+      // Toggle rest with 'r' key
+      if (loggedIn && localPlayer && e.key === 'r') {
+        e.preventDefault();
+        send({ type: 'toggle_rest' });
         return;
       }
 
@@ -2047,7 +2085,7 @@
     function drawChatHistory() {
       const { x1,y1,x2,y2,pad } = CHAT;
       const w = x2 - x1;
-      ctx.font = '12px monospace'; ctx.fillStyle = '#000'; ctx.textAlign = 'left';
+      ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left';
       const lineH = 16;
       let y = y2 - pad;
       
@@ -2057,8 +2095,13 @@
       const endIndex = Math.max(0, messages.length - chatScrollOffset);
       
       for (let i = endIndex - 1; i >= startIndex; i--) {
-        let line = messages[i];
+        const msg = messages[i];
+        let line = typeof msg === 'string' ? msg : msg.text;
+        let color = typeof msg === 'string' ? 'black' : (msg.color || 'black');
+        
         while (ctx.measureText(line).width > w - pad*2 && line.length > 1) line = line.slice(0, -1);
+        
+        ctx.fillStyle = color;
         ctx.fillText(line, x1 + pad, y);
         y -= lineH;
         if (y < y1 + pad) break;
