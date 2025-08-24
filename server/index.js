@@ -1017,6 +1017,107 @@ function findClosestPlayer(enemy) {
   return closestPlayer;
 }
 
+// Handle player attack on enemy
+async function playerAttackEnemy(playerData, playerWs) {
+  // Get position in front of player based on direction
+  const targetPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+  
+  // Find enemy at target position
+  const targetEnemy = Object.values(enemies).find(enemy => 
+    Number(enemy.map_id) === Number(playerData.map_id) &&
+    enemy.pos_x === targetPos.x &&
+    enemy.pos_y === targetPos.y &&
+    !enemy.is_dead
+  );
+
+  if (!targetEnemy) return false;
+
+  // Calculate player's attack damage
+  let minDamage = 0;
+  let maxDamage = 1; // Default fist damage
+
+  if (playerData.weapon && playerData.weapon > 0) {
+    const weaponDetails = getItemDetails(playerData.weapon);
+    if (weaponDetails && weaponDetails.type === 'weapon' && 
+        typeof weaponDetails.statMin === 'number' && typeof weaponDetails.statMax === 'number') {
+      minDamage = weaponDetails.statMin;
+      maxDamage = weaponDetails.statMax;
+    }
+  }
+
+  // Calculate initial damage
+  const initialDamage = Math.floor(Math.random() * (maxDamage - minDamage + 1)) + minDamage;
+
+  // Calculate enemy defense
+  let defense = 0;
+  const enemyDetails = targetEnemy.details;
+  if (enemyDetails && typeof enemyDetails.defense_min === 'number' && typeof enemyDetails.defense_max === 'number') {
+    defense = Math.floor(Math.random() * (enemyDetails.defense_max - enemyDetails.defense_min + 1)) + enemyDetails.defense_min;
+  }
+
+  // Calculate final damage
+  const finalDamage = Math.max(0, initialDamage - defense);
+
+  // Send attack message to player
+  const enemyName = enemyDetails?.name || `Enemy ${targetEnemy.enemy_type}`;
+  send(playerWs, { type: 'chat', text: `~ You attack ${enemyName} for ${finalDamage} damage!` });
+
+  // Apply damage to enemy
+  if (finalDamage > 0) {
+    targetEnemy.hp = Math.max(0, targetEnemy.hp - finalDamage);
+  }
+
+  // Check if enemy died
+  if (targetEnemy.hp <= 0) {
+    await handleEnemyDeath(targetEnemy);
+  }
+
+  return true;
+}
+
+// Handle enemy death
+async function handleEnemyDeath(enemy) {
+  try {
+    // Mark enemy as dead
+    enemy.is_dead = true;
+
+    // Remove enemy from database
+    await pool.query('DELETE FROM enemies WHERE id = $1', [enemy.id]);
+
+    // Remove from memory
+    delete enemies[enemy.id];
+
+    // Broadcast enemy removal to all clients
+    broadcast({
+      type: 'enemy_removed',
+      id: enemy.id,
+      map_id: enemy.map_id
+    });
+
+    // Create drop container with item 201 at enemy position
+    // For now, just dropping a basic item (you can customize loot tables later)
+    const dropItems = []; // Add items here if you want specific loot
+    const dropGold = Math.floor(Math.random() * 10) + 1; // Random 1-10 gold
+
+    await createOrUpdateDropContainer(enemy.map_id, enemy.pos_x, enemy.pos_y, dropItems, dropGold);
+
+    // Set respawn timer (using existing enemy respawn logic)
+    if (!enemy.is_admin_spawned) {
+      // Re-spawn the enemy after delay (existing system should handle this)
+      const respawnTime = new Date(Date.now() + 30000); // 30 second respawn
+      await pool.query(
+        'INSERT INTO enemies (enemy_type, map_id, pos_x, pos_y, spawn_x, spawn_y, hp, direction, step, is_dead, respawn_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
+        [enemy.enemy_type, enemy.map_id, enemy.spawn_x, enemy.spawn_y, enemy.spawn_x, enemy.spawn_y, enemy.details?.hp || 100, 'down', 1, true, respawnTime]
+      );
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error handling enemy death:', error);
+    return false;
+  }
+}
+
 // Handle enemy attack on player
 async function enemyAttackPlayer(enemy, targetX, targetY) {
   console.log(`enemyAttackPlayer called: Enemy ${enemy.id} attacking position (${targetX}, ${targetY})`);
@@ -1228,6 +1329,120 @@ async function handlePlayerDeath(playerData, playerWs, killerEnemy) {
 
   } catch (error) {
     console.error('Error handling player death:', error);
+  }
+}
+
+// Drop container management functions
+async function createOrUpdateDropContainer(mapId, x, y, itemsToAdd = [], goldToAdd = 0) {
+  try {
+    // Check if drop container already exists
+    const existing = await pool.query(
+      'SELECT items, gold FROM drop_containers WHERE map_id = $1 AND pos_x = $2 AND pos_y = $3',
+      [mapId, x, y]
+    );
+
+    let currentItems = [];
+    let currentGold = 0;
+
+    if (existing.rows.length > 0) {
+      currentItems = existing.rows[0].items || [];
+      currentGold = existing.rows[0].gold || 0;
+    }
+
+    // Add new items (up to max 10 total)
+    const combinedItems = [...currentItems];
+    for (const item of itemsToAdd) {
+      if (combinedItems.length < 10) {
+        combinedItems.push(item);
+      }
+    }
+
+    // Add gold
+    const totalGold = currentGold + goldToAdd;
+
+    // Upsert the drop container
+    await pool.query(`
+      INSERT INTO drop_containers (map_id, pos_x, pos_y, items, gold)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (map_id, pos_x, pos_y)
+      DO UPDATE SET items = $4, gold = $5
+    `, [mapId, x, y, JSON.stringify(combinedItems), totalGold]);
+
+    // Place item 201 on the map
+    await saveItemToDatabase(x, y, 201, mapId);
+
+    // Broadcast item placement
+    broadcast({
+      type: 'item_placed',
+      x: x,
+      y: y,
+      itemId: 201,
+      mapId: mapId
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error creating/updating drop container:', error);
+    return false;
+  }
+}
+
+async function getDropContainer(mapId, x, y) {
+  try {
+    const result = await pool.query(
+      'SELECT items, gold FROM drop_containers WHERE map_id = $1 AND pos_x = $2 AND pos_y = $3',
+      [mapId, x, y]
+    );
+    
+    if (result.rows.length > 0) {
+      return {
+        items: result.rows[0].items || [],
+        gold: result.rows[0].gold || 0
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Error getting drop container:', error);
+    return null;
+  }
+}
+
+async function updateDropContainer(mapId, x, y, items, gold) {
+  try {
+    await pool.query(
+      'UPDATE drop_containers SET items = $1, gold = $2 WHERE map_id = $3 AND pos_x = $4 AND pos_y = $5',
+      [JSON.stringify(items), gold, mapId, x, y]
+    );
+    return true;
+  } catch (error) {
+    console.error('Error updating drop container:', error);
+    return false;
+  }
+}
+
+async function removeDropContainer(mapId, x, y) {
+  try {
+    await pool.query(
+      'DELETE FROM drop_containers WHERE map_id = $1 AND pos_x = $2 AND pos_y = $3',
+      [mapId, x, y]
+    );
+
+    // Remove item 201 from the map
+    await saveItemToDatabase(x, y, 0, mapId);
+
+    // Broadcast item removal
+    broadcast({
+      type: 'item_placed',
+      x: x,
+      y: y,
+      itemId: 0,
+      mapId: mapId
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error removing drop container:', error);
+    return false;
   }
 }
 
@@ -1795,6 +2010,19 @@ async function initializeDatabase() {
       )
     `);
 
+    // Create drop_containers table if it doesn't exist
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS drop_containers (
+        map_id INTEGER NOT NULL,
+        pos_x INTEGER NOT NULL,
+        pos_y INTEGER NOT NULL,
+        items JSON DEFAULT '[]',
+        gold INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (map_id, pos_x, pos_y)
+      )
+    `);
+
     // Add map_id column if it doesn't exist (migration)
     try {
       await pool.query(`ALTER TABLE map_items ADD COLUMN IF NOT EXISTS map_id INTEGER DEFAULT 1`);
@@ -2340,6 +2568,17 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'attack') {
       if (!playerData) return;
       
+      // First check if there's an enemy in front to attack
+      const attacked = await playerAttackEnemy(playerData, ws);
+      if (attacked) {
+        // Attack animation is handled by client, stamina reduction
+        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
+        updateStatsInDb(playerData.id, { stamina: playerData.stamina })
+          .catch(err => console.error('Error updating stamina after attack:', err));
+        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+        return; // Exit early since we attacked an enemy
+      }
+      
       // Get the adjacent position based on player's facing direction
       const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
       
@@ -2528,6 +2767,65 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'pickup_item') {
       if (!playerData) return;
+      
+      // Check if item at current position is item 201 (drop container)
+      const playerMapSpec = getMapSpec(playerData.map_id);
+      const itemAtPosition = getItemAtPosition(playerData.pos_x, playerData.pos_y, playerMapSpec, playerData.map_id);
+      
+      if (itemAtPosition === 201) {
+        // Handle drop container pickup
+        const dropContainer = await getDropContainer(playerData.map_id, playerData.pos_x, playerData.pos_y);
+        if (dropContainer) {
+          let pickedUpGold = false;
+          let pickedUpItem = false;
+          
+          // Pick up gold first
+          if (dropContainer.gold > 0) {
+            playerData.gold = (playerData.gold || 0) + dropContainer.gold;
+            send(ws, { type: 'chat', text: `~ You found ${dropContainer.gold} gold coins.` });
+            await updateStatsInDb(playerData.id, { gold: playerData.gold });
+            dropContainer.gold = 0;
+            pickedUpGold = true;
+          }
+          
+          // Pick up first non-zero item if hands are empty
+          if (dropContainer.items && dropContainer.items.length > 0) {
+            const firstItemIndex = dropContainer.items.findIndex(item => item > 0);
+            if (firstItemIndex !== -1) {
+              if (!playerData.hands || playerData.hands === 0) {
+                // Hands are empty, pick up the item
+                playerData.hands = dropContainer.items[firstItemIndex];
+                dropContainer.items[firstItemIndex] = 0; // Remove from container
+                pickedUpItem = true;
+                
+                // Update player hands in database
+                await updateStatsInDb(playerData.id, { hands: playerData.hands });
+                
+                // Send equipment update
+                send(ws, {
+                  type: 'player_equipment_update',
+                  id: playerData.id,
+                  hands: playerData.hands
+                });
+              } else {
+                // Hands are full
+                send(ws, { type: 'chat', text: '~ Your hands are full, you cannot hold another item.' });
+              }
+            }
+          }
+          
+          // Clean up container if empty
+          const hasItems = dropContainer.items && dropContainer.items.some(item => item > 0);
+          if (!hasItems && dropContainer.gold === 0) {
+            await removeDropContainer(playerData.map_id, playerData.pos_x, playerData.pos_y);
+          } else if (pickedUpGold || pickedUpItem) {
+            // Update the container with remaining items/gold
+            const cleanedItems = dropContainer.items ? dropContainer.items.filter(item => item > 0) : [];
+            await updateDropContainer(playerData.map_id, playerData.pos_x, playerData.pos_y, cleanedItems, dropContainer.gold);
+          }
+        }
+        return; // Exit early for drop container pickup
+      }
       
       // Clear temporary sprite when picking up
       playerData.temporarySprite = 0;
