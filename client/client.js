@@ -728,23 +728,8 @@
       return 21; // 'stand' animation
     }
 
-    // Special handling for stand animation from pickup
-    if (shouldStayInStand && isLocal && !player.isMoving) {
-      return 20; // 'stand' animation
-    }
-
-    // For other players, check if they should be in stand animation
-    if (!isLocal && player.animationFrame === 20 && !player.isMoving) {
-      return 20; // 'stand' animation
-    }
-
-    // Use the new direction and step system
-    if (isLocal) {
-      return getAnimationFrameFromDirectionAndStep(playerDirection, playerStep);
-    } else {
-      // For other players, use their direction and step
-      return getAnimationFrameFromDirectionAndStep(player.direction || 'down', player.step || 2);
-    }
+    // Return null for fallback to normal movement logic
+    return null;
   }
 
     // ---------- HEARTBEAT ----------
@@ -2013,11 +1998,17 @@
           const attackSeq = ATTACK_SEQUENCES[playerDirection] || ATTACK_SEQUENCES.down;
           animFrame = attackSeq[localAttackState];
         } else {
-          // Check if we should stay in stand animation (after pickup and not moving)
-          if (shouldStayInStand && !localPlayer.isMoving) {
-            animFrame = 20; // Stay in 'stand' animation
-          } else {
-            animFrame = getAnimationFrameFromDirectionAndStep(playerDirection, playerStep);
+          // Use getCurrentAnimationFrame for local player to handle resting states
+          animFrame = getCurrentAnimationFrame(localPlayer, true);
+          
+          // Fallback to direction/step if no special animation frame
+          if (animFrame === null || animFrame === undefined) {
+            // Check if we should stay in stand animation (after pickup and not moving)
+            if (shouldStayInStand && !localPlayer.isMoving) {
+              animFrame = 20; // Stay in 'stand' animation
+            } else {
+              animFrame = getAnimationFrameFromDirectionAndStep(playerDirection, playerStep);
+            }
           }
         }
       } else {
