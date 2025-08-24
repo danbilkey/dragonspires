@@ -1068,6 +1068,13 @@
           }
           break;
           
+        case 'enemy_removed':
+          // Remove enemy from current map
+          if (enemies[msg.id] && (!localPlayer || enemies[msg.id].map_id === localPlayer.map_id)) {
+            delete enemies[msg.id];
+          }
+          break;
+          
         case 'enemy_spawned':
           // Add new enemy to the client
           if (msg.enemy) {
