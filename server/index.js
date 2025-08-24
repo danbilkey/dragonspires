@@ -2102,9 +2102,10 @@ async function moveEnemyToward(enemy, targetX, targetY) {
     broadcastToMap(enemy.map_id, {
       type: 'enemy_moved',
       id: enemy.id,
-      x: newX,
-      y: newY,
-      direction: enemy.direction
+      pos_x: newX,
+      pos_y: newY,
+      direction: enemy.direction,
+      step: enemy.step || 1
     });
   }
 }
@@ -2157,9 +2158,10 @@ async function moveEnemyRandomly(enemy) {
     broadcastToMap(enemy.map_id, {
       type: 'enemy_moved',
       id: enemy.id,
-      x: newX,
-      y: newY,
-      direction: randomDirection
+      pos_x: newX,
+      pos_y: newY,
+      direction: randomDirection,
+      step: enemy.step || 1
     });
   }
 }
