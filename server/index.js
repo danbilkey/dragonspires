@@ -2345,6 +2345,7 @@ wss.on('connection', (ws) => {
       // Cancel resting when moving
       if (playerData.isResting) {
         playerData.isResting = false;
+        playerData.animationFrame = null; // Clear animation frame to restore normal movement
         send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
         console.log(`Player ${playerData.username} stopped resting due to movement`);
       }
@@ -2635,6 +2636,7 @@ wss.on('connection', (ws) => {
       // Cancel resting when attacking
       if (playerData.isResting) {
         playerData.isResting = false;
+        playerData.animationFrame = null; // Clear animation frame to restore normal movement
         send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
         console.log(`Player ${playerData.username} stopped resting due to attack`);
       }
@@ -2832,12 +2834,12 @@ wss.on('connection', (ws) => {
       
       if (playerData.isResting) {
         // Start resting
-        playerData.animationFrame = 22; // 'sit' sprite
+        playerData.animationFrame = 21; // 'sit' sprite (index 21 in ANIMATION_NAMES)
         send(ws, { type: 'chat', text: 'You settle down and begin resting.', color: 'gold' });
         console.log(`Player ${playerData.username} started resting`);
       } else {
         // Stop resting
-        playerData.animationFrame = 21; // 'stand' sprite
+        playerData.animationFrame = 20; // 'stand' sprite (index 20 in ANIMATION_NAMES)
         send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
         console.log(`Player ${playerData.username} stopped resting`);
       }
