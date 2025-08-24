@@ -1034,8 +1034,6 @@ async function playerAttackEnemy(playerData, playerWs) {
 
   if (!targetEnemy) {
     console.log(`No enemy found at position (${targetPos.x}, ${targetPos.y}) on map ${playerData.map_id}`);
-    // Debug: Send chat message to player
-    send(playerWs, { type: 'chat', text: `~ DEBUG: No enemy at position (${targetPos.x}, ${targetPos.y})` });
     return false;
   }
   
@@ -1388,7 +1386,11 @@ async function createOrUpdateDropContainer(mapId, x, y, itemsToAdd = [], goldToA
     let currentGold = 0;
 
     if (existing.rows.length > 0) {
-      currentItems = existing.rows[0].items || [];
+      try {
+        currentItems = JSON.parse(existing.rows[0].items || '[]');
+      } catch (e) {
+        currentItems = [];
+      }
       currentGold = existing.rows[0].gold || 0;
     }
 
@@ -1438,8 +1440,14 @@ async function getDropContainer(mapId, x, y) {
     );
     
     if (result.rows.length > 0) {
+      let items = [];
+      try {
+        items = JSON.parse(result.rows[0].items || '[]');
+      } catch (e) {
+        items = [];
+      }
       return {
-        items: result.rows[0].items || [],
+        items: items,
         gold: result.rows[0].gold || 0
       };
     }
@@ -2059,7 +2067,7 @@ async function initializeDatabase() {
         map_id INTEGER NOT NULL,
         pos_x INTEGER NOT NULL,
         pos_y INTEGER NOT NULL,
-        items JSON DEFAULT '[]',
+        items TEXT DEFAULT '[]',
         gold INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (map_id, pos_x, pos_y)
@@ -2612,7 +2620,6 @@ wss.on('connection', (ws) => {
       if (!playerData) return;
       
       console.log(`Attack message received from player ${playerData.username} at (${playerData.pos_x}, ${playerData.pos_y}) facing ${playerData.direction}`);
-      send(ws, { type: 'chat', text: `~ DEBUG: Attack received, checking for enemies...` });
       
       // First check if there's an enemy in front to attack
       const attacked = await playerAttackEnemy(playerData, ws);
@@ -2626,7 +2633,6 @@ wss.on('connection', (ws) => {
         return; // Exit early since we attacked an enemy
       } else {
         console.log(`Player ${playerData.username} attack found no enemy target`);
-        send(ws, { type: 'chat', text: `~ DEBUG: No enemy found to attack` });
       }
       
       // Get the adjacent position based on player's facing direction
