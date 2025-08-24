@@ -1013,6 +1013,11 @@
               localPlayer.pos_x = msg.x;
               localPlayer.pos_y = msg.y;
               
+              // Show loading screen if provided
+              if (msg.showLoadingScreen) {
+                showLoadingScreen(msg.showLoadingScreen);
+              }
+              
               // Check if map changed and reload if necessary
               if (localPlayer.map_id !== msg.mapId) {
                 localPlayer.map_id = msg.mapId;
@@ -1039,8 +1044,6 @@
                   };
                 }
               }
-              
-              pushChat("~ You have been teleported!");
             } else if (!msg.success && msg.message) {
               pushChat(msg.message);
             }
@@ -2371,6 +2374,29 @@
       if (!itemDetails) return false;
       const pickupableTypes = ["weapon", "armor", "useable", "consumable", "buff", "garbage"];
       return pickupableTypes.includes(itemDetails.type);
+    }
+
+    function showLoadingScreen(loadingScreenData) {
+      if (!loadingScreenData || !loadingScreenData.imagePath) return;
+      
+      // Create loading screen image element
+      const loadingImg = document.createElement('img');
+      loadingImg.src = loadingScreenData.imagePath;
+      loadingImg.style.position = 'absolute';
+      loadingImg.style.left = loadingScreenData.x + 'px';
+      loadingImg.style.top = loadingScreenData.y + 'px';
+      loadingImg.style.zIndex = '9999';
+      loadingImg.style.pointerEvents = 'none'; // Don't interfere with game interaction
+      
+      // Add to document body
+      document.body.appendChild(loadingImg);
+      
+      // Remove after specified duration
+      setTimeout(() => {
+        if (loadingImg.parentNode) {
+          document.body.removeChild(loadingImg);
+        }
+      }, loadingScreenData.duration || 200);
     }
 
     function showHelpControls() {
