@@ -26,11 +26,15 @@
   "enemies": [
     {
       "type": 3,
-      "coordinates": "47,44"
+      "coordinates": "47,43"
     },
     {
       "type": 3,
-      "coordinates": "41,38"
+      "coordinates": "25,30"
+    },
+    {
+      "type": 3,
+      "coordinates": "18,33"
     }
   ]
 }
