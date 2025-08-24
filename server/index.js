@@ -1271,15 +1271,26 @@ async function handlePlayerDeath(playerData, playerWs, killerEnemy) {
     text: `~ ${playerData.username} has been killed by ${enemyName}!` 
   });
 
-  // Drop item from hands
+  // Drop item from hands using drop_container system
   if (playerData.hands && playerData.hands > 0) {
     const droppedItemId = playerData.hands;
+    const itemsToAdd = [droppedItemId];
     
     // Clear hands first
     playerData.hands = 0;
     
-    // Save dropped item to database
-    await saveItemToDatabase(playerData.pos_x, playerData.pos_y, droppedItemId, playerData.map_id);
+    // Check if there's already an item on the ground
+    const currentMapSpec = getMapSpec(playerData.map_id);
+    const existingItemId = getItemAtPosition(playerData.pos_x, playerData.pos_y, currentMapSpec, playerData.map_id);
+    if (existingItemId && existingItemId > 0 && existingItemId !== 201) {
+      // There's an item on the ground, add it to the drop container too
+      itemsToAdd.push(existingItemId);
+      // Remove the existing item from the map
+      await saveItemToDatabase(playerData.pos_x, playerData.pos_y, 0, playerData.map_id);
+    }
+    
+    // Create or update drop container with the item(s)
+    await createOrUpdateDropContainer(playerData.map_id, playerData.pos_x, playerData.pos_y, itemsToAdd, 0);
     
     // Update player hands in database
     await updateStatsInDb(playerData.id, { hands: playerData.hands });
@@ -1291,14 +1302,7 @@ async function handlePlayerDeath(playerData, playerWs, killerEnemy) {
       hands: playerData.hands
     });
     
-    // Broadcast item placement
-    broadcast({
-      type: 'item_placed',
-      x: playerData.pos_x,
-      y: playerData.pos_y,
-      itemId: droppedItemId,
-      mapId: playerData.map_id
-    });
+    console.log(`Player death: Created drop_container with items [${itemsToAdd.join(', ')}] at (${playerData.pos_x}, ${playerData.pos_y})`);
   }
 
   // Get respawn location from map data
@@ -2634,24 +2638,31 @@ wss.on('connection', (ws) => {
       
       console.log(`Attack message received from player ${playerData.username} at (${playerData.pos_x}, ${playerData.pos_y}) facing ${playerData.direction}`);
       
-      // First check if there's an enemy in front to attack
-      const attacked = await playerAttackEnemy(playerData, ws);
-      if (attacked) {
-        console.log(`Player ${playerData.username} successfully attacked an enemy`);
-        // Attack animation is handled by client, stamina reduction
-        playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
-        updateStatsInDb(playerData.id, { stamina: playerData.stamina })
-          .catch(err => console.error('Error updating stamina after attack:', err));
-        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-        return; // Exit early since we attacked an enemy
-      } else {
-        console.log(`Player ${playerData.username} attack found no enemy target`);
+      // Check if attacking a fountain first - no stamina cost for fountains
+      const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+      const playerMapSpec = getMapSpec(playerData.map_id);
+      const itemAtAdjacentPos = getItemAtPosition(adjacentPos.x, adjacentPos.y, playerMapSpec, playerData.map_id);
+      const isFountain = (itemAtAdjacentPos === 60);
+      
+      console.log(`Checking target at (${adjacentPos.x}, ${adjacentPos.y}): item ${itemAtAdjacentPos}, isFountain: ${isFountain}`);
+      
+      if (!isFountain) {
+        // First check if there's an enemy in front to attack (only for non-fountain attacks)
+        const attacked = await playerAttackEnemy(playerData, ws);
+        if (attacked) {
+          console.log(`Player ${playerData.username} successfully attacked an enemy`);
+          // Attack animation is handled by client, stamina reduction
+          playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
+          updateStatsInDb(playerData.id, { stamina: playerData.stamina })
+            .catch(err => console.error('Error updating stamina after attack:', err));
+          send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+          return; // Exit early since we attacked an enemy
+        } else {
+          console.log(`Player ${playerData.username} attack found no enemy target`);
+        }
       }
       
-      // Get the adjacent position based on player's facing direction
-      const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
-      
-      // Check bounds
+      // Check bounds (adjacentPos already calculated above)
       if (adjacentPos.x >= 0 && adjacentPos.x < MAP_WIDTH && adjacentPos.y >= 0 && adjacentPos.y < MAP_HEIGHT) {
         // Check if attacking a container first
         const mapData = getMapData(playerData.map_id);
@@ -2756,11 +2767,6 @@ wss.on('connection', (ws) => {
           }
         }
       }
-      
-      // Check if attacking a fountain (item 60) - no stamina cost for fountains
-      const playerMapSpec = getMapSpec(playerData.map_id);
-      const itemAtAdjacentPos = getItemAtPosition(adjacentPos.x, adjacentPos.y, playerMapSpec, playerData.map_id);
-      const isFountain = (itemAtAdjacentPos === 60);
       
       console.log(`Attack attempt by ${playerData.username}: stamina ${playerData.stamina ?? 0}/10, attacking fountain: ${isFountain}`);
       
