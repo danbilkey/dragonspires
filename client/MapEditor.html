@@ -46,6 +46,7 @@
         <p>N - Clear map (set all floors to tile 6, all items to 0)</p>
         <p>P - Save map as newmap.json</p>
         <p>I - Import/Load a JSON map file</p>
+        <p>TAB - Toggle dragging mode (place tiles/items while moving)</p>
     </div>
 
     <canvas id="gameCanvas"></canvas>
@@ -94,6 +95,7 @@
             let editMode = 'floor'; // 'floor' or 'item'
             let selectedFloorTile = 1;
             let selectedItem = 0;
+            let draggingEnabled = false;
             
             // Chat messages
             let messages = ['Map Editor Loaded', 'Mode: Floor Tiles | Selected: Tile 1'];
@@ -339,13 +341,30 @@
             function updateStatusMessage() {
                 const mode = editMode === 'floor' ? 'Floor Tiles' : 'Items';
                 const selected = editMode === 'floor' ? `Tile ${selectedFloorTile}` : `Item ${selectedItem}`;
-                const statusMsg = `Mode: ${mode} | Selected: ${selected}`;
+                const dragStatus = draggingEnabled ? ' | DRAGGING ON' : '';
+                const statusMsg = `Mode: ${mode} | Selected: ${selected}${dragStatus}`;
                 
                 // Replace the last status message if it exists
                 if (messages.length > 1 && messages[messages.length - 1].startsWith('Mode:')) {
                     messages[messages.length - 1] = statusMsg;
                 } else {
                     pushChat(statusMsg);
+                }
+            }
+
+            function placeAtCurrentPosition() {
+                if (!mapReady) return;
+                
+                if (editMode === 'floor') {
+                    if (!mapSpec.tiles[playerY]) {
+                        mapSpec.tiles[playerY] = new Array(mapSpec.width).fill(6);
+                    }
+                    mapSpec.tiles[playerY][playerX] = selectedFloorTile;
+                } else {
+                    if (!mapSpec.items[playerY]) {
+                        mapSpec.items[playerY] = new Array(mapSpec.width).fill(0);
+                    }
+                    mapSpec.items[playerY][playerX] = selectedItem;
                 }
             }
 
@@ -655,15 +674,27 @@
                 // Movement
                 if (k === 'w' || k === 'arrowup') {
                     playerY = Math.max(0, playerY - 1);
+                    if (draggingEnabled) {
+                        placeAtCurrentPosition();
+                    }
                     e.preventDefault();
                 } else if (k === 's' || k === 'arrowdown') {
                     playerY = Math.min(mapSpec.height - 1, playerY + 1);
+                    if (draggingEnabled) {
+                        placeAtCurrentPosition();
+                    }
                     e.preventDefault();
                 } else if (k === 'a' || k === 'arrowleft') {
                     playerX = Math.max(0, playerX - 1);
+                    if (draggingEnabled) {
+                        placeAtCurrentPosition();
+                    }
                     e.preventDefault();
                 } else if (k === 'd' || k === 'arrowright') {
                     playerX = Math.min(mapSpec.width - 1, playerX + 1);
+                    if (draggingEnabled) {
+                        placeAtCurrentPosition();
+                    }
                     e.preventDefault();
                 }
                 
@@ -762,6 +793,15 @@
                     loadMapFile();
                     e.preventDefault();
                 }
+
+                // Toggle dragging
+                else if (k === 'tab') {
+                    draggingEnabled = !draggingEnabled;
+                    const status = draggingEnabled ? 'enabled' : 'disabled';
+                    pushChat(`Dragging ${status}`);
+                    updateStatusMessage();
+                    e.preventDefault();
+                }
             });
 
             // ---------- RENDER ----------
@@ -818,4 +858,5 @@
     </script>
 </body>
 </html>
+
 
