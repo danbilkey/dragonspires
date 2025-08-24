@@ -717,6 +717,14 @@
       return player.animationFrame || DIRECTION_IDLE[player.direction] || DIRECTION_IDLE.down;
     }
 
+    // Special handling for specific animation frames (resting, standing, etc.)
+    if (player.animationFrame === 22) {
+      return 22; // 'sit' animation (resting)
+    }
+    if (player.animationFrame === 21) {
+      return 21; // 'stand' animation
+    }
+
     // Special handling for stand animation from pickup
     if (shouldStayInStand && isLocal && !player.isMoving) {
       return 20; // 'stand' animation
@@ -820,6 +828,24 @@
       };;
     }
     
+    // Focus tracking for warning
+    let windowFocused = true;
+    
+    window.addEventListener('focus', () => {
+      windowFocused = true;
+    });
+    
+    window.addEventListener('blur', () => {
+      windowFocused = false;
+    });
+    
+    // Canvas click to regain focus
+    canvas.addEventListener('click', () => {
+      if (!windowFocused) {
+        window.focus();
+      }
+    });
+
     // Wait 20ms for title to load, then start connecting
     setTimeout(connectToServer, 20);
 
@@ -972,6 +998,10 @@
           localPlayer.isMoving = msg.isMoving || false;
           localPlayer.isAttacking = msg.isAttacking || false;
           localPlayer.isPickingUp = msg.isPickingUp || false;
+          // Store animationFrame for resting/standing animations
+          if (typeof msg.animationFrame !== 'undefined') {
+            localPlayer.animationFrame = msg.animationFrame;
+          }
           // Update client state variables for local player
           playerDirection = localPlayer.direction;
           playerStep = localPlayer.step;
@@ -1142,7 +1172,7 @@
               localPlayer.stamina = msg.stamina;
               localPlayer.life = msg.life;
               localPlayer.magic = msg.magic;
-              pushChat("~ You are refreshed by the fountains healing waters!");
+              pushChat("You are refreshed by the fountains healing waters!", 'cornflowerblue');
             }
             break;
           
@@ -2103,6 +2133,7 @@
           case 'gold': color = 'rgb(145,141,58)'; break;
           case 'cornflowerblue': color = 'rgb(0,162,232)'; break;
           case 'blue': color = 'rgb(0,35,245)'; break;
+          case 'signblue': color = 'rgb(0,35,45)'; break;
           case 'red': color = 'red'; break;
           case 'grey': color = 'grey'; break;
           default: color = 'black'; break;
@@ -2371,6 +2402,14 @@
 
       if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
       else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
+
+      // Draw focus warning if window is not focused
+      if (!windowFocused && loggedIn) {
+        ctx.font = 'bold 14px "Times New Roman", serif';
+        ctx.fillStyle = 'yellow';
+        ctx.textAlign = 'left';
+        ctx.fillText('*Warning* The window is not in focus. Click to regain focus.', 10, 30);
+      }
 
       // Draw stand sprite at position 13,198 after game border
       if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
