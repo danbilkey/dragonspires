@@ -3826,17 +3826,21 @@ wss.on('connection', (ws) => {
     }
 
     else if (msg.type === 'use_consumable_item') {
+      console.log(`Debug: Received use_consumable_item message for item ${msg.itemId}`);
       if (!playerData) return;
       
       const { itemId } = msg;
+      console.log(`Debug: Player ${playerData.username} trying to use item ${itemId}, hands: ${playerData.hands}`);
       
       // Verify player has the item in hands
       if (playerData.hands !== itemId) {
+        console.log(`Debug: Player hands (${playerData.hands}) doesn't match item (${itemId})`);
         return;
       }
       
       // Get item details
       const itemDetails = getItemDetails(itemId);
+      console.log(`Debug: Server item details for ${itemId}:`, itemDetails);
       if (!itemDetails) {
         console.log(`Item ${itemId} not found in itemdetails.json`);
         return;
@@ -3847,6 +3851,8 @@ wss.on('connection', (ws) => {
         console.log(`Item ${itemId} is not consumable (type: ${itemDetails.type})`);
         return;
       }
+      
+      console.log(`Debug: Item ${itemId} is consumable, proceeding with consumption`);
       
       // Get the stat to affect and the amount
       const statEffected = itemDetails.statEffected;
