@@ -235,6 +235,7 @@
     let localPlayer = null;
     let otherPlayers = {};
     let enemies = {}; // Store enemies by ID
+    let spells = {}; // Store active spells by ID
 
     // NEW: Simplified direction and animation state system
     let playerDirection = 'down'; // Current facing direction
@@ -1097,6 +1098,9 @@
                   };
                 }
               }
+
+              // Clear spells when changing maps
+              spells = {};
             } else if (!msg.success && msg.message) {
               pushChat(msg.message);
             }
@@ -1124,6 +1128,24 @@
           } else {
             console.log(`Enemy ${msg.id} not found in enemies object`);
           }
+          break;
+
+        case 'spell_created':
+          spells[msg.spell.id] = msg.spell;
+          console.log(`Spell ${msg.spell.id} created at (${msg.spell.currentX}, ${msg.spell.currentY})`);
+          break;
+
+        case 'spell_moved':
+          if (spells[msg.spellId]) {
+            spells[msg.spellId].currentX = msg.x;
+            spells[msg.spellId].currentY = msg.y;
+            console.log(`Spell ${msg.spellId} moved to (${msg.x}, ${msg.y})`);
+          }
+          break;
+
+        case 'spell_removed':
+          delete spells[msg.spellId];
+          console.log(`Spell ${msg.spellId} removed`);
           break;
           
         case 'enemy_spawned':
@@ -1321,7 +1343,8 @@
           98: { cost: 10, result: 117 },  // Item 98 -> Item 117
           285: { cost: 10, result: 323 }, // Item 285 -> Item 323
           283: { cost: 10, result: -1 },  // Item 283 -> Random (special case)
-          58: { cost: 20, result: -2 }    // Item 58 -> Teleport to map 1 (special case)
+          58: { cost: 20, result: -2 },   // Item 58 -> Teleport to map 1 (special case)
+          97: { cost: 10, result: -3 }    // Item 97 -> Fire pillar spell (special case)
         };
         
         if (handsItem > 0 && transformations[handsItem]) {
@@ -1341,6 +1364,12 @@
                 targetMap: 1,
                 targetX: 33,
                 targetY: 27
+              });
+            } else if (handsItem === 97) {
+              // Special fire pillar spell
+              send({ 
+                type: 'use_fire_pillar_spell', 
+                itemId: handsItem
               });
             } else {
               send({ 
@@ -2386,6 +2415,13 @@
             const arr = playersByTile[k];
             if (arr && arr.length) {
               for (const p of arr) drawPlayer(p, !!p.__isLocal);
+            }
+
+            // Draw spells after players (renders item 289 for fire pillars)
+            for (const [spellId, spell] of Object.entries(spells)) {
+              if (spell.currentX === x && spell.currentY === y && spell.mapId === localPlayer.map_id) {
+                drawItemAtTile(screenX, screenY, spell.itemId);
+              }
             }
           }
         }
