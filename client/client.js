@@ -2395,7 +2395,12 @@
     }
 
     function showLoadingScreen(loadingScreenData) {
-      if (!loadingScreenData || !loadingScreenData.imagePath) return;
+      if (!loadingScreenData || !loadingScreenData.imagePath) {
+        console.log('Loading screen data missing:', loadingScreenData);
+        return;
+      }
+      
+      console.log('Attempting to show loading screen:', loadingScreenData);
       
       // Create and load the loading screen image
       if (!loadingScreenImage) {
@@ -2403,30 +2408,51 @@
       }
       
       loadingScreenImage.onload = () => {
+        console.log('Loading screen image loaded successfully');
         // Set loading screen state
         loadingScreenActive = true;
         loadingScreenX = loadingScreenData.x || 232;
         loadingScreenY = loadingScreenData.y || 20;
         loadingScreenEndTime = Date.now() + (loadingScreenData.duration || 200);
+        console.log('Loading screen activated:', {
+          active: loadingScreenActive,
+          x: loadingScreenX,
+          y: loadingScreenY,
+          endTime: loadingScreenEndTime
+        });
+      };
+      
+      loadingScreenImage.onerror = () => {
+        console.error('Failed to load loading screen image:', loadingScreenData.imagePath);
       };
       
       // Set the image source to start loading
       loadingScreenImage.src = loadingScreenData.imagePath;
+      console.log('Loading screen image source set:', loadingScreenData.imagePath);
     }
 
     function drawLoadingScreen() {
       // Check if loading screen should be active
       if (!loadingScreenActive || !loadingScreenImage || !loadingScreenImage.complete) {
+        if (loadingScreenActive) {
+          console.log('Loading screen active but image not ready:', {
+            active: loadingScreenActive,
+            hasImage: !!loadingScreenImage,
+            imageComplete: loadingScreenImage ? loadingScreenImage.complete : false
+          });
+        }
         return;
       }
       
       // Check if duration has expired
       if (Date.now() >= loadingScreenEndTime) {
+        console.log('Loading screen duration expired, deactivating');
         loadingScreenActive = false;
         return;
       }
       
       // Draw the loading screen image on top of everything
+      console.log('Drawing loading screen at:', loadingScreenX, loadingScreenY);
       ctx.drawImage(loadingScreenImage, loadingScreenX, loadingScreenY);
     }
 
