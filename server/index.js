@@ -1229,12 +1229,12 @@ async function enemyAttackPlayer(enemy, targetX, targetY) {
 
   // Send attack text to player
   if (enemyDetails.attack_text) {
-    send(targetWs, { type: 'chat', text: enemyDetails.attack_text });
+    send(targetWs, { type: 'chat', text: enemyDetails.attack_text, color: 'red' });
   }
 
   // Send damage message to player
   const enemyName = enemyDetails.name || `Enemy ${enemy.enemy_type}`;
-  send(targetWs, { type: 'chat', text: `~ ${enemyName} deals ${finalDamage} damage to you!` });
+  send(targetWs, { type: 'chat', text: `${enemyName} deals ${finalDamage} damage to you!`, color: 'red' });
 
   // Apply damage
   if (finalDamage > 0) {
@@ -1261,14 +1261,15 @@ async function handlePlayerDeath(playerData, playerWs, killerEnemy) {
   playerData.is_dead = true;
   
   // Send death messages to player
-  send(playerWs, { type: 'chat', text: '~ You have died!' });
-  send(playerWs, { type: 'chat', text: '~ Anything you were holding in your hands has dropped on the ground where you died.' });
+  send(playerWs, { type: 'chat', text: 'You have died!', color: 'red' });
+  send(playerWs, { type: 'chat', text: 'Anything you were holding in your hands has dropped on the ground where you died.', color: 'red' });
   
   // Broadcast death message to all players
   const enemyName = killerEnemy.details?.name || `Enemy ${killerEnemy.enemy_type}`;
   broadcast({ 
     type: 'chat', 
-    text: `~ ${playerData.username} has been killed by ${enemyName}!` 
+    text: `${playerData.username} has been killed by ${enemyName}!`,
+    color: 'grey'
   });
 
   // Drop item from hands using drop_container system
@@ -2353,6 +2354,13 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'move') {
       if (!playerData) return;
       
+      // Cancel resting when moving
+      if (playerData.isResting) {
+        playerData.isResting = false;
+        send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
+        console.log(`Player ${playerData.username} stopped resting due to movement`);
+      }
+      
       // Clear temporary sprite when moving
       playerData.temporarySprite = 0;
       // Broadcast temporary sprite clear to all players (client will filter by map)
@@ -2528,7 +2536,7 @@ wss.on('connection', (ws) => {
               // If map changed, send teleport result to client (same as item#58 logic)
               if (oldMapId !== newMapId) {
                 // Send loading message
-                send(ws, { type: 'chat', text: '* Loading map. Please wait. *' });
+                send(ws, { type: 'chat', text: '* Loading map. Please wait. *', color: 'cornflowerblue' });
                 
                 const newMapItems = await loadItemsFromDatabase(newMapId);
                 const newMapEnemies = getEnemiesForMap(newMapId);
@@ -2635,6 +2643,13 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'attack') {
       if (!playerData) return;
+      
+      // Cancel resting when attacking
+      if (playerData.isResting) {
+        playerData.isResting = false;
+        send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
+        console.log(`Player ${playerData.username} stopped resting due to attack`);
+      }
       
       console.log(`Attack message received from player ${playerData.username} at (${playerData.pos_x}, ${playerData.pos_y}) facing ${playerData.direction}`);
       
@@ -2815,6 +2830,50 @@ wss.on('connection', (ws) => {
       stopAttackAnimation(playerData, ws);
     }
 
+    else if (msg.type === 'heartbeat') {
+      // Simple heartbeat response to keep connection alive
+      // No response needed, just receiving the message keeps the server active
+      return;
+    }
+
+    else if (msg.type === 'toggle_rest') {
+      if (!playerData) return;
+      
+      // Toggle resting state
+      playerData.isResting = !playerData.isResting;
+      
+      if (playerData.isResting) {
+        // Start resting
+        playerData.animationFrame = 22; // 'sit' sprite
+        send(ws, { type: 'chat', text: 'You settle down and begin resting.', color: 'gold' });
+        console.log(`Player ${playerData.username} started resting`);
+      } else {
+        // Stop resting
+        playerData.animationFrame = 21; // 'stand' sprite
+        send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
+        console.log(`Player ${playerData.username} stopped resting`);
+      }
+      
+      // Update database
+      try {
+        await pool.query(
+          'UPDATE players SET animation_frame = $1 WHERE id = $2',
+          [playerData.animationFrame, playerData.id]
+        );
+      } catch (err) {
+        console.error('Error updating resting state:', err);
+      }
+      
+      // Broadcast animation update
+      broadcast({
+        type: 'animation_update',
+        id: playerData.id,
+        map_id: playerData.map_id,
+        animationFrame: playerData.animationFrame,
+        isResting: playerData.isResting
+      });
+    }
+
     else if (msg.type === 'animation_update') {
       if (!playerData) return;
 
@@ -2869,7 +2928,7 @@ wss.on('connection', (ws) => {
           if (dropContainer.gold > 0) {
             const goldAmount = dropContainer.gold;
             playerData.gold = (playerData.gold || 0) + goldAmount;
-            send(ws, { type: 'chat', text: `~ You found ${goldAmount} gold coins.` });
+            send(ws, { type: 'chat', text: `You found ${goldAmount} gold coins.`, color: 'gold' });
             
             // Update database and send stats update to client
             await updateStatsInDb(playerData.id, { gold: playerData.gold });
@@ -3351,7 +3410,7 @@ wss.on('connection', (ws) => {
       });
       
       // Send loading message
-      send(ws, { type: 'chat', text: '* Loading map. Please wait. *' });
+      send(ws, { type: 'chat', text: '* Loading map. Please wait. *', color: 'cornflowerblue' });
       
       // Get enemies for target map
       const mapEnemies = getEnemiesForMap(targetMap);
@@ -3667,7 +3726,7 @@ wss.on('connection', (ws) => {
           });
           
           // Send loading message
-          send(ws, { type: 'chat', text: '* Loading map. Please wait. *' });
+          send(ws, { type: 'chat', text: '* Loading map. Please wait. *', color: 'cornflowerblue' });
           
           // Send map change result to the admin
           const mapItems = await loadItemsFromDatabase(targetMapId);
@@ -3862,8 +3921,9 @@ wss.on('connection', (ws) => {
         send(ws, { 
           type: 'chat', 
           text: itemId === 0 
-            ? `~ Item removed from (${adjacentPos.x}, ${adjacentPos.y})`
-            : `~ Item ${itemId} placed at (${adjacentPos.x}, ${adjacentPos.y})`
+            ? `Item removed from (${adjacentPos.x}, ${adjacentPos.y})`
+            : `Item ${itemId} placed at (${adjacentPos.x}, ${adjacentPos.y})`,
+          color: 'grey'
         });
         return;
       }
@@ -3898,7 +3958,7 @@ wss.on('connection', (ws) => {
       
       // Send global chat about player leaving and log it
       const leaveMessage = `${playerData.username} has left DragonSpires.`;
-      broadcast({ type: 'chat', text: leaveMessage });
+      broadcast({ type: 'chat', text: leaveMessage, color: 'grey' });
       broadcast({ type: 'player_left', id: playerData.id, username: playerData.username });
       
       // Log the logout message (non-blocking)
@@ -3913,11 +3973,13 @@ wss.on('connection', (ws) => {
 // ---------- Regeneration Loops ----------
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
-// Every 3s: stamina +10% max
+// Every 3s: stamina +10% max (+30% if resting - 200% increase)
 setInterval(async () => {
   const updates = [];
   for (const [ws, p] of clients.entries()) {
-    const inc = Math.floor((p.max_stamina ?? 0) * 0.10);
+    const basePercent = 0.10;
+    const regenPercent = p.isResting ? 0.30 : basePercent; // 200% increase when resting
+    const inc = Math.floor((p.max_stamina ?? 0) * regenPercent);
     const next = clamp((p.stamina ?? 0) + inc, 0, p.max_stamina ?? 0);
     if (next !== p.stamina) {
       p.stamina = next;
