@@ -1171,6 +1171,7 @@
             if ('stamina' in msg) obj.stamina = msg.stamina;
             if ('life' in msg) obj.life = msg.life;
             if ('magic' in msg) obj.magic = msg.magic;
+            if ('gold' in msg) obj.gold = msg.gold;
           };
           if (localPlayer && msg.id === localPlayer.id) apply(localPlayer);
           else if (otherPlayers[msg.id]) apply(otherPlayers[msg.id]);
