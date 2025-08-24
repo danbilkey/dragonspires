@@ -651,12 +651,12 @@
       ""
     ],
     [
-      "NPC Scuba Steve",
+      "Andy",
       "true",
       "npc",
       0,
       0,
-      "You see Scuba Steve!",
+      "You see Andy. Andy likes crabs.",
       "none",
       ""
     ],
@@ -671,12 +671,12 @@
       ""
     ],
     [
-      "NPC Blacksmith",
+      "Ted the Armorer",
       "true",
       "npc",
       0,
       0,
-      "You see Gerald, the Blacksmith!",
+      "You see Ted the Armorer!",
       "none",
       ""
     ],
