@@ -33,12 +33,12 @@
     [
       "Wine",
       "false",
-      "garbage",
+      "consumable",
       0,
       0,
       "It's an empty wine bottle.",
-      "none",
-      ""
+      "stamina",
+      "You drink the Wine and feel slightly drunk."
     ],
     [
       "Light Sword",
@@ -53,12 +53,12 @@
     [
       "Pouch",
       "false",
-      "container",
+      "consumable",
       0,
-      5,
+      0,
       "A silk white pouch - I wonder what's inside!",
-      "none",
-      ""
+      "magic",
+      "I hope you're ready.. for nothing!"
     ],
     [
       "Line",
@@ -93,8 +93,8 @@
     [
       "Smelly Fish",
       "false",
-      "consumable",
-      1,
+      "weapon",
+      0,
       1,
       "It's a large, smelly fish.",
       "none",
@@ -183,7 +183,7 @@
     [
       "Dog Bone",
       "false",
-      "consumable",
+      "useable",
       0,
       0,
       "It's a magical dog treat!",
@@ -244,8 +244,8 @@
       "Pile of Gold",
       "false",
       "container",
-      5,
-      20,
+      100,
+      100,
       "A pile of gold coins!",
       "none",
       ""
@@ -314,10 +314,10 @@
       "Green Tonic",
       "false",
       "buff",
-      0,
-      0,
+      1,
+      1,
       "An invigorating green bottle of tonic.",
-      "none",
+      "stamina",
       ""
     ],
     [
@@ -387,28 +387,28 @@
       0,
       0,
       "It's a Big Mech sandwich!",
-      "none",
-      ""
+      "hp",
+      "You eat the Big Mech sandwich.. you don't feel great."
     ],
     [
       "Hamburger",
       "false",
       "consumable",
-      0,
-      0,
+      1,
+      1,
       "It's a hamburger - weird.",
-      "none",
-      ""
+      "hp",
+      "You eat the Hamburger, it was pretty good."
     ],
     [
       "Flower",
       "false",
-      "garbage",
+      "consumable",
       0,
       0,
       "It's a pretty white flower, possibly a daisy.",
-      "none",
-      ""
+      "stamina",
+      "You ate the flower.. why?"
     ],
     [
       "Stairs",
@@ -433,12 +433,12 @@
     [
       "Blood Chalice",
       "false",
-      "garbage",
-      0,
-      0,
+      "consumable",
+      -100,
+      -100,
       "A chalice full of blood.. I don't want to drink this..",
-      "none",
-      ""
+      "hp",
+      "You force down the contents of the Blood Chalice.. and die."
     ],
     [
       "Hot Sauce",
@@ -467,8 +467,8 @@
       100,
       100,
       "An herb, this will make you feel good.",
-      "none",
-      ""
+      "stamina",
+      "You use the Herb and feel great!"
     ],
     [
       "Blue Crab",
@@ -487,8 +487,8 @@
       25,
       25,
       "This leaf looks tasty.",
-      "none",
-      ""
+      "stamina",
+      "You use the leaf and feel refreshed."
     ],
     [
       "Perfume",
@@ -503,12 +503,12 @@
     [
       "Blueberry Jam",
       "false",
-      "garbage",
-      0,
-      0,
+      "consumable",
+      1,
+      1,
       "A bottle of blueberry jam.",
-      "none",
-      ""
+      "hp",
+      "You eat the Bluebery Jam, it's berrylicious."
     ],
     [
       "Ketchup",
@@ -531,24 +531,24 @@
       ""
     ],
     [
-      "Cola",
+      "Jolt Cola",
       "false",
       "garbage",
-      0,
-      0,
-      "A bottle of soda.",
-      "none",
-      ""
+      100,
+      100,
+      "A refreshing bottle of Jolt Cola!",
+      "stamina",
+      "You drink the Jolt Cola and feel energized!"
     ],
     [
       "Coffee",
       "false",
-      "garbage",
-      0,
-      0,
+      "consumable",
+      10,
+      10,
       "A cup 'o joe.",
-      "none",
-      ""
+      "stamina",
+      "You drink the coffee and feel refreshed."
     ],
     [
       "Bloody Knives",
@@ -953,12 +953,12 @@
     [
       "Beer",
       "false",
-      "garbage",
+      "consumable",
       0,
       0,
       "A 6-pack of brews.",
-      "none",
-      ""
+      "stamina",
+      "You drink the beer and feel buzzed."
     ],
     [
       "Red Scroll",
@@ -1394,11 +1394,11 @@
       "Crystal Ball",
       "false",
       "consumable",
-      1,
-      5,
+      10,
+      10,
       "A magical crystal ball.. don't smash it.",
-      "none",
-      ""
+      "magic",
+      "You smash the crystal ball and feel the magic inside refresh you."
     ],
     [
       "Unlit Fire Pedestal",
