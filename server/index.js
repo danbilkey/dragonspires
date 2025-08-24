@@ -250,8 +250,19 @@ function createFirePillar(casterPlayerId, startX, startY, direction, mapId) {
   
   console.log(`Fire pillar spell ${spellId} created at (${startX}, ${startY}) facing ${direction}`);
   
-  // Start the spell movement timer
-  scheduleSpellMovement(spellId);
+  // Check for collision at starting position first
+  setTimeout(async () => {
+    const startingCollision = await checkSpellCollision(spell, startX, startY);
+    if (startingCollision) {
+      // Handle collision at starting position
+      await handleSpellCollision(spell, startingCollision);
+      // End spell after 1 second delay for collision
+      setTimeout(() => endSpell(spellId), 1000);
+    } else {
+      // No collision at start, begin normal movement
+      scheduleSpellMovement(spellId);
+    }
+  }, 0);
   
   return spellId;
 }
@@ -393,9 +404,16 @@ async function handleSpellCollision(spell, collision) {
   if (collision.type === 'enemy') {
     // Deal 5 damage to enemy
     const enemy = collision.data;
-    enemy.life = Math.max(0, (enemy.life || 0) - 5);
+    enemy.hp = Math.max(0, (enemy.hp || enemy.max_hp || 0) - 5);
     
-    console.log(`Fire pillar deals 5 damage to enemy ${enemy.id}, HP: ${enemy.life}`);
+    console.log(`Fire pillar deals 5 damage to enemy ${enemy.id}, HP: ${enemy.hp}`);
+    
+    // Update enemy HP in database
+    try {
+      await pool.query('UPDATE enemies SET hp = $1 WHERE id = $2', [enemy.hp, enemy.id]);
+    } catch (err) {
+      console.error('Error updating enemy HP in database:', err);
+    }
     
     // Get enemy name from enemy details
     const enemyDetailsData = getEnemyDetails(enemy.enemy_type);
@@ -414,7 +432,7 @@ async function handleSpellCollision(spell, collision) {
     }
     
     // Check if enemy died
-    if (enemy.life <= 0) {
+    if (enemy.hp <= 0) {
       // Send death message to caster before handling death
       for (const [ws, playerData] of clients.entries()) {
         if (playerData.id === spell.casterPlayerId) {
