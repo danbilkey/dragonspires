@@ -2239,15 +2239,9 @@ wss.on('connection', (ws) => {
         send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: playerMapItems, inventory: inventory, enemies: mapEnemies });
         broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false, map_id: playerData.map_id } });
         
-        // Send global chat about player joining to OTHER players only
-        const joinMessage = `${playerData.username} enters DragonSpires.`;
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.id !== playerData.id && otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({ type: 'chat', text: joinMessage }));
-          }
-        }
-        
+        // Join message is handled by the player_joined broadcast and client-side logic
         // Log the login message (non-blocking)
+        const joinMessage = `${playerData.username} has entered DragonSpires.`;
         logChatMessage(playerData.id, playerData.username, 'login', joinMessage, playerData.map_id)
           .catch(() => {}); // Silently ignore logging errors
       } catch (e) {
@@ -2334,15 +2328,9 @@ wss.on('connection', (ws) => {
         send(ws, { type: 'signup_success', player: playerData, players: others, items: playerMapItems, inventory: inventory, enemies: mapEnemies });
         broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0, map_id: playerData.map_id } });
         
-        // Send global chat about player joining to OTHER players only
-        const joinMessage = `${playerData.username} enters DragonSpires.`;
-        for (const [otherWs, otherPlayer] of clients.entries()) {
-          if (otherPlayer && otherPlayer.id !== playerData.id && otherWs.readyState === WebSocket.OPEN) {
-            otherWs.send(JSON.stringify({ type: 'chat', text: joinMessage }));
-          }
-        }
-        
+        // Join message is handled by the player_joined broadcast and client-side logic
         // Log the login message (non-blocking)
+        const joinMessage = `${playerData.username} has entered DragonSpires.`;
         logChatMessage(playerData.id, playerData.username, 'login', joinMessage, playerData.map_id)
           .catch(() => {}); // Silently ignore logging errors
       } catch (e) {
