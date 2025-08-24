@@ -1372,7 +1372,7 @@
           } else {
             pushChat("~ You do not have enough magic to use that item!");
           }
-
+        }
         
         return;
       }
