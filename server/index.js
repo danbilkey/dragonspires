@@ -2345,9 +2345,13 @@ wss.on('connection', (ws) => {
       // Cancel resting when moving
       if (playerData.isResting) {
         playerData.isResting = false;
-        playerData.animationFrame = null; // Clear animation frame to restore normal movement
         send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
         console.log(`Player ${playerData.username} stopped resting due to movement`);
+      }
+      
+      // Always clear animation frame when moving to restore normal movement sprites
+      if (playerData.animationFrame !== null && playerData.animationFrame !== undefined) {
+        playerData.animationFrame = null;
         
         // Broadcast animation frame clear
         broadcast({
@@ -2645,9 +2649,13 @@ wss.on('connection', (ws) => {
       // Cancel resting when attacking
       if (playerData.isResting) {
         playerData.isResting = false;
-        playerData.animationFrame = null; // Clear animation frame to restore normal movement
         send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
         console.log(`Player ${playerData.username} stopped resting due to attack`);
+      }
+      
+      // Always clear animation frame when attacking to restore normal attack sprites
+      if (playerData.animationFrame !== null && playerData.animationFrame !== undefined) {
+        playerData.animationFrame = null;
         
         // Broadcast animation frame clear
         broadcast({
