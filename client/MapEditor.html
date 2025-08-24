@@ -377,6 +377,43 @@
                 pushChat(`Map cleared: all floors set to tile 6, all items removed`);
             }
 
+            function fillWithItem14() {
+                if (!mapReady) return;
+                
+                // Ensure items array exists
+                for (let y = 0; y < mapSpec.height; y++) {
+                    if (!mapSpec.items[y]) {
+                        mapSpec.items[y] = new Array(mapSpec.width).fill(0);
+                    }
+                }
+                
+                // Calculate total tiles and target count (40%)
+                const totalTiles = mapSpec.width * mapSpec.height;
+                const targetCount = Math.floor(totalTiles * 0.4);
+                
+                // Create array of all possible positions
+                const positions = [];
+                for (let y = 0; y < mapSpec.height; y++) {
+                    for (let x = 0; x < mapSpec.width; x++) {
+                        positions.push({ x, y });
+                    }
+                }
+                
+                // Shuffle the positions array using Fisher-Yates shuffle
+                for (let i = positions.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [positions[i], positions[j]] = [positions[j], positions[i]];
+                }
+                
+                // Place item #14 at the first targetCount positions
+                for (let i = 0; i < targetCount && i < positions.length; i++) {
+                    const { x, y } = positions[i];
+                    mapSpec.items[y][x] = 14;
+                }
+                
+                pushChat(`Placed item #14 at ${targetCount} random positions (40% of map)`);
+            }
+
             function loadMapFile() {
                 console.log('loadMapFile called'); // Debug log
                 const input = document.createElement('input');
@@ -707,6 +744,12 @@
                     clearMap();
                     e.preventDefault();
                 }
+
+                // Fill 40% of map with item #14
+                else if (k === 'm') {
+                    fillWithItem14();
+                    e.preventDefault();
+                }
                 
                 // Save
                 else if (k === 'p') {
@@ -775,3 +818,4 @@
     </script>
 </body>
 </html>
+
