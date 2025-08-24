@@ -1009,6 +1009,42 @@ function findClosestPlayer(enemy) {
   return closestPlayer;
 }
 
+// Move enemy in a random direction
+async function moveEnemyRandomly(enemy) {
+  const directions = [
+    { dx: 0, dy: -1, dir: 'up' },
+    { dx: 0, dy: 1, dir: 'down' },
+    { dx: -1, dy: 0, dir: 'left' },
+    { dx: 1, dy: 0, dir: 'right' }
+  ];
+  
+  // Pick a random direction
+  const randomDirection = directions[Math.floor(Math.random() * directions.length)];
+  const newX = enemy.pos_x + randomDirection.dx;
+  const newY = enemy.pos_y + randomDirection.dy;
+  
+  // Check if the move is valid
+  if (canMoveTo(newX, newY, null, null, enemy.map_id, enemy.id)) {
+    // Update enemy position and direction
+    enemy.pos_x = newX;
+    enemy.pos_y = newY;
+    enemy.direction = randomDirection.dir;
+    enemy.last_move_time = Date.now();
+    
+    // Cycle through animation steps
+    enemy.step = ((enemy.step || 0) + 1) % 4;
+    
+    // Update in database
+    await updateEnemyDirectionAndStep(enemy.id, enemy.direction, enemy.step);
+    
+    // Broadcast the movement to all players on the same map
+    broadcastEnemyMovement(enemy);
+  } else {
+    // Can't move in that direction, just update last_move_time
+    enemy.last_move_time = Date.now();
+  }
+}
+
 // Update enemy direction and step in database
 async function updateEnemyDirectionAndStep(enemyId, direction, step) {
   try {
@@ -1181,9 +1217,8 @@ async function processEnemyAI() {
       // Try to move toward the closest player
       await moveEnemyToward(enemy, closestPlayer.pos_x, closestPlayer.pos_y);
     } else {
-      // No player within range - enemy idles in place
-      // Still update last_move_time so we don't process this enemy too frequently
-      enemy.last_move_time = Date.now();
+      // No player within range - move randomly
+      await moveEnemyRandomly(enemy);
     }
   }
 }
