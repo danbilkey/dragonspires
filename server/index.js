@@ -1022,6 +1022,8 @@ async function playerAttackEnemy(playerData, playerWs) {
   // Get position in front of player based on direction
   const targetPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
   
+  console.log(`Player ${playerData.username} attacking position (${targetPos.x}, ${targetPos.y}) from (${playerData.pos_x}, ${playerData.pos_y}) facing ${playerData.direction}`);
+  
   // Find enemy at target position
   const targetEnemy = Object.values(enemies).find(enemy => 
     Number(enemy.map_id) === Number(playerData.map_id) &&
@@ -1030,7 +1032,14 @@ async function playerAttackEnemy(playerData, playerWs) {
     !enemy.is_dead
   );
 
-  if (!targetEnemy) return false;
+  if (!targetEnemy) {
+    console.log(`No enemy found at position (${targetPos.x}, ${targetPos.y}) on map ${playerData.map_id}`);
+    // Debug: Send chat message to player
+    send(playerWs, { type: 'chat', text: `~ DEBUG: No enemy at position (${targetPos.x}, ${targetPos.y})` });
+    return false;
+  }
+  
+  console.log(`Found enemy ${targetEnemy.id} (type ${targetEnemy.enemy_type}) at position (${targetPos.x}, ${targetPos.y}), HP: ${targetEnemy.hp}`);
 
   // Calculate player's attack damage
   let minDamage = 0;
@@ -1038,38 +1047,52 @@ async function playerAttackEnemy(playerData, playerWs) {
 
   if (playerData.weapon && playerData.weapon > 0) {
     const weaponDetails = getItemDetails(playerData.weapon);
+    console.log(`Player weapon ${playerData.weapon}:`, weaponDetails);
     if (weaponDetails && weaponDetails.type === 'weapon' && 
         typeof weaponDetails.statMin === 'number' && typeof weaponDetails.statMax === 'number') {
       minDamage = weaponDetails.statMin;
       maxDamage = weaponDetails.statMax;
+      console.log(`Using weapon damage: ${minDamage}-${maxDamage}`);
     }
+  } else {
+    console.log(`Player using fist damage: ${minDamage}-${maxDamage}`);
   }
 
   // Calculate initial damage
   const initialDamage = Math.floor(Math.random() * (maxDamage - minDamage + 1)) + minDamage;
+  console.log(`Initial damage rolled: ${initialDamage}`);
 
   // Calculate enemy defense
   let defense = 0;
   const enemyDetails = targetEnemy.details;
   if (enemyDetails && typeof enemyDetails.defense_min === 'number' && typeof enemyDetails.defense_max === 'number') {
     defense = Math.floor(Math.random() * (enemyDetails.defense_max - enemyDetails.defense_min + 1)) + enemyDetails.defense_min;
+    console.log(`Enemy defense rolled: ${defense} (from ${enemyDetails.defense_min}-${enemyDetails.defense_max})`);
+  } else {
+    console.log(`Enemy has no defense stats:`, enemyDetails);
   }
 
   // Calculate final damage
   const finalDamage = Math.max(0, initialDamage - defense);
+  console.log(`Final damage: ${finalDamage} (${initialDamage} - ${defense})`);
 
   // Send attack message to player
   const enemyName = enemyDetails?.name || `Enemy ${targetEnemy.enemy_type}`;
   send(playerWs, { type: 'chat', text: `~ You attack ${enemyName} for ${finalDamage} damage!` });
 
   // Apply damage to enemy
-  if (finalDamage > 0) {
-    targetEnemy.hp = Math.max(0, targetEnemy.hp - finalDamage);
-  }
+  const oldHp = targetEnemy.hp;
+  targetEnemy.hp = Math.max(0, targetEnemy.hp - finalDamage);
+  console.log(`Enemy HP: ${oldHp} -> ${targetEnemy.hp}`);
 
   // Check if enemy died
   if (targetEnemy.hp <= 0) {
+    console.log(`Enemy ${targetEnemy.id} died, handling death...`);
     await handleEnemyDeath(targetEnemy);
+  } else {
+    // Enemy survived, counter-attack the player
+    console.log(`Enemy ${targetEnemy.id} survived with ${targetEnemy.hp} HP, counter-attacking...`);
+    await enemyAttackPlayer(targetEnemy, playerData.pos_x, playerData.pos_y);
   }
 
   return true;
@@ -1095,9 +1118,29 @@ async function handleEnemyDeath(enemy) {
     });
 
     // Create drop container with item 201 at enemy position
-    // For now, just dropping a basic item (you can customize loot tables later)
-    const dropItems = []; // Add items here if you want specific loot
-    const dropGold = Math.floor(Math.random() * 10) + 1; // Random 1-10 gold
+    const dropItems = [];
+    let dropGold = 0;
+    
+    const enemyDetails = enemy.details;
+    if (enemyDetails) {
+      // Handle item drop based on drop_chance
+      if (enemyDetails.drop_item && typeof enemyDetails.drop_chance === 'number') {
+        const dropRoll = Math.random() * 100; // 0-100
+        console.log(`Drop roll: ${dropRoll}% vs ${enemyDetails.drop_chance}% chance for item ${enemyDetails.drop_item}`);
+        if (dropRoll <= enemyDetails.drop_chance) {
+          dropItems.push(enemyDetails.drop_item);
+          console.log(`Item ${enemyDetails.drop_item} dropped!`);
+        } else {
+          console.log(`Item ${enemyDetails.drop_item} did not drop`);
+        }
+      }
+      
+      // Handle gold drop
+      if (typeof enemyDetails.drop_gold_min === 'number' && typeof enemyDetails.drop_gold_max === 'number') {
+        dropGold = Math.floor(Math.random() * (enemyDetails.drop_gold_max - enemyDetails.drop_gold_min + 1)) + enemyDetails.drop_gold_min;
+        console.log(`Gold dropped: ${dropGold} (from ${enemyDetails.drop_gold_min}-${enemyDetails.drop_gold_max})`);
+      }
+    }
 
     await createOrUpdateDropContainer(enemy.map_id, enemy.pos_x, enemy.pos_y, dropItems, dropGold);
 
@@ -2568,15 +2611,22 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'attack') {
       if (!playerData) return;
       
+      console.log(`Attack message received from player ${playerData.username} at (${playerData.pos_x}, ${playerData.pos_y}) facing ${playerData.direction}`);
+      send(ws, { type: 'chat', text: `~ DEBUG: Attack received, checking for enemies...` });
+      
       // First check if there's an enemy in front to attack
       const attacked = await playerAttackEnemy(playerData, ws);
       if (attacked) {
+        console.log(`Player ${playerData.username} successfully attacked an enemy`);
         // Attack animation is handled by client, stamina reduction
         playerData.stamina = Math.max(0, (playerData.stamina ?? 0) - 1);
         updateStatsInDb(playerData.id, { stamina: playerData.stamina })
           .catch(err => console.error('Error updating stamina after attack:', err));
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
         return; // Exit early since we attacked an enemy
+      } else {
+        console.log(`Player ${playerData.username} attack found no enemy target`);
+        send(ws, { type: 'chat', text: `~ DEBUG: No enemy found to attack` });
       }
       
       // Get the adjacent position based on player's facing direction
