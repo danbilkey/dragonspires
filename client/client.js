@@ -1070,8 +1070,16 @@
           
         case 'enemy_removed':
           // Remove enemy from current map
-          if (enemies[msg.id] && (!localPlayer || enemies[msg.id].map_id === localPlayer.map_id)) {
+          console.log(`Received enemy_removed for enemy ${msg.id} on map ${msg.map_id}`);
+          console.log(`Current enemies:`, Object.keys(enemies));
+          console.log(`Local player map:`, localPlayer?.map_id);
+          
+          if (enemies[msg.id]) {
+            console.log(`Enemy ${msg.id} exists, removing...`);
             delete enemies[msg.id];
+            console.log(`Enemy ${msg.id} removed. Remaining enemies:`, Object.keys(enemies));
+          } else {
+            console.log(`Enemy ${msg.id} not found in enemies object`);
           }
           break;
           
