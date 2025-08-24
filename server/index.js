@@ -3144,6 +3144,44 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // Check for -refresh admin command
+      if (t.toLowerCase() === '-refresh') {
+        // Validate admin role
+        if (playerData.role !== 'admin') {
+          // Do nothing for non-admin users
+          return;
+        }
+
+        try {
+          // Restore all stats to maximum
+          playerData.life = playerData.max_life || 100;
+          playerData.stamina = playerData.max_stamina || 100;
+          playerData.magic = playerData.max_magic || 100;
+
+          // Update database
+          await updateStatsInDb(playerData.id, {
+            life: playerData.life,
+            stamina: playerData.stamina,
+            magic: playerData.magic
+          });
+
+          // Send updated stats to client
+          send(ws, {
+            type: 'stats_update',
+            id: playerData.id,
+            life: playerData.life,
+            stamina: playerData.stamina,
+            magic: playerData.magic
+          });
+
+          send(ws, { type: 'chat', text: '~ All stats refreshed to maximum.' });
+        } catch (error) {
+          console.error('Error refreshing player stats:', error);
+          send(ws, { type: 'chat', text: '~ Error refreshing stats.' });
+        }
+        return;
+      }
+
       // Check for -players command (available to all players)
       if (t.toLowerCase() === '-players') {
         const onlinePlayers = getOnlinePlayersList();
