@@ -261,6 +261,13 @@
     let inventorySelectedSlot = 1; // Default to slot 1
     let chatScrollOffset = 0; // For scrolling through chat messages
     let playerInventory = {}; // { slotNumber: itemId }
+    
+    // Loading screen state
+    let loadingScreenActive = false;
+    let loadingScreenImage = null;
+    let loadingScreenX = 0;
+    let loadingScreenY = 0;
+    let loadingScreenEndTime = 0;
 
     // ---------- COLLISION HELPERS ----------
     function hasFloorCollision(x, y) {
@@ -2326,6 +2333,9 @@
 
       // Draw inventory last (on top of everything)
       drawInventory();
+      
+      // Draw loading screen absolutely last (on top of everything including inventory)
+      drawLoadingScreen();
     }
 
     // ---------- LOOP ----------
@@ -2379,24 +2389,37 @@
     function showLoadingScreen(loadingScreenData) {
       if (!loadingScreenData || !loadingScreenData.imagePath) return;
       
-      // Create loading screen image element
-      const loadingImg = document.createElement('img');
-      loadingImg.src = loadingScreenData.imagePath;
-      loadingImg.style.position = 'absolute';
-      loadingImg.style.left = loadingScreenData.x + 'px';
-      loadingImg.style.top = loadingScreenData.y + 'px';
-      loadingImg.style.zIndex = '9999';
-      loadingImg.style.pointerEvents = 'none'; // Don't interfere with game interaction
+      // Create and load the loading screen image
+      if (!loadingScreenImage) {
+        loadingScreenImage = new Image();
+      }
       
-      // Add to document body
-      document.body.appendChild(loadingImg);
+      loadingScreenImage.onload = () => {
+        // Set loading screen state
+        loadingScreenActive = true;
+        loadingScreenX = loadingScreenData.x || 232;
+        loadingScreenY = loadingScreenData.y || 20;
+        loadingScreenEndTime = Date.now() + (loadingScreenData.duration || 200);
+      };
       
-      // Remove after specified duration
-      setTimeout(() => {
-        if (loadingImg.parentNode) {
-          document.body.removeChild(loadingImg);
-        }
-      }, loadingScreenData.duration || 200);
+      // Set the image source to start loading
+      loadingScreenImage.src = loadingScreenData.imagePath;
+    }
+
+    function drawLoadingScreen() {
+      // Check if loading screen should be active
+      if (!loadingScreenActive || !loadingScreenImage || !loadingScreenImage.complete) {
+        return;
+      }
+      
+      // Check if duration has expired
+      if (Date.now() >= loadingScreenEndTime) {
+        loadingScreenActive = false;
+        return;
+      }
+      
+      // Draw the loading screen image on top of everything
+      ctx.drawImage(loadingScreenImage, loadingScreenX, loadingScreenY);
     }
 
     function showHelpControls() {
