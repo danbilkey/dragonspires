@@ -718,6 +718,7 @@
     }
 
     // Special handling for specific animation frames (resting, standing, etc.)
+    console.log(`getAnimationFrame called for player ${player.id || 'local'}, animationFrame: ${player.animationFrame}, isMoving: ${player.isMoving}, isAttacking: ${player.isAttacking}`);
     if (player.animationFrame === 22) {
       console.log(`Rendering sit animation for player ${player.id || 'local'}`);
       return 22; // 'sit' animation (resting)
@@ -1371,13 +1372,7 @@
           } else {
             pushChat("~ You do not have enough magic to use that item!");
           }
-        } else if (handsItem > 0) {
-          // Check if it's a readable item
-          const itemDetails = getItemDetails(handsItem);
-          if (itemDetails && itemDetails.type === 'readable' && itemDetails.usage) {
-            pushChat(itemDetails.usage, 'signblue');
-          }
-        }
+
         
         return;
       }
