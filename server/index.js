@@ -556,6 +556,14 @@ async function saveItemToDatabase(x, y, itemId, mapId = 1) {
       'INSERT INTO map_items (x, y, map_id, item_id) VALUES ($1, $2, $3, $4) ON CONFLICT (x, y, map_id) DO UPDATE SET item_id = $4',
       [x, y, mapId, itemId]
     );
+    
+    // Update in-memory mapItems for item pickup
+    const key = `${x},${y}`;
+    if (itemId === 0) {
+      delete mapItems[key];
+    } else {
+      mapItems[key] = itemId;
+    }
   } catch (error) {
     console.error('Error saving item to database:', error);
   }
@@ -1120,6 +1128,13 @@ async function handlePlayerDeath(playerData, playerWs, killerEnemy) {
     
     // Update player hands in database
     await updateStatsInDb(playerData.id, { hands: playerData.hands });
+    
+    // Send equipment update to player (hands cleared)
+    send(playerWs, {
+      type: 'player_equipment_update',
+      id: playerData.id,
+      hands: playerData.hands
+    });
     
     // Broadcast item placement
     broadcast({
