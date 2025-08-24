@@ -1112,9 +1112,11 @@ async function handleEnemyDeath(enemy) {
     delete enemies[enemy.id];
 
     // Broadcast enemy removal to all clients on the same map
+    console.log(`Broadcasting enemy_removed for enemy ${enemy.id} on map ${enemy.map_id}`);
     for (const [ws, playerData] of clients.entries()) {
       if (playerData && Number(playerData.map_id) === Number(enemy.map_id)) {
         if (ws.readyState === WebSocket.OPEN) {
+          console.log(`Sending enemy_removed to player ${playerData.username} on map ${playerData.map_id}`);
           send(ws, {
             type: 'enemy_removed',
             id: enemy.id,
