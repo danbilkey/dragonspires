@@ -2019,7 +2019,7 @@ wss.on('connection', (ws) => {
                   items: newMapItems,
                   enemies: newMapEnemies,
                   showLoadingScreen: {
-                    imagePath: '/clients/assets/loadscreen.gif',
+                    imagePath: '/assets/loadscreen.gif',
                     x: 232,
                     y: 20,
                     duration: 200
@@ -2751,7 +2751,7 @@ wss.on('connection', (ws) => {
         items: mapItems,
         enemies: mapEnemies,
         showLoadingScreen: {
-          imagePath: '/clients/assets/loadscreen.gif',
+          imagePath: '/assets/loadscreen.gif',
           x: 232,
           y: 20,
           duration: 200
@@ -3065,7 +3065,7 @@ wss.on('connection', (ws) => {
             items: mapItems,
             enemies: mapEnemies,
             showLoadingScreen: {
-              imagePath: '/clients/assets/loadscreen.gif',
+              imagePath: '/assets/loadscreen.gif',
               x: 232,
               y: 20,
               duration: 200
