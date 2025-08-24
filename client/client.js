@@ -98,6 +98,14 @@
       return directionMappings[direction]?.[step] || directionMappings.down[2]; // Default to "down" idle
     }
     
+    // Get item details by ID
+    function getItemDetails(itemId) {
+      if (!itemDetailsReady || !itemDetails || itemId < 1 || itemId > itemDetails.length) {
+        return null;
+      }
+      return itemDetails[itemId - 1];
+    }
+
     // Get enemy sprite ID based on enemy type, direction, and step
     function getEnemySpriteId(enemyType, direction, step) {
       // We need to get the sprite ID from the enemy details that were sent from server
@@ -1347,7 +1355,15 @@
           97: { cost: 10, result: -3 }    // Item 97 -> Fire pillar spell (special case)
         };
         
-        if (handsItem > 0 && transformations[handsItem]) {
+        // First check if item is consumable
+        const itemDetails = getItemDetails(handsItem);
+        if (itemDetails && itemDetails.type === 'consumable') {
+          // Send consumable item request to server
+          send({ 
+            type: 'use_consumable_item', 
+            itemId: handsItem
+          });
+        } else if (handsItem > 0 && transformations[handsItem]) {
           const transformation = transformations[handsItem];
           
           if (playerMagic >= transformation.cost) {
@@ -2721,7 +2737,9 @@
             type: item[2],
             statMin: parseInt(item[3]) || 0,
             statMax: parseInt(item[4]) || 0,
-            description: item[5]
+            description: item[5],
+            statEffected: item[6] || null,
+            useMessage: item[7] || null
           }));
           itemDetailsReady = true;
         }
@@ -2739,7 +2757,9 @@
                 type: item[2],
                 statMin: parseInt(item[3]) || 0,
                 statMax: parseInt(item[4]) || 0,
-                description: item[5]
+                description: item[5],
+                statEffected: item[6] || null,
+                useMessage: item[7] || null
               }));
               itemDetailsReady = true;
             }
@@ -2757,7 +2777,9 @@
                     type: item[2],
                     statMin: parseInt(item[3]) || 0,
                     statMax: parseInt(item[4]) || 0,
-                    description: item[5]
+                    description: item[5],
+                    statEffected: item[6] || null,
+                    useMessage: item[7] || null
                   }));
                   itemDetailsReady = true;
                 }
