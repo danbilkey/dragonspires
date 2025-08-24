@@ -169,48 +169,12 @@ async function loadItemDetails() {
     const fs = require('fs').promises;
     const path = require('path');
     
-    // Try multiple possible paths for itemdetails.json
-    const possiblePaths = [
-      path.join(__dirname, 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', 'client', 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', '..', 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', '..', 'client', 'assets', 'itemdetails.json'),
-      path.join(__dirname, '..', '..', 'server', 'assets', 'itemdetails.json'), // For Render structure
-      path.join(process.cwd(), 'assets', 'itemdetails.json'),
-      path.join(process.cwd(), 'client', 'assets', 'itemdetails.json'),
-      path.join(process.cwd(), 'server', 'assets', 'itemdetails.json'),
-      // Additional paths for potential Render deployment structure
-      path.join(process.cwd(), 'src', 'server', 'assets', 'itemdetails.json'),
-      path.join(process.cwd(), 'src', 'assets', 'itemdetails.json'),
-      path.join(process.cwd(), 'src', 'client', 'assets', 'itemdetails.json')
-    ];
+    // Load itemdetails.json from the correct server path
+    const itemDetailsPath = path.join(__dirname, 'assets', 'itemdetails.json');
     
-    let data = null;
-    let usedPath = null;
+    console.log(`Loading itemdetails.json from: ${itemDetailsPath}`);
     
-    // Debug: log all paths being tried
-    console.log('Searching for itemdetails.json in these paths:');
-    for (const itemDetailsPath of possiblePaths) {
-      console.log(`  Trying: ${itemDetailsPath}`);
-      try {
-        data = await fs.readFile(itemDetailsPath, 'utf8');
-        usedPath = itemDetailsPath;
-        break;
-      } catch (err) {
-        // Try next path
-        continue;
-      }
-    }
-    
-    if (!data) {
-      console.error('Could not find itemdetails.json in any of the expected paths');
-      console.log('Current working directory:', process.cwd());
-      console.log('__dirname:', __dirname);
-      itemDetailsReady = true; // Don't block server startup
-      return;
-    }
-    
+    const data = await fs.readFile(itemDetailsPath, 'utf8');
     const parsed = JSON.parse(data);
     
     if (parsed && Array.isArray(parsed.items)) {
@@ -221,13 +185,24 @@ async function loadItemDetails() {
         type: item[2],
         statMin: parseInt(item[3]) || 0,
         statMax: parseInt(item[4]) || 0,
-        description: item[5]
+        description: item[5],
+        statEffected: item[6] || null,     // New field: STAT_EFFECTED
+        useMessage: item[7] || null        // New field: USE_MESSAGE
       }));
       itemDetailsReady = true;
-      console.log(`Server loaded ${itemDetails.length} item details from: ${usedPath}`);
+      console.log(`Server loaded ${itemDetails.length} item details from: ${itemDetailsPath}`);
+      console.log(`Sample item with new fields:`, {
+        name: itemDetails[0]?.name,
+        statEffected: itemDetails[0]?.statEffected,
+        useMessage: itemDetails[0]?.useMessage
+      });
+    } else {
+      throw new Error('Invalid itemdetails.json structure - missing items array');
     }
   } catch (error) {
     console.error('Failed to load server item details:', error);
+    console.log('Current working directory:', process.cwd());
+    console.log('__dirname:', __dirname);
     itemDetailsReady = true; // Don't block server startup
   }
 }
