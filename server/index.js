@@ -1023,26 +1023,36 @@ async function moveEnemyRandomly(enemy) {
   const newX = enemy.pos_x + randomDirection.dx;
   const newY = enemy.pos_y + randomDirection.dy;
   
+  // Get map specification for collision checking
+  const mapSpec = getMapSpec(enemy.map_id);
+  
+  // Always update direction and step (even if blocked) to match moveEnemyToward behavior
+  enemy.direction = randomDirection.dir;
+  // Initialize step if it's not valid, then cycle between 1 and 2
+  if (enemy.step !== 1 && enemy.step !== 2) {
+    enemy.step = 1;
+  } else {
+    enemy.step = enemy.step === 1 ? 2 : 1; // Cycle between 1 and 2
+  }
+  enemy.last_move_time = Date.now();
+  
   // Check if the move is valid
-  if (canMoveTo(newX, newY, null, null, enemy.map_id, enemy.id)) {
-    // Update enemy position and direction
+  if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id, enemy.id)) {
+    // Update enemy position
     enemy.pos_x = newX;
     enemy.pos_y = newY;
-    enemy.direction = randomDirection.dir;
-    enemy.last_move_time = Date.now();
-    
-    // Cycle through animation steps
-    enemy.step = ((enemy.step || 0) + 1) % 4;
-    
-    // Update in database
-    await updateEnemyDirectionAndStep(enemy.id, enemy.direction, enemy.step);
-    
-    // Broadcast the movement to all players on the same map
-    broadcastEnemyMovement(enemy);
+    if (enemy.is_admin_spawned) {
+      console.log(`Spawned enemy ${enemy.id} moved to (${newX},${newY}) facing ${enemy.direction}`);
+    }
   } else {
-    // Can't move in that direction, just update last_move_time
-    enemy.last_move_time = Date.now();
+    if (enemy.is_admin_spawned) {
+      console.log(`Spawned enemy ${enemy.id} blocked from moving to (${newX},${newY}), staying at (${enemy.pos_x},${enemy.pos_y})`);
+    }
   }
+  
+  // Always update database and broadcast (direction/step changes even if position doesn't)
+  await updateEnemyDirectionAndStep(enemy.id, enemy.direction, enemy.step);
+  broadcastEnemyMovement(enemy);
 }
 
 // Update enemy direction and step in database
@@ -1218,6 +1228,10 @@ async function processEnemyAI() {
       await moveEnemyToward(enemy, closestPlayer.pos_x, closestPlayer.pos_y);
     } else {
       // No player within range - move randomly
+      // Debug logging for spawned enemies
+      if (enemy.is_admin_spawned) {
+        console.log(`Spawned enemy ${enemyId} at (${enemy.pos_x},${enemy.pos_y}) attempting random movement...`);
+      }
       await moveEnemyRandomly(enemy);
     }
   }
