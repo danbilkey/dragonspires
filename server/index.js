@@ -1086,6 +1086,9 @@ async function playerAttackEnemy(playerData, playerWs) {
   // Check if enemy died
   if (targetEnemy.hp <= 0) {
     console.log(`Enemy ${targetEnemy.id} died, handling death...`);
+    // Send slain message to player
+    const enemyName = enemyDetails?.name || `Enemy ${targetEnemy.enemy_type}`;
+    send(playerWs, { type: 'chat', text: `~ You have slain ${enemyName}!` });
     await handleEnemyDeath(targetEnemy);
   } else {
     // Enemy survived, counter-attack the player
@@ -1108,12 +1111,18 @@ async function handleEnemyDeath(enemy) {
     // Remove from memory
     delete enemies[enemy.id];
 
-    // Broadcast enemy removal to all clients
-    broadcast({
-      type: 'enemy_removed',
-      id: enemy.id,
-      map_id: enemy.map_id
-    });
+    // Broadcast enemy removal to all clients on the same map
+    for (const [ws, playerData] of clients.entries()) {
+      if (playerData && Number(playerData.map_id) === Number(enemy.map_id)) {
+        if (ws.readyState === WebSocket.OPEN) {
+          send(ws, {
+            type: 'enemy_removed',
+            id: enemy.id,
+            map_id: enemy.map_id
+          });
+        }
+      }
+    }
 
     // Create drop container with item 201 at enemy position
     const dropItems = [];
@@ -2837,11 +2846,17 @@ wss.on('connection', (ws) => {
           
           // Pick up gold first
           if (dropContainer.gold > 0) {
-            playerData.gold = (playerData.gold || 0) + dropContainer.gold;
-            send(ws, { type: 'chat', text: `~ You found ${dropContainer.gold} gold coins.` });
+            const goldAmount = dropContainer.gold;
+            playerData.gold = (playerData.gold || 0) + goldAmount;
+            send(ws, { type: 'chat', text: `~ You found ${goldAmount} gold coins.` });
+            
+            // Update database and send stats update to client
             await updateStatsInDb(playerData.id, { gold: playerData.gold });
+            send(ws, { type: 'stats_update', id: playerData.id, gold: playerData.gold });
+            
             dropContainer.gold = 0;
             pickedUpGold = true;
+            console.log(`Player ${playerData.username} picked up ${goldAmount} gold, total now: ${playerData.gold}`);
           }
           
           // Pick up first non-zero item if hands are empty
