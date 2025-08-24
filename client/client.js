@@ -898,7 +898,7 @@
             mapItems = { ...msg.items };
           }
 
-          pushChat("Welcome to DragonSpires!");
+          pushChat("Welcome to DragonSpires!", 'blue');
           break;
           
         case 'player_joined':
@@ -1181,9 +1181,7 @@
           break;
           
         case 'player_left':
-          const p = otherPlayers[msg.id];
-          const name = msg.username || p?.username || `#${msg.id}`;
-          if (!localPlayer || msg.id !== localPlayer.id) pushChat(`${name} has left DragonSpires.`, 'grey');
+          // Remove player from game - chat message is handled by server
           delete otherPlayers[msg.id];
           break;
           
@@ -2085,7 +2083,7 @@
     function drawChatHistory() {
       const { x1,y1,x2,y2,pad } = CHAT;
       const w = x2 - x1;
-      ctx.font = 'bold 12px monospace'; ctx.textAlign = 'left';
+      ctx.font = 'bold 12px "Times New Roman", serif'; ctx.textAlign = 'left';
       const lineH = 16;
       let y = y2 - pad;
       
@@ -2097,7 +2095,18 @@
       for (let i = endIndex - 1; i >= startIndex; i--) {
         const msg = messages[i];
         let line = typeof msg === 'string' ? msg : msg.text;
-        let color = typeof msg === 'string' ? 'black' : (msg.color || 'black');
+        let colorName = typeof msg === 'string' ? 'black' : (msg.color || 'black');
+        
+        // Convert color names to specific RGB values
+        let color;
+        switch (colorName) {
+          case 'gold': color = 'rgb(145,141,58)'; break;
+          case 'cornflowerblue': color = 'rgb(0,162,232)'; break;
+          case 'blue': color = 'rgb(0,35,245)'; break;
+          case 'red': color = 'red'; break;
+          case 'grey': color = 'grey'; break;
+          default: color = 'black'; break;
+        }
         
         while (ctx.measureText(line).width > w - pad*2 && line.length > 1) line = line.slice(0, -1);
         
