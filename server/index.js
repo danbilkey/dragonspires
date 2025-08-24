@@ -74,6 +74,10 @@ const playerAttackIndex = new Map(); // Map<playerId, attackIndex> for alternati
 // In-memory item storage
 let mapItems = {}; // { "x,y": itemId }
 
+// Active spells storage
+let spells = {}; // { id: spellData }
+let spellIdCounter = 1;
+
 // Item details for server-side collision checking
 let itemDetails = [];
 let itemDetailsReady = false;
@@ -212,6 +216,188 @@ function getItemDetails(itemId) {
     return null;
   }
   return itemDetails[itemId - 1];
+}
+
+// ---------- SPELL SYSTEM ----------
+
+// Create a fire pillar spell
+function createFirePillar(casterPlayerId, startX, startY, direction, mapId) {
+  const spellId = spellIdCounter++;
+  
+  const spell = {
+    id: spellId,
+    type: 'fire_pillar',
+    casterPlayerId: casterPlayerId,
+    mapId: mapId,
+    direction: direction,
+    currentX: startX,
+    currentY: startY,
+    startX: startX,
+    startY: startY,
+    tilesMoved: 0,
+    maxTiles: 3,
+    itemId: 289, // Renders as item 289
+    createdAt: Date.now()
+  };
+  
+  spells[spellId] = spell;
+  
+  // Broadcast spell creation to all players on the same map
+  broadcastToMap(mapId, {
+    type: 'spell_created',
+    spell: spell
+  });
+  
+  console.log(`Fire pillar spell ${spellId} created at (${startX}, ${startY}) facing ${direction}`);
+  
+  // Start the spell movement timer
+  scheduleSpellMovement(spellId);
+  
+  return spellId;
+}
+
+// Move spell forward and handle collisions
+async function moveSpell(spellId) {
+  const spell = spells[spellId];
+  if (!spell) return;
+  
+  // Calculate next position
+  const nextPos = getAdjacentPosition(spell.currentX, spell.currentY, spell.direction);
+  
+  // Check map bounds
+  if (nextPos.x < 0 || nextPos.x >= MAP_WIDTH || nextPos.y < 0 || nextPos.y >= MAP_HEIGHT) {
+    console.log(`Spell ${spellId} hit map boundary, ending`);
+    endSpell(spellId);
+    return;
+  }
+  
+  // Check for collisions
+  const collision = await checkSpellCollision(spell, nextPos.x, nextPos.y);
+  
+  if (collision) {
+    // Move to collision tile first
+    spell.currentX = nextPos.x;
+    spell.currentY = nextPos.y;
+    spell.tilesMoved++;
+    
+    // Broadcast spell movement
+    broadcastToMap(spell.mapId, {
+      type: 'spell_moved',
+      spellId: spellId,
+      x: nextPos.x,
+      y: nextPos.y
+    });
+    
+    // Handle collision effects
+    await handleSpellCollision(spell, collision);
+    
+    // End spell after 1 second delay for collision
+    setTimeout(() => endSpell(spellId), 1000);
+    return;
+  }
+  
+  // Move to next position
+  spell.currentX = nextPos.x;
+  spell.currentY = nextPos.y;
+  spell.tilesMoved++;
+  
+  // Broadcast spell movement
+  broadcastToMap(spell.mapId, {
+    type: 'spell_moved',
+    spellId: spellId,
+    x: nextPos.x,
+    y: nextPos.y
+  });
+  
+  console.log(`Spell ${spellId} moved to (${nextPos.x}, ${nextPos.y}), tiles moved: ${spell.tilesMoved}`);
+  
+  // Check if reached maximum distance
+  if (spell.tilesMoved >= spell.maxTiles) {
+    // End spell after 1 second delay at final position
+    setTimeout(() => endSpell(spellId), 1000);
+  } else {
+    // Schedule next movement
+    scheduleSpellMovement(spellId);
+  }
+}
+
+// Schedule spell movement after 1 second
+function scheduleSpellMovement(spellId) {
+  setTimeout(() => moveSpell(spellId), 1000);
+}
+
+// Check for spell collisions
+async function checkSpellCollision(spell, x, y) {
+  // Check for players
+  for (const [ws, playerData] of clients.entries()) {
+    if (playerData.map_id === spell.mapId && playerData.pos_x === x && playerData.pos_y === y) {
+      return { type: 'player', data: playerData };
+    }
+  }
+  
+  // Check for enemies
+  for (const [enemyId, enemy] of Object.entries(enemies)) {
+    if (Number(enemy.map_id) === Number(spell.mapId) && enemy.pos_x === x && enemy.pos_y === y && !enemy.is_dead) {
+      return { type: 'enemy', data: enemy };
+    }
+  }
+  
+  // Check for collidable items
+  const mapSpec = getMapSpec(spell.mapId);
+  const itemId = getItemAtPosition(x, y, mapSpec, spell.mapId);
+  if (itemId > 0) {
+    const itemDetails = getItemDetails(itemId);
+    if (itemDetails && itemDetails.collision) {
+      return { type: 'item', data: { itemId, itemDetails } };
+    }
+  }
+  
+  return null;
+}
+
+// Handle spell collision effects
+async function handleSpellCollision(spell, collision) {
+  console.log(`Spell ${spell.id} collided with ${collision.type}`);
+  
+  if (collision.type === 'enemy') {
+    // Deal 5 damage to enemy
+    const enemy = collision.data;
+    enemy.life = Math.max(0, (enemy.life || 0) - 5);
+    
+    console.log(`Fire pillar deals 5 damage to enemy ${enemy.id}, HP: ${enemy.life}`);
+    
+    // Check if enemy died
+    if (enemy.life <= 0) {
+      await handleEnemyDeath(enemy, null); // No attacking player for spell kills
+    }
+  }
+  // Players and items just stop the spell without additional effects
+}
+
+// Remove spell from game
+function endSpell(spellId) {
+  const spell = spells[spellId];
+  if (!spell) return;
+  
+  console.log(`Ending spell ${spellId}`);
+  
+  // Broadcast spell removal
+  broadcastToMap(spell.mapId, {
+    type: 'spell_removed',
+    spellId: spellId
+  });
+  
+  // Remove from memory
+  delete spells[spellId];
+}
+
+// Broadcast message to all players on a specific map
+function broadcastToMap(mapId, message) {
+  for (const [ws, playerData] of clients.entries()) {
+    if (playerData.map_id === mapId && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(message));
+    }
+  }
 }
 
 // Enemy details loading and management
@@ -3349,6 +3535,47 @@ wss.on('connection', (ws) => {
         map_id: playerData.map_id,
         temporarySprite: playerData.temporarySprite
       });
+    }
+
+    else if (msg.type === 'use_fire_pillar_spell') {
+      if (!playerData) return;
+      
+      const { itemId } = msg;
+      
+      // Verify player has item 97 in hands
+      if (playerData.hands !== 97 || itemId !== 97) {
+        return;
+      }
+      
+      // Verify player has enough magic (10)
+      if ((playerData.magic || 0) < 10) {
+        send(ws, { type: 'chat', text: 'You do not have enough magic to cast this spell!' });
+        return;
+      }
+      
+      // Reduce magic by 10
+      playerData.magic = Math.max(0, (playerData.magic || 0) - 10);
+      
+      // Update database
+      updateStatsInDb(playerData.id, { magic: playerData.magic })
+        .catch(err => console.error('Error updating magic after fire pillar:', err));
+      
+      // Send magic update to client
+      send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
+      
+      // Calculate starting position (tile in front of player)
+      const startPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+      
+      // Check if starting position is valid (within bounds)
+      if (startPos.x < 0 || startPos.x >= MAP_WIDTH || startPos.y < 0 || startPos.y >= MAP_HEIGHT) {
+        send(ws, { type: 'chat', text: 'Cannot cast spell outside map bounds!' });
+        return;
+      }
+      
+      // Create fire pillar spell
+      const spellId = createFirePillar(playerData.id, startPos.x, startPos.y, playerData.direction, playerData.map_id);
+      
+      console.log(`Player ${playerData.username} cast fire pillar spell ${spellId} at (${startPos.x}, ${startPos.y})`);
     }
 
     else if (msg.type === 'use_teleport_item') {
