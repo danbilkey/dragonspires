@@ -2007,15 +2007,6 @@ wss.on('connection', (ws) => {
                 // Send loading message
                 send(ws, { type: 'chat', text: '* Loading map. Please wait. *' });
                 
-                // Send loading screen
-                send(ws, {
-                  type: 'show_loading_screen',
-                  imagePath: '/clients/assets/loadscreen.gif',
-                  x: 232,
-                  y: 20,
-                  duration: 200
-                });
-                
                 const newMapItems = await loadItemsFromDatabase(newMapId);
                 const newMapEnemies = getEnemiesForMap(newMapId);
                 send(ws, {
@@ -2026,7 +2017,13 @@ wss.on('connection', (ws) => {
                   y: newY,
                   mapId: newMapId,
                   items: newMapItems,
-                  enemies: newMapEnemies
+                  enemies: newMapEnemies,
+                  showLoadingScreen: {
+                    imagePath: '/clients/assets/loadscreen.gif',
+                    x: 232,
+                    y: 20,
+                    duration: 200
+                  }
                 });
               }
               
@@ -2736,15 +2733,8 @@ wss.on('connection', (ws) => {
         isAttacking: false
       });
       
-      // Send loading message and screen
+      // Send loading message
       send(ws, { type: 'chat', text: '* Loading map. Please wait. *' });
-      send(ws, {
-        type: 'show_loading_screen',
-        imagePath: '/clients/assets/loadscreen.gif',
-        x: 232,
-        y: 20,
-        duration: 200
-      });
       
       // Get enemies for target map
       const mapEnemies = getEnemiesForMap(targetMap);
@@ -2759,7 +2749,13 @@ wss.on('connection', (ws) => {
         y: targetY,
         mapId: targetMap,
         items: mapItems,
-        enemies: mapEnemies
+        enemies: mapEnemies,
+        showLoadingScreen: {
+          imagePath: '/clients/assets/loadscreen.gif',
+          x: 232,
+          y: 20,
+          duration: 200
+        }
       });
       
       // Broadcast magic update to teleporting player
@@ -3053,15 +3049,8 @@ wss.on('connection', (ws) => {
             isAttacking: false
           });
           
-          // Send loading message and screen
+          // Send loading message
           send(ws, { type: 'chat', text: '* Loading map. Please wait. *' });
-          send(ws, {
-            type: 'show_loading_screen',
-            imagePath: '/clients/assets/loadscreen.gif',
-            x: 232,
-            y: 20,
-            duration: 200
-          });
           
           // Send map change result to the admin
           const mapItems = await loadItemsFromDatabase(targetMapId);
@@ -3074,10 +3063,16 @@ wss.on('connection', (ws) => {
             y: playerData.pos_y,
             mapId: targetMapId,
             items: mapItems,
-            enemies: mapEnemies
+            enemies: mapEnemies,
+            showLoadingScreen: {
+              imagePath: '/clients/assets/loadscreen.gif',
+              x: 232,
+              y: 20,
+              duration: 200
+            }
           });
           
-          send(ws, { type: 'chat', text: `~ Teleported to map ${targetMapId}` });
+
           
         } catch (error) {
           console.error('Error changing player map:', error);
