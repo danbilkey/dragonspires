@@ -100,10 +100,14 @@
     
     // Get item details by ID
     function getItemDetails(itemId) {
+      console.log(`Debug getItemDetails: itemId=${itemId}, ready=${itemDetailsReady}, length=${itemDetails.length}`);
       if (!itemDetailsReady || !itemDetails || itemId < 1 || itemId > itemDetails.length) {
+        console.log(`Debug getItemDetails: Returning null - ready:${itemDetailsReady}, hasArray:${!!itemDetails}, validId:${itemId >= 1 && itemId <= itemDetails.length}`);
         return null;
       }
-      return itemDetails[itemId - 1];
+      const result = itemDetails[itemId - 1];
+      console.log(`Debug getItemDetails: Returning item:`, result);
+      return result;
     }
 
     // Get enemy sprite ID based on enemy type, direction, and step
@@ -1357,7 +1361,10 @@
         
         // First check if item is consumable
         const itemDetails = getItemDetails(handsItem);
+        console.log(`Debug: Checking item ${handsItem}, details:`, itemDetails);
+        
         if (itemDetails && itemDetails.type === 'consumable') {
+          console.log(`Debug: Item ${handsItem} is consumable, sending use_consumable_item message`);
           // Send consumable item request to server
           send({ 
             type: 'use_consumable_item', 
@@ -2742,6 +2749,9 @@
             useMessage: item[7] || null
           }));
           itemDetailsReady = true;
+          console.log(`Client loaded ${itemDetails.length} item details`);
+          // Debug: Show first few items
+          console.log('Sample items:', itemDetails.slice(0, 5));
         }
       })
       .catch(err => {
