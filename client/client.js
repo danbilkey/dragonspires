@@ -719,13 +719,18 @@
 
     // Special handling for specific animation frames (resting, standing, etc.)
     console.log(`getAnimationFrame called for player ${player.id || 'local'}, animationFrame: ${player.animationFrame}, isMoving: ${player.isMoving}, isAttacking: ${player.isAttacking}`);
-    if (player.animationFrame === 22) {
-      console.log(`Rendering sit animation for player ${player.id || 'local'}`);
-      return 22; // 'sit' animation (resting)
-    }
     if (player.animationFrame === 21) {
+      console.log(`Rendering sit animation for player ${player.id || 'local'}`);
+      return 21; // 'sit' animation (resting) - index 21 in ANIMATION_NAMES
+    }
+    if (player.animationFrame === 20) {
       console.log(`Rendering stand animation for player ${player.id || 'local'}`);
-      return 21; // 'stand' animation
+      return 20; // 'stand' animation - index 20 in ANIMATION_NAMES
+    }
+    // If animationFrame is null or undefined, use normal movement logic
+    if (player.animationFrame === null || player.animationFrame === undefined) {
+      console.log(`No special animation frame, using normal movement logic`);
+      return null;
     }
 
     // Return null for fallback to normal movement logic
