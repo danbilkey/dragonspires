@@ -397,8 +397,35 @@ async function handleSpellCollision(spell, collision) {
     
     console.log(`Fire pillar deals 5 damage to enemy ${enemy.id}, HP: ${enemy.life}`);
     
+    // Get enemy name from enemy details
+    const enemyDetailsData = getEnemyDetails(enemy.enemy_type);
+    const enemyName = enemyDetailsData ? enemyDetailsData.name : `Enemy ${enemy.enemy_type}`;
+    
+    // Find the caster player and send them a damage message
+    for (const [ws, playerData] of clients.entries()) {
+      if (playerData.id === spell.casterPlayerId) {
+        send(ws, {
+          type: 'chat',
+          text: `Your Fire Pillar spell deals 5 damage to ${enemyName}!`,
+          color: 'red'
+        });
+        break;
+      }
+    }
+    
     // Check if enemy died
     if (enemy.life <= 0) {
+      // Send death message to caster before handling death
+      for (const [ws, playerData] of clients.entries()) {
+        if (playerData.id === spell.casterPlayerId) {
+          send(ws, {
+            type: 'chat',
+            text: `You have slain ${enemyName}!`,
+            color: 'red'
+          });
+          break;
+        }
+      }
       await handleEnemyDeath(enemy, null); // No attacking player for spell kills
     }
   }
