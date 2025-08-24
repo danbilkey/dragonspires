@@ -1557,7 +1557,7 @@
           if (targetItemId === 42 || targetItemId === 338) {
             // Show loading screen immediately before teleport
             showLoadingScreen({
-              imagePath: '/client/assets/loadscreen.gif',
+              imagePath: '/assets/loadscreen.gif',
               x: 232,
               y: 20,
               duration: 200
