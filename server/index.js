@@ -1013,19 +1013,34 @@ function findClosestPlayer(enemy) {
 async function enemyAttackPlayer(enemy, targetX, targetY) {
   console.log(`enemyAttackPlayer called: Enemy ${enemy.id} attacking position (${targetX}, ${targetY})`);
   
+  // Debug: List all players on this map
+  console.log(`Players on map ${enemy.map_id}:`);
+  for (const [ws, playerData] of clients.entries()) {
+    if (playerData && Number(playerData.map_id) === Number(enemy.map_id)) {
+      console.log(`  Player ${playerData.username} at (${playerData.pos_x}, ${playerData.pos_y}), dead: ${playerData.is_dead}`);
+    }
+  }
+  
   // Find the player at the target position
-  const targetPlayer = Object.values(clients).find(([ws, playerData]) => {
-    return playerData && 
-           Number(playerData.map_id) === Number(enemy.map_id) && 
-           playerData.pos_x === targetX && 
-           playerData.pos_y === targetY && 
-           !playerData.is_dead;
-  });
+  let targetPlayer = null;
+  let targetWs = null;
+  
+  for (const [ws, playerData] of clients.entries()) {
+    if (playerData && 
+        Number(playerData.map_id) === Number(enemy.map_id) && 
+        playerData.pos_x === targetX && 
+        playerData.pos_y === targetY && 
+        !playerData.is_dead) {
+      targetPlayer = playerData;
+      targetWs = ws;
+      break;
+    }
+  }
 
   console.log(`Target player found: ${!!targetPlayer}`);
-  if (!targetPlayer) return false;
+  if (!targetPlayer || !targetWs) return false;
 
-  const [targetWs, playerData] = targetPlayer;
+  const playerData = targetPlayer;
   
   // Get enemy details for attack stats
   const enemyDetails = enemy.details;
