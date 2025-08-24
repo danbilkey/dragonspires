@@ -17,7 +17,7 @@
   ],
   "readables": [
     {
-      "coordinates": "30,35",
+      "coordinates": "30,34",
       "message": "The sign reads: Welcome to the Inn."
     },
     {
@@ -29,8 +29,16 @@
       "message": "The sign reads: Welcome to the Inn."
     },
     {
-      "coordinates": "51,26",
+      "coordinates": "47,24",
       "message": "The sign reads: Magical Graffiti Board (the magic seems to be lost)."
+    },
+    {
+      "coordinates": "36,33",
+      "message": "The sign reads: This portal leads to Maloysia Park."
+    },
+    {
+      "coordinates": "41,8",
+      "message": "The sign reads: Arena Spectator Entrance."
     }
   ],
   "holders": [
