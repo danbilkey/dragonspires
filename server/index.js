@@ -1052,7 +1052,17 @@ async function moveEnemyRandomly(enemy) {
   
   // Always update database and broadcast (direction/step changes even if position doesn't)
   await updateEnemyDirectionAndStep(enemy.id, enemy.direction, enemy.step);
-  broadcastEnemyMovement(enemy);
+  
+  // Broadcast movement to all clients
+  broadcast({
+    type: 'enemy_moved',
+    id: enemy.id,
+    pos_x: enemy.pos_x,
+    pos_y: enemy.pos_y,
+    direction: enemy.direction,
+    step: enemy.step,
+    map_id: enemy.map_id
+  });
 }
 
 // Update enemy direction and step in database
