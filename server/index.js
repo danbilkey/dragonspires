@@ -3825,6 +3825,99 @@ wss.on('connection', (ws) => {
       console.log(`Player ${playerData.username} cast fire pillar spell ${spellId} at (${startPos.x}, ${startPos.y})`);
     }
 
+    else if (msg.type === 'use_consumable_item') {
+      if (!playerData) return;
+      
+      const { itemId } = msg;
+      
+      // Verify player has the item in hands
+      if (playerData.hands !== itemId) {
+        return;
+      }
+      
+      // Get item details
+      const itemDetails = getItemDetails(itemId);
+      if (!itemDetails) {
+        console.log(`Item ${itemId} not found in itemdetails.json`);
+        return;
+      }
+      
+      // Check if item is consumable
+      if (itemDetails.type !== 'consumable') {
+        console.log(`Item ${itemId} is not consumable (type: ${itemDetails.type})`);
+        return;
+      }
+      
+      // Get the stat to affect and the amount
+      const statEffected = itemDetails.statEffected;
+      const statIncrease = itemDetails.statMax;
+      const useMessage = itemDetails.useMessage;
+      
+      if (!statEffected || !statIncrease) {
+        console.log(`Item ${itemId} missing stat information`);
+        return;
+      }
+      
+      // Map stat names to player data fields
+      let playerStatField, maxStatField;
+      if (statEffected === 'hp') {
+        playerStatField = 'life';
+        maxStatField = 'max_life';
+      } else if (statEffected === 'stamina') {
+        playerStatField = 'stamina';
+        maxStatField = 'max_stamina';
+      } else if (statEffected === 'magic') {
+        playerStatField = 'magic';
+        maxStatField = 'max_magic';
+      } else {
+        console.log(`Unknown stat type: ${statEffected}`);
+        return;
+      }
+      
+      // Calculate new stat value
+      const currentStat = playerData[playerStatField] || 0;
+      const maxStat = playerData[maxStatField] || 100;
+      const newStatValue = Math.min(currentStat + statIncrease, maxStat);
+      
+      // Update player stat
+      playerData[playerStatField] = newStatValue;
+      
+      // Remove item from hands
+      playerData.hands = 0;
+      
+      // Update database
+      const updateFields = { hands: 0 };
+      updateFields[playerStatField] = newStatValue;
+      
+      try {
+        await updateStatsInDb(playerData.id, updateFields);
+      } catch (err) {
+        console.error('Error updating player stats after consumable use:', err);
+      }
+      
+      // Send stat update to client
+      const statUpdate = { type: 'stats_update', id: playerData.id };
+      statUpdate[playerStatField] = newStatValue;
+      send(ws, statUpdate);
+      
+      // Send hands update to client
+      send(ws, { type: 'hands_update', id: playerData.id, hands: 0 });
+      
+      // Send use message to player chat
+      if (useMessage) {
+        send(ws, { type: 'chat', text: useMessage, color: 'green' });
+      }
+      
+      // Broadcast hands update to other players
+      broadcast({
+        type: 'hands_update',
+        id: playerData.id,
+        hands: 0
+      });
+      
+      console.log(`Player ${playerData.username} used consumable ${itemDetails.name}, ${statEffected} increased by ${statIncrease} to ${newStatValue}`);
+    }
+
     else if (msg.type === 'use_teleport_item') {
       if (!playerData) return;
       
