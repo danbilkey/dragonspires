@@ -1000,7 +1000,8 @@ function findClosestPlayer(enemy) {
   for (const [ws, playerData] of clients.entries()) {
     if (playerData && 
         Number(playerData.map_id) === Number(enemy.map_id) && 
-        !playerData.is_dead) {
+        !playerData.is_dead &&
+        (!playerData.temporarySprite || playerData.temporarySprite === 0)) { // Ignore transformed players
       const distance = getDistance(
         enemy.pos_x, enemy.pos_y, 
         playerData.pos_x, playerData.pos_y
@@ -1191,7 +1192,8 @@ async function enemyAttackPlayer(enemy, targetX, targetY) {
         Number(playerData.map_id) === Number(enemy.map_id) && 
         playerData.pos_x === targetX && 
         playerData.pos_y === targetY && 
-        !playerData.is_dead) {
+        !playerData.is_dead &&
+        (!playerData.temporarySprite || playerData.temporarySprite === 0)) { // Don't attack transformed players
       targetPlayer = playerData;
       targetWs = ws;
       break;
@@ -2755,20 +2757,29 @@ wss.on('connection', (ws) => {
         }
       }
       
-      console.log(`Attack attempt by ${playerData.username}: stamina ${playerData.stamina ?? 0}/10`);
+      // Check if attacking a fountain (item 60) - no stamina cost for fountains
+      const playerMapSpec = getMapSpec(playerData.map_id);
+      const itemAtAdjacentPos = getItemAtPosition(adjacentPos.x, adjacentPos.y, playerMapSpec, playerData.map_id);
+      const isFountain = (itemAtAdjacentPos === 60);
       
-      // Check stamina requirement (at least 10)
-      if ((playerData.stamina ?? 0) < 10) {
-        console.log(`Attack blocked for player ${playerData.username}: insufficient stamina (${playerData.stamina ?? 0}/10)`);
-        // Send stamina update to client to sync any discrepancy
-        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-        return;
+      console.log(`Attack attempt by ${playerData.username}: stamina ${playerData.stamina ?? 0}/10, attacking fountain: ${isFountain}`);
+      
+      if (!isFountain) {
+        // Check stamina requirement (at least 10) - only for non-fountain attacks
+        if ((playerData.stamina ?? 0) < 10) {
+          console.log(`Attack blocked for player ${playerData.username}: insufficient stamina (${playerData.stamina ?? 0}/10)`);
+          // Send stamina update to client to sync any discrepancy
+          send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+          return;
+        }
+        
+        // Reduce stamina by 10 - only for non-fountain attacks
+        const oldStamina = playerData.stamina ?? 0;
+        playerData.stamina = Math.max(0, oldStamina - 10);
+        console.log(`Attack stamina: ${oldStamina} -> ${playerData.stamina}`);
+      } else {
+        console.log(`Fountain attack - no stamina cost`);
       }
-      
-      // Reduce stamina by 10
-      const oldStamina = playerData.stamina ?? 0;
-      playerData.stamina = Math.max(0, oldStamina - 10);
-      console.log(`Attack stamina: ${oldStamina} -> ${playerData.stamina}`);
       
       // Update direction if provided
       if (msg.direction) {
@@ -2778,15 +2789,17 @@ wss.on('connection', (ws) => {
       // Start attack animation (this will handle alternating)
       startAttackAnimation(playerData, ws);
       
-      // Update stamina in database and send to client
-      updateStatsInDb(playerData.id, { stamina: playerData.stamina })
-        .then(() => {
-          console.log(`Stamina updated in database for ${playerData.username}: ${playerData.stamina}`);
-        })
-        .catch(err => console.error('Error updating stamina after attack:', err));
-      
-      send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
-      console.log(`Sent stamina update to client: ${playerData.stamina}`);
+      // Update stamina in database and send to client - only for non-fountain attacks
+      if (!isFountain) {
+        updateStatsInDb(playerData.id, { stamina: playerData.stamina })
+          .then(() => {
+            console.log(`Stamina updated in database for ${playerData.username}: ${playerData.stamina}`);
+          })
+          .catch(err => console.error('Error updating stamina after attack:', err));
+        
+        send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+        console.log(`Sent stamina update to client: ${playerData.stamina}`);
+      }
     }
 
     else if (msg.type === 'stop_attack') {
