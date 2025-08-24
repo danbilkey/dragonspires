@@ -1,67 +1,36 @@
 {
-  "start": "31,27",
-  "exits": "4,3,0,2",
+  "start": "55,42",
+  "exits": "0,0,0,0",
   "stamval": -1,
   "diemap": 1,
   "allowupload": false,
   "maxuploads": 7,
-  "allowcombat": true,
+  "allowcombat": false,
   "combatarea": "39,15,44,22",
   "portals": [
-    "35,33,1,22,21",
-    "47,20,1,57,28",
-    "30,52,1,36,55",
-    "28,54,1,31,60"
+    "63,42,1,1,42",
+    "63,43,1,1,43"
   ],
   "readables": [
     {
-      "coordinates": "30,35",
-      "message": "The sign reads: Welcome to the Inn."
-    },
-    {
-      "coordinates": "37,30",
-      "message": "The sign reads: Arena now open to the public."
-    },
-    {
-      "coordinates": "21,45",
-      "message": "The sign reads: Welcome to the Inn."
-    },
-    {
-      "coordinates": "51,26",
-      "message": "The sign reads: Magical Graffiti Board (the magic seems to be lost)."
+      "coordinates": "57,42",
+      "message": "The sign reads: Welcome to the Swamp, beware the creatures."
     }
   ],
   "holders": [
     {
-      "coordinates": "32,16",
+      "coordinates": "63,40",
       "item": 110
-    },
-    {
-      "coordinates": "16,39",
-      "item": 25
-    },
-    {
-      "coordinates": "16,40",
-      "item": 12
-    },
-    {
-      "coordinates": "16,41",
-      "item": 109
-    },
-    {
-      "coordinates": "16,42",
-      "item": 48
     }
   ],
   "enemies": [
     {
-      "type": 1,
-      "coordinates": "20,41"
+      "type": 3,
+      "coordinates": "47,44"
     },
     {
-      "type": 2,
-      "coordinates": "20,39"
+      "type": 3,
+      "coordinates": "41,38"
     }
   ]
-
 }
