@@ -321,9 +321,35 @@ async function moveSpell(spellId) {
   }
 }
 
-// Schedule spell movement after 1 second
+// Schedule spell movement after 0.5 seconds
 function scheduleSpellMovement(spellId) {
-  setTimeout(() => moveSpell(spellId), 1000);
+  setTimeout(() => moveSpell(spellId), 500);
+}
+
+// Check if a position has floor collision
+function hasFloorCollision(x, y, mapId) {
+  if (!floorCollisionReady || !floorCollision || 
+      x < 0 || y < 0) {
+    return false; // No collision data or out of bounds
+  }
+  
+  const mapSpec = getMapSpec(mapId);
+  if (!mapSpec || !mapSpec.tiles || x >= mapSpec.width || y >= mapSpec.height) {
+    return false; // No map data or out of bounds
+  }
+  
+  // Get the floor tile ID at this position
+  const tileId = (mapSpec.tiles && mapSpec.tiles[y] && 
+                  typeof mapSpec.tiles[y][x] !== 'undefined') 
+                  ? mapSpec.tiles[y][x] : 0;
+  
+  // If no tile (ID 0) or tile ID is out of range, no collision
+  if (tileId <= 0 || tileId > floorCollision.length) {
+    return false;
+  }
+  
+  // Look up collision for this tile ID (convert to 0-based index)
+  return floorCollision[tileId - 1] === true || floorCollision[tileId - 1] === "true";
 }
 
 // Check for spell collisions
@@ -340,6 +366,11 @@ async function checkSpellCollision(spell, x, y) {
     if (Number(enemy.map_id) === Number(spell.mapId) && enemy.pos_x === x && enemy.pos_y === y && !enemy.is_dead) {
       return { type: 'enemy', data: enemy };
     }
+  }
+  
+  // Check for collidable floor tiles
+  if (hasFloorCollision(x, y, spell.mapId)) {
+    return { type: 'floor', data: { x, y } };
   }
   
   // Check for collidable items
@@ -4253,4 +4284,8 @@ setInterval(async () => {
 }, 500);
 
 const PORT = process.env.PORT || 3000;
+
+// Initialize floor collision data
+loadFloorCollision();
+
 server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
