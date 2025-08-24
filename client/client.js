@@ -719,9 +719,11 @@
 
     // Special handling for specific animation frames (resting, standing, etc.)
     if (player.animationFrame === 22) {
+      console.log(`Rendering sit animation for player ${player.id || 'local'}`);
       return 22; // 'sit' animation (resting)
     }
     if (player.animationFrame === 21) {
+      console.log(`Rendering stand animation for player ${player.id || 'local'}`);
       return 21; // 'stand' animation
     }
 
@@ -1000,6 +1002,7 @@
           localPlayer.isPickingUp = msg.isPickingUp || false;
           // Store animationFrame for resting/standing animations
           if (typeof msg.animationFrame !== 'undefined') {
+            console.log(`Local player animation frame updated: ${msg.animationFrame}`);
             localPlayer.animationFrame = msg.animationFrame;
           }
           // Update client state variables for local player
@@ -1367,6 +1370,12 @@
             }
           } else {
             pushChat("~ You do not have enough magic to use that item!");
+          }
+        } else if (handsItem > 0) {
+          // Check if it's a readable item
+          const itemDetails = getItemDetails(handsItem);
+          if (itemDetails && itemDetails.type === 'readable' && itemDetails.usage) {
+            pushChat(itemDetails.usage, 'signblue');
           }
         }
         
@@ -2403,20 +2412,20 @@
       if (borderProcessed) ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
       else if (imgBorder && imgBorder.complete) ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
 
-      // Draw focus warning if window is not focused
-      if (!windowFocused && loggedIn) {
-        ctx.font = 'bold 14px "Times New Roman", serif';
-        ctx.fillStyle = 'yellow';
-        ctx.textAlign = 'left';
-        ctx.fillText('*Warning* The window is not in focus. Click to regain focus.', 10, 30);
-      }
-
       // Draw stand sprite at position 13,198 after game border
       if (playerSpritesReady && playerSprites[20] && playerSprites[20].complete) {
         ctx.drawImage(playerSprites[20], 13, 198);
       }
 
       drawBarsAndStats();
+      
+      // Draw focus warning if window is not focused (after HP/stamina bars)
+      if (!windowFocused && loggedIn) {
+        ctx.font = 'bold 14px "Times New Roman", serif';
+        ctx.fillStyle = 'yellow';
+        ctx.textAlign = 'left';
+        ctx.fillText('*Warning* The window is not in focus. Click to regain focus.', 10, 30);
+      }
       drawChatHistory();
       drawChatInput();
 
