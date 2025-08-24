@@ -2022,7 +2022,7 @@ wss.on('connection', (ws) => {
                     imagePath: '/assets/loadscreen.gif',
                     x: 232,
                     y: 20,
-                    duration: 200
+                    duration: 500
                   }
                 });
               }
@@ -2754,7 +2754,7 @@ wss.on('connection', (ws) => {
           imagePath: '/assets/loadscreen.gif',
           x: 232,
           y: 20,
-          duration: 200
+          duration: 500
         }
       });
       
@@ -3068,7 +3068,7 @@ wss.on('connection', (ws) => {
               imagePath: '/assets/loadscreen.gif',
               x: 232,
               y: 20,
-              duration: 200
+              duration: 500
             }
           });
           
