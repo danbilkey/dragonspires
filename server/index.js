@@ -2004,7 +2004,20 @@ wss.on('connection', (ws) => {
               
               // If map changed, send teleport result to client (same as item#58 logic)
               if (oldMapId !== newMapId) {
+                // Send loading message
+                send(ws, { type: 'chat', text: '* Loading map. Please wait. *' });
+                
+                // Send loading screen
+                send(ws, {
+                  type: 'show_loading_screen',
+                  imagePath: '/clients/assets/loadscreen.gif',
+                  x: 232,
+                  y: 20,
+                  duration: 200
+                });
+                
                 const newMapItems = await loadItemsFromDatabase(newMapId);
+                const newMapEnemies = getEnemiesForMap(newMapId);
                 send(ws, {
                   type: 'teleport_result',
                   success: true,
@@ -2012,7 +2025,8 @@ wss.on('connection', (ws) => {
                   x: newX,
                   y: newY,
                   mapId: newMapId,
-                  items: newMapItems
+                  items: newMapItems,
+                  enemies: newMapEnemies
                 });
               }
               
@@ -2722,6 +2736,19 @@ wss.on('connection', (ws) => {
         isAttacking: false
       });
       
+      // Send loading message and screen
+      send(ws, { type: 'chat', text: '* Loading map. Please wait. *' });
+      send(ws, {
+        type: 'show_loading_screen',
+        imagePath: '/clients/assets/loadscreen.gif',
+        x: 232,
+        y: 20,
+        duration: 200
+      });
+      
+      // Get enemies for target map
+      const mapEnemies = getEnemiesForMap(targetMap);
+      
       // Then send success response to teleporting player
       send(ws, {
         type: 'teleport_result',
@@ -2731,7 +2758,8 @@ wss.on('connection', (ws) => {
         x: targetX,
         y: targetY,
         mapId: targetMap,
-        items: mapItems
+        items: mapItems,
+        enemies: mapEnemies
       });
       
       // Broadcast magic update to teleporting player
@@ -3023,6 +3051,16 @@ wss.on('connection', (ws) => {
             step: playerData.step,
             isMoving: false,
             isAttacking: false
+          });
+          
+          // Send loading message and screen
+          send(ws, { type: 'chat', text: '* Loading map. Please wait. *' });
+          send(ws, {
+            type: 'show_loading_screen',
+            imagePath: '/clients/assets/loadscreen.gif',
+            x: 232,
+            y: 20,
+            duration: 200
           });
           
           // Send map change result to the admin
