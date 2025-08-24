@@ -724,13 +724,9 @@
     if (player.animationFrame === 20) {
       return 20; // 'stand' animation - index 20 in ANIMATION_NAMES
     }
-    // If animationFrame is null or undefined, use normal movement logic
-    if (player.animationFrame === null || player.animationFrame === undefined) {
-      return null;
-    }
 
-    // Return null for fallback to normal movement logic
-    return null;
+    // For normal movement, use the direction and step system
+    return getAnimationFrameFromDirectionAndStep(player.direction || 'down', player.step || 2);
   }
 
     // ---------- HEARTBEAT ----------
