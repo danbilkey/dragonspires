@@ -332,9 +332,9 @@ async function moveSpell(spellId) {
   }
 }
 
-// Schedule spell movement after 0.5 seconds
+// Schedule spell movement after 0.2 seconds
 function scheduleSpellMovement(spellId) {
-  setTimeout(() => moveSpell(spellId), 500);
+  setTimeout(() => moveSpell(spellId), 200);
 }
 
 // Check if a position has floor collision
@@ -1992,6 +1992,175 @@ async function processEnemyAI() {
       }
       await moveEnemyRandomly(enemy);
     }
+  }
+}
+
+// Check if an enemy is moving onto a spell tile and handle collision
+async function checkEnemySpellCollision(enemy, newX, newY) {
+  // Check if there's a spell at the new position
+  for (const [spellId, spell] of Object.entries(spells)) {
+    if (spell.mapId === enemy.map_id && spell.currentX === newX && spell.currentY === newY) {
+      // Enemy is moving onto a spell tile - deal damage
+      console.log(`Enemy ${enemy.id} moved onto fire pillar spell ${spellId} at (${newX}, ${newY})`);
+      
+      // Deal 5 damage to enemy
+      enemy.hp = Math.max(0, (enemy.hp || enemy.max_hp || 0) - 5);
+      
+      console.log(`Fire pillar deals 5 damage to enemy ${enemy.id}, HP: ${enemy.hp}`);
+      
+      // Update enemy HP in database
+      try {
+        await pool.query('UPDATE enemies SET hp = $1 WHERE id = $2', [enemy.hp, enemy.id]);
+      } catch (err) {
+        console.error('Error updating enemy HP in database:', err);
+      }
+      
+      // Get enemy name from enemy details
+      const enemyDetailsData = getEnemyDetails(enemy.enemy_type);
+      const enemyName = enemyDetailsData ? enemyDetailsData.name : `Enemy ${enemy.enemy_type}`;
+      
+      // Find the caster player and send them a damage message
+      for (const [ws, playerData] of clients.entries()) {
+        if (playerData.id === spell.casterPlayerId) {
+          send(ws, {
+            type: 'chat',
+            text: `Your Fire Pillar spell deals 5 damage to ${enemyName}!`,
+            color: 'red'
+          });
+          break;
+        }
+      }
+      
+      // Check if enemy died
+      if (enemy.hp <= 0) {
+        // Send death message to caster before handling death
+        for (const [ws, playerData] of clients.entries()) {
+          if (playerData.id === spell.casterPlayerId) {
+            send(ws, {
+              type: 'chat',
+              text: `You have slain ${enemyName}!`,
+              color: 'red'
+            });
+            break;
+          }
+        }
+        await handleEnemyDeath(enemy, null); // No attacking player for spell kills
+        return true; // Enemy died, stop processing movement
+      }
+      
+      // Only process collision with one spell per movement
+      break;
+    }
+  }
+  return false; // Enemy didn't die
+}
+
+// Move enemy toward a target position
+async function moveEnemyToward(enemy, targetX, targetY) {
+  const currentX = enemy.pos_x;
+  const currentY = enemy.pos_y;
+  
+  // Calculate direction to move
+  let newX = currentX;
+  let newY = currentY;
+  
+  if (targetX > currentX) {
+    newX = currentX + 1;
+    enemy.direction = 'right';
+  } else if (targetX < currentX) {
+    newX = currentX - 1;
+    enemy.direction = 'left';
+  } else if (targetY > currentY) {
+    newY = currentY + 1;
+    enemy.direction = 'down';
+  } else if (targetY < currentY) {
+    newY = currentY - 1;
+    enemy.direction = 'up';
+  }
+  
+  // Check if movement is allowed
+  const mapSpec = getMapSpec(enemy.map_id);
+  if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id, enemy.id)) {
+    // Check for spell collision before moving
+    const enemyDied = await checkEnemySpellCollision(enemy, newX, newY);
+    if (enemyDied) return; // Enemy died from spell, don't continue movement
+    
+    // Update enemy position
+    enemy.pos_x = newX;
+    enemy.pos_y = newY;
+    enemy.last_move_time = Date.now();
+    
+    // Update position in database
+    try {
+      await pool.query('UPDATE enemies SET pos_x = $1, pos_y = $2, direction = $3, last_move_time = $4 WHERE id = $5', 
+        [newX, newY, enemy.direction, new Date(), enemy.id]);
+    } catch (err) {
+      console.error('Error updating enemy position in database:', err);
+    }
+    
+    // Broadcast enemy movement to all players on the same map
+    broadcastToMap(enemy.map_id, {
+      type: 'enemy_moved',
+      id: enemy.id,
+      x: newX,
+      y: newY,
+      direction: enemy.direction
+    });
+  }
+}
+
+// Move enemy in a random direction
+async function moveEnemyRandomly(enemy) {
+  const directions = ['up', 'down', 'left', 'right'];
+  const randomDirection = directions[Math.floor(Math.random() * directions.length)];
+  
+  let newX = enemy.pos_x;
+  let newY = enemy.pos_y;
+  
+  switch (randomDirection) {
+    case 'up':
+      newY = enemy.pos_y - 1;
+      break;
+    case 'down':
+      newY = enemy.pos_y + 1;
+      break;
+    case 'left':
+      newX = enemy.pos_x - 1;
+      break;
+    case 'right':
+      newX = enemy.pos_x + 1;
+      break;
+  }
+  
+  // Check if movement is allowed
+  const mapSpec = getMapSpec(enemy.map_id);
+  if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id, enemy.id)) {
+    // Check for spell collision before moving
+    const enemyDied = await checkEnemySpellCollision(enemy, newX, newY);
+    if (enemyDied) return; // Enemy died from spell, don't continue movement
+    
+    // Update enemy position
+    enemy.pos_x = newX;
+    enemy.pos_y = newY;
+    enemy.direction = randomDirection;
+    enemy.last_move_time = Date.now();
+    
+    // Update position in database
+    try {
+      await pool.query('UPDATE enemies SET pos_x = $1, pos_y = $2, direction = $3, last_move_time = $4 WHERE id = $5', 
+        [newX, newY, enemy.direction, new Date(), enemy.id]);
+    } catch (err) {
+      console.error('Error updating enemy position in database:', err);
+    }
+    
+    // Broadcast enemy movement to all players on the same map
+    broadcastToMap(enemy.map_id, {
+      type: 'enemy_moved',
+      id: enemy.id,
+      x: newX,
+      y: newY,
+      direction: randomDirection
+    });
   }
 }
 
