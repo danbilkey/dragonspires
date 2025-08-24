@@ -3556,8 +3556,8 @@ wss.on('connection', (ws) => {
         const readable = mapData.readables.find(r => r.coordinates === coordinateString);
         
         if (readable) {
-          // Found a readable - send its message and stop here
-          send(ws, { type: 'chat', text: readable.message });
+          // Found a readable - send its message with signblue color and stop here
+          send(ws, { type: 'chat', text: readable.message, color: 'signblue' });
           return;
         }
       }
