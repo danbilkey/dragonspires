@@ -1016,17 +1016,17 @@
             break;
         case 'teleport_result':
             if (msg.success && localPlayer && msg.id === localPlayer.id) {
+              // Show loading screen FIRST (before any position/map changes are visible)
+              if (msg.showLoadingScreen) {
+                showLoadingScreen(msg.showLoadingScreen);
+              }
+              
               // Only update magic if newMagic is provided (for item 58)
               if (msg.newMagic !== undefined) {
                 localPlayer.magic = msg.newMagic;
               }
               localPlayer.pos_x = msg.x;
               localPlayer.pos_y = msg.y;
-              
-              // Show loading screen if provided (for server-detected portals)
-              if (msg.showLoadingScreen) {
-                showLoadingScreen(msg.showLoadingScreen);
-              }
               
               // Check if map changed and reload if necessary
               if (localPlayer.map_id !== msg.mapId) {
@@ -1555,14 +1555,6 @@
           // Check for teleportation items first
           const targetItemId = getItemAtPosition(nx, ny);
           if (targetItemId === 42 || targetItemId === 338) {
-            // Show loading screen immediately before teleport
-            showLoadingScreen({
-              imagePath: '/assets/loadscreen.gif',
-              x: 232,
-              y: 20,
-              duration: 200
-            });
-            
             // Clear fountain effect when teleporting
             fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
             
