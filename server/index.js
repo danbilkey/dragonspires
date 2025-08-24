@@ -2348,6 +2348,15 @@ wss.on('connection', (ws) => {
         playerData.animationFrame = null; // Clear animation frame to restore normal movement
         send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
         console.log(`Player ${playerData.username} stopped resting due to movement`);
+        
+        // Broadcast animation frame clear
+        broadcast({
+          type: 'animation_update',
+          id: playerData.id,
+          map_id: playerData.map_id,
+          animationFrame: null,
+          isResting: false
+        });
       }
       
       // Clear temporary sprite when moving
@@ -2639,6 +2648,15 @@ wss.on('connection', (ws) => {
         playerData.animationFrame = null; // Clear animation frame to restore normal movement
         send(ws, { type: 'chat', text: 'You stand, feeling more rested.', color: 'gold' });
         console.log(`Player ${playerData.username} stopped resting due to attack`);
+        
+        // Broadcast animation frame clear
+        broadcast({
+          type: 'animation_update',
+          id: playerData.id,
+          map_id: playerData.map_id,
+          animationFrame: null,
+          isResting: false
+        });
       }
       
       console.log(`Attack message received from player ${playerData.username} at (${playerData.pos_x}, ${playerData.pos_y}) facing ${playerData.direction}`);
