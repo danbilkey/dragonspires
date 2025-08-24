@@ -44,6 +44,7 @@
         <p>Space - Place selected tile/item at current position</p>
         <p>G - Pick up (copy) the floor tile or item at current position</p>
         <p>N - Clear map (set all floors to tile 6, all items to 0)</p>
+        <p>M - Fill 40% of map with item #14</p>
         <p>P - Save map as newmap.json</p>
         <p>I - Import/Load a JSON map file</p>
     </div>
@@ -377,6 +378,43 @@
                 pushChat(`Map cleared: all floors set to tile 6, all items removed`);
             }
 
+            function fillWithItem14() {
+                if (!mapReady) return;
+                
+                // Ensure items array exists
+                for (let y = 0; y < mapSpec.height; y++) {
+                    if (!mapSpec.items[y]) {
+                        mapSpec.items[y] = new Array(mapSpec.width).fill(0);
+                    }
+                }
+                
+                // Calculate total tiles and target count (40%)
+                const totalTiles = mapSpec.width * mapSpec.height;
+                const targetCount = Math.floor(totalTiles * 0.4);
+                
+                // Create array of all possible positions
+                const positions = [];
+                for (let y = 0; y < mapSpec.height; y++) {
+                    for (let x = 0; x < mapSpec.width; x++) {
+                        positions.push({ x, y });
+                    }
+                }
+                
+                // Shuffle the positions array using Fisher-Yates shuffle
+                for (let i = positions.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [positions[i], positions[j]] = [positions[j], positions[i]];
+                }
+                
+                // Place item #14 at the first targetCount positions
+                for (let i = 0; i < targetCount && i < positions.length; i++) {
+                    const { x, y } = positions[i];
+                    mapSpec.items[y][x] = 14;
+                }
+                
+                pushChat(`Placed item #14 at ${targetCount} random positions (40% of map)`);
+            }
+
             function loadMapFile() {
                 console.log('loadMapFile called'); // Debug log
                 const input = document.createElement('input');
@@ -669,109 +707,4 @@
                             mapSpec.tiles[playerY] = new Array(mapSpec.width).fill(6);
                         }
                         mapSpec.tiles[playerY][playerX] = selectedFloorTile;
-                        pushChat(`Placed floor tile ${selectedFloorTile} at (${playerX}, ${playerY})`);
-                    } else {
-                        if (!mapSpec.items[playerY]) {
-                            mapSpec.items[playerY] = new Array(mapSpec.width).fill(0);
-                        }
-                        mapSpec.items[playerY][playerX] = selectedItem;
-                        if (selectedItem === 0) {
-                            pushChat(`Removed item at (${playerX}, ${playerY})`);
-                        } else {
-                            pushChat(`Placed item ${selectedItem} at (${playerX}, ${playerY})`);
-                        }
-                    }
-                    e.preventDefault();
-                }
-                
-                // Pick up (copy existing tile/item to current selection)
-                else if (k === 'g') {
-                    if (!mapReady) return;
-                    
-                    if (editMode === 'floor') {
-                        const currentTile = (mapSpec.tiles && mapSpec.tiles[playerY] && typeof mapSpec.tiles[playerY][playerX] !== 'undefined') ? mapSpec.tiles[playerY][playerX] : 6;
-                        selectedFloorTile = Math.max(1, Math.min(MAX_FLOOR_TILES, currentTile));
-                        pushChat(`Picked up floor tile ${selectedFloorTile} from (${playerX}, ${playerY})`);
-                        updateStatusMessage();
-                    } else {
-                        const currentItem = (mapSpec.items && mapSpec.items[playerY] && typeof mapSpec.items[playerY][playerX] !== 'undefined') ? mapSpec.items[playerY][playerX] : 0;
-                        selectedItem = Math.max(0, Math.min(MAX_ITEMS, currentItem));
-                        pushChat(`Picked up item ${selectedItem} from (${playerX}, ${playerY})`);
-                        updateStatusMessage();
-                    }
-                    e.preventDefault();
-                }
-                
-                // Clear map
-                else if (k === 'n') {
-                    clearMap();
-                    e.preventDefault();
-                }
-                
-                // Save
-                else if (k === 'p') {
-                    saveMap();
-                    e.preventDefault();
-                }
-                
-                // Import/Load map file
-                else if (k === 'i') {
-                    loadMapFile();
-                    e.preventDefault();
-                }
-            });
-
-            // ---------- RENDER ----------
-            function render() {
-                ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-                ctx.fillStyle = '#0a0a0a'; 
-                ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
-                if (tilesReady && mapReady) {
-                    // Draw floor tiles
-                    for (let y = 0; y < mapSpec.height; y++) {
-                        for (let x = 0; x < mapSpec.width; x++) {
-                            const t = (mapSpec.tiles && mapSpec.tiles[y] && typeof mapSpec.tiles[y][x] !== 'undefined') ? mapSpec.tiles[y][x] : 6;
-                            const { screenX, screenY } = isoScreen(x, y);
-                            drawTile(screenX, screenY, t);
-                        }
-                    }
-                    
-                    // Draw items
-                    if (itemsReady) {
-                        for (let y = 0; y < mapSpec.height; y++) {
-                            for (let x = 0; x < mapSpec.width; x++) {
-                                const itemId = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') ? mapSpec.items[y][x] : 0;
-                                if (itemId > 0) {
-                                    const { screenX, screenY } = isoScreen(x, y);
-                                    drawItemAtTile(screenX, screenY, itemId);
-                                }
-                            }
-                        }
-                    }
-                    
-                    // Draw player
-                    drawPlayer();
-                }
-
-                // Draw border
-                if (borderProcessed) {
-                    ctx.drawImage(borderProcessed, 0, 0, CANVAS_W, CANVAS_H);
-                } else if (imgBorder && imgBorder.complete) {
-                    ctx.drawImage(imgBorder, 0, 0, CANVAS_W, CANVAS_H);
-                }
-
-                // Draw chat
-                drawChatHistory();
-                
-                // Draw coordinates
-                drawCoordinates();
-                
-                requestAnimationFrame(render);
-            }
-            
-            render();
-        });
-    </script>
-</body>
-</html>
+                        pushChat(`Placed floor tile ${selectedFloorTile} at (${player
