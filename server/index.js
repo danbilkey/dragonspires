@@ -2959,7 +2959,7 @@ wss.on('connection', (ws) => {
       }
       
       // Verify item exists (but animation already started)
-      const playerMapSpec = getMapSpec(playerData.map_id);
+      // playerMapSpec already declared above
       const actualItemId = getItemAtPosition(x, y, playerMapSpec, playerData.map_id);
       if (actualItemId !== itemId) {
         console.log(`ERROR: Item mismatch! Expected ${itemId}, found ${actualItemId}`);
