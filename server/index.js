@@ -983,10 +983,11 @@ function getDistance(x1, y1, x2, y2) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-// Find the closest player to an enemy on the same map
+// Find the closest player to an enemy on the same map (within 4 tile range)
 function findClosestPlayer(enemy) {
   let closestPlayer = null;
   let closestDistance = Infinity;
+  const MAX_PURSUIT_RANGE = 4; // Only pursue players within 4 tiles
   
   for (const [ws, playerData] of clients.entries()) {
     if (playerData && 
@@ -997,7 +998,8 @@ function findClosestPlayer(enemy) {
         playerData.pos_x, playerData.pos_y
       );
       
-      if (distance < closestDistance) {
+      // Only consider players within pursuit range
+      if (distance <= MAX_PURSUIT_RANGE && distance < closestDistance) {
         closestDistance = distance;
         closestPlayer = playerData;
       }
@@ -1172,12 +1174,16 @@ async function processEnemyAI() {
     
     if (timeSinceLastMove < moveDelayMs) continue;
     
-    // Find closest player on the same map
+    // Find closest player on the same map (within pursuit range)
     const closestPlayer = findClosestPlayer(enemy);
     
     if (closestPlayer) {
       // Try to move toward the closest player
       await moveEnemyToward(enemy, closestPlayer.pos_x, closestPlayer.pos_y);
+    } else {
+      // No player within range - enemy idles in place
+      // Still update last_move_time so we don't process this enemy too frequently
+      enemy.last_move_time = Date.now();
     }
   }
 }
