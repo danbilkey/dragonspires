@@ -991,8 +991,8 @@
           localPlayer.isMoving = msg.isMoving || false;
           localPlayer.isAttacking = msg.isAttacking || false;
           localPlayer.isPickingUp = msg.isPickingUp || false;
-          // Store animationFrame for resting/standing animations
-          if (typeof msg.animationFrame !== 'undefined') {
+          // Store animationFrame for resting/standing animations (including null to clear)
+          if (msg.hasOwnProperty('animationFrame')) {
             console.log(`Local player animation frame updated: ${msg.animationFrame}`);
             localPlayer.animationFrame = msg.animationFrame;
           }
