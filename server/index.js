@@ -1011,6 +1011,8 @@ function findClosestPlayer(enemy) {
 
 // Handle enemy attack on player
 async function enemyAttackPlayer(enemy, targetX, targetY) {
+  console.log(`enemyAttackPlayer called: Enemy ${enemy.id} attacking position (${targetX}, ${targetY})`);
+  
   // Find the player at the target position
   const targetPlayer = Object.values(clients).find(([ws, playerData]) => {
     return playerData && 
@@ -1020,6 +1022,7 @@ async function enemyAttackPlayer(enemy, targetX, targetY) {
            !playerData.is_dead;
   });
 
+  console.log(`Target player found: ${!!targetPlayer}`);
   if (!targetPlayer) return false;
 
   const [targetWs, playerData] = targetPlayer;
@@ -1351,12 +1354,10 @@ async function moveEnemyToward(enemy, targetX, targetY) {
     const isAdjacent = (dx <= 1 && dy <= 1) && (dx + dy === 1); // Only orthogonally adjacent
     
     if (isAdjacent) {
-      // We're next to the player - check if we should attack
-      const playerAtTarget = isPlayerAtPosition(newX, newY);
-      if (playerAtTarget) {
-        // Attack the player at the target position
-        await enemyAttackPlayer(enemy, newX, newY);
-      }
+      // We're next to the player and can't move - this means there's a player blocking us
+      // Since we're moving toward a target player, we should attack
+      console.log(`Enemy ${enemy.id} adjacent to player at (${targetX}, ${targetY}), attempting attack`);
+      await enemyAttackPlayer(enemy, targetX, targetY);
       
       // Face the player and animate in place
       broadcast({
