@@ -1009,6 +1009,195 @@ function findClosestPlayer(enemy) {
   return closestPlayer;
 }
 
+// Handle enemy attack on player
+async function enemyAttackPlayer(enemy, targetX, targetY) {
+  // Find the player at the target position
+  const targetPlayer = Object.values(clients).find(([ws, playerData]) => {
+    return playerData && 
+           Number(playerData.map_id) === Number(enemy.map_id) && 
+           playerData.pos_x === targetX && 
+           playerData.pos_y === targetY && 
+           !playerData.is_dead;
+  });
+
+  if (!targetPlayer) return false;
+
+  const [targetWs, playerData] = targetPlayer;
+  
+  // Get enemy details for attack stats
+  const enemyDetails = enemy.details;
+  if (!enemyDetails || typeof enemyDetails.attack_min !== 'number' || typeof enemyDetails.attack_max !== 'number') {
+    return false;
+  }
+
+  // Calculate initial damage (random between attack_min and attack_max)
+  const initialDamage = Math.floor(Math.random() * (enemyDetails.attack_max - enemyDetails.attack_min + 1)) + enemyDetails.attack_min;
+  
+  // Calculate defense from player's armor
+  let defense = 0;
+  if (playerData.armor && playerData.armor > 0) {
+    const armorDetails = getItemDetails(playerData.armor);
+    if (armorDetails && armorDetails.type === 'armor' && 
+        typeof armorDetails.statMin === 'number' && typeof armorDetails.statMax === 'number') {
+      defense = Math.floor(Math.random() * (armorDetails.statMax - armorDetails.statMin + 1)) + armorDetails.statMin;
+    }
+  }
+
+  // Calculate final damage
+  const finalDamage = Math.max(0, initialDamage - defense);
+
+  // Send attack text to player
+  if (enemyDetails.attack_text) {
+    send(targetWs, { type: 'chat', text: enemyDetails.attack_text });
+  }
+
+  // Send damage message to player
+  const enemyName = enemyDetails.name || `Enemy ${enemy.enemy_type}`;
+  send(targetWs, { type: 'chat', text: `~ ${enemyName} deals ${finalDamage} damage to you!` });
+
+  // Apply damage
+  if (finalDamage > 0) {
+    playerData.life = Math.max(0, (playerData.life || 0) - finalDamage);
+    
+    // Update player's HP in database
+    await updateStatsInDb(playerData.id, { life: playerData.life });
+    
+    // Send stats update to player
+    send(targetWs, { type: 'stats_update', id: playerData.id, life: playerData.life });
+  }
+
+  // Check if player died
+  if (playerData.life <= 0) {
+    await handlePlayerDeath(playerData, targetWs, enemy);
+  }
+
+  return true;
+}
+
+// Handle player death
+async function handlePlayerDeath(playerData, playerWs, killerEnemy) {
+  // Set player as dead
+  playerData.is_dead = true;
+  
+  // Send death messages to player
+  send(playerWs, { type: 'chat', text: '~ You have died!' });
+  send(playerWs, { type: 'chat', text: '~ Anything you were holding in your hands has dropped on the ground where you died.' });
+  
+  // Broadcast death message to all players
+  const enemyName = killerEnemy.details?.name || `Enemy ${killerEnemy.enemy_type}`;
+  broadcast({ 
+    type: 'chat', 
+    text: `~ ${playerData.username} has been killed by ${enemyName}!` 
+  });
+
+  // Drop item from hands
+  if (playerData.hands && playerData.hands > 0) {
+    const droppedItemId = playerData.hands;
+    
+    // Clear hands first
+    playerData.hands = 0;
+    
+    // Save dropped item to database
+    await saveItemToDatabase(playerData.pos_x, playerData.pos_y, droppedItemId, playerData.map_id);
+    
+    // Update player hands in database
+    await updateStatsInDb(playerData.id, { hands: playerData.hands });
+    
+    // Broadcast item placement
+    broadcast({
+      type: 'item_placed',
+      x: playerData.pos_x,
+      y: playerData.pos_y,
+      itemId: droppedItemId,
+      mapId: playerData.map_id
+    });
+  }
+
+  // Get respawn location from map data
+  try {
+    const currentMapData = getMapData(playerData.map_id);
+    if (!currentMapData || typeof currentMapData.diemap !== 'number') {
+      console.error('No diemap found for current map:', playerData.map_id);
+      return;
+    }
+
+    const respawnMapId = currentMapData.diemap;
+    const respawnMapData = getMapData(respawnMapId);
+    
+    if (!respawnMapData || !respawnMapData.start) {
+      console.error('No start coordinates found for respawn map:', respawnMapId);
+      return;
+    }
+
+    // Parse start coordinates (format: "x,y")
+    const [respawnX, respawnY] = respawnMapData.start.split(',').map(Number);
+    
+    // Restore player stats
+    playerData.life = playerData.max_life || 100;
+    playerData.stamina = playerData.max_stamina || 100;
+    playerData.magic = playerData.max_magic || 100;
+    playerData.is_dead = false;
+    
+    // Update position and map
+    playerData.pos_x = respawnX;
+    playerData.pos_y = respawnY;
+    playerData.map_id = respawnMapId;
+
+    // Update database
+    await updateStatsInDb(playerData.id, {
+      life: playerData.life,
+      stamina: playerData.stamina,
+      magic: playerData.magic,
+      hands: playerData.hands
+    });
+    
+    await pool.query(
+      'UPDATE players SET pos_x = $1, pos_y = $2, map_id = $3 WHERE id = $4',
+      [respawnX, respawnY, respawnMapId, playerData.id]
+    );
+
+    // Send respawn data to player
+    const respawnMapItems = await loadItemsFromDatabase(respawnMapId);
+    const respawnEnemies = getEnemiesForMap(respawnMapId);
+    
+    send(playerWs, {
+      type: 'teleport_result',
+      success: true,
+      id: playerData.id,
+      x: respawnX,
+      y: respawnY,
+      mapId: respawnMapId,
+      items: respawnMapItems,
+      enemies: respawnEnemies
+    });
+
+    // Send stats update
+    send(playerWs, {
+      type: 'stats_update',
+      id: playerData.id,
+      life: playerData.life,
+      stamina: playerData.stamina,
+      magic: playerData.magic
+    });
+
+    // Broadcast player respawn
+    broadcast({
+      type: 'player_moved',
+      id: playerData.id,
+      x: respawnX,
+      y: respawnY,
+      map_id: respawnMapId,
+      direction: playerData.direction,
+      step: playerData.step,
+      isMoving: false,
+      isAttacking: false
+    });
+
+  } catch (error) {
+    console.error('Error handling player death:', error);
+  }
+}
+
 // Move enemy in a random direction
 async function moveEnemyRandomly(enemy) {
   const directions = [
@@ -1162,7 +1351,14 @@ async function moveEnemyToward(enemy, targetX, targetY) {
     const isAdjacent = (dx <= 1 && dy <= 1) && (dx + dy === 1); // Only orthogonally adjacent
     
     if (isAdjacent) {
-      // We're next to the player, just face them and animate in place
+      // We're next to the player - check if we should attack
+      const playerAtTarget = isPlayerAtPosition(newX, newY);
+      if (playerAtTarget) {
+        // Attack the player at the target position
+        await enemyAttackPlayer(enemy, newX, newY);
+      }
+      
+      // Face the player and animate in place
       broadcast({
         type: 'enemy_moved',
         id: enemy.id,
