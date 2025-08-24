@@ -1020,7 +1020,7 @@
               localPlayer.pos_x = msg.x;
               localPlayer.pos_y = msg.y;
               
-              // Show loading screen if provided
+              // Show loading screen if provided (for server-detected portals)
               if (msg.showLoadingScreen) {
                 showLoadingScreen(msg.showLoadingScreen);
               }
@@ -1552,6 +1552,14 @@
           // Check for teleportation items first
           const targetItemId = getItemAtPosition(nx, ny);
           if (targetItemId === 42 || targetItemId === 338) {
+            // Show loading screen immediately before teleport
+            showLoadingScreen({
+              imagePath: 'client/assets/loadscreen.gif',
+              x: 232,
+              y: 20,
+              duration: 200
+            });
+            
             // Clear fountain effect when teleporting
             fountainEffects = fountainEffects.filter(effect => effect.playerId !== (localPlayer ? localPlayer.id : null));
             
