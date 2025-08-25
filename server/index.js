@@ -4550,14 +4550,32 @@ wss.on('connection', (ws) => {
 // ---------- Regeneration Loops ----------
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
-// Every 3s: stamina +10% max (+30% if resting - 200% increase)
+// Get buff bonus from held item
+function getBuffBonus(player, statType) {
+  const handsItem = player.hands || 0;
+  if (handsItem <= 0) return 0;
+  
+  const itemDetails = getItemDetails(handsItem);
+  if (!itemDetails || itemDetails.type !== 'buff') return 0;
+  
+  // Check if the buff affects the requested stat type
+  if (itemDetails.statEffected === statType) {
+    return itemDetails.statMax || 0;
+  }
+  
+  return 0;
+}
+
+// Every 3s: stamina +10% max (+30% if resting - 200% increase) + buff bonus
 setInterval(async () => {
   const updates = [];
   for (const [ws, p] of clients.entries()) {
     const basePercent = 0.10;
     const regenPercent = p.isResting ? 0.30 : basePercent; // 200% increase when resting
-    const inc = Math.floor((p.max_stamina ?? 0) * regenPercent);
-    const next = clamp((p.stamina ?? 0) + inc, 0, p.max_stamina ?? 0);
+    const baseInc = Math.floor((p.max_stamina ?? 0) * regenPercent);
+    const buffBonus = getBuffBonus(p, 'stamina');
+    const totalInc = baseInc + buffBonus;
+    const next = clamp((p.stamina ?? 0) + totalInc, 0, p.max_stamina ?? 0);
     if (next !== p.stamina) {
       p.stamina = next;
       updates.push({ id: p.id, stamina: p.stamina });
@@ -4569,12 +4587,14 @@ setInterval(async () => {
   }
 }, 3000);
 
-// Every 5s: life +5% max (min +1)
+// Every 5s: life +5% max (min +1) + buff bonus
 setInterval(async () => {
   const updates = [];
   for (const [ws, p] of clients.entries()) {
-    const inc = Math.max(1, Math.floor((p.max_life ?? 0) * 0.05));
-    const next = clamp((p.life ?? 0) + inc, 0, p.max_life ?? 0);
+    const baseInc = Math.max(1, Math.floor((p.max_life ?? 0) * 0.05));
+    const buffBonus = getBuffBonus(p, 'hp');
+    const totalInc = baseInc + buffBonus;
+    const next = clamp((p.life ?? 0) + totalInc, 0, p.max_life ?? 0);
     if (next !== p.life) {
       p.life = next;
       updates.push({ id: p.id, life: p.life });
@@ -4586,11 +4606,14 @@ setInterval(async () => {
   }
 }, 5000);
 
-// Every 30s: magic +5 flat
+// Every 30s: magic +5 flat + buff bonus
 setInterval(async () => {
   const updates = [];
   for (const [ws, p] of clients.entries()) {
-    const next = clamp((p.magic ?? 0) + 5, 0, p.max_magic ?? 0);
+    const baseInc = 5;
+    const buffBonus = getBuffBonus(p, 'magic');
+    const totalInc = baseInc + buffBonus;
+    const next = clamp((p.magic ?? 0) + totalInc, 0, p.max_magic ?? 0);
     if (next !== p.magic) {
       p.magic = next;
       updates.push({ id: p.id, magic: p.magic });
