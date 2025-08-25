@@ -249,6 +249,7 @@
     let enemies = {}; // Store enemies by ID
     let spells = {}; // Store active spells by ID
     let electrocuteEffects = {}; // Store active electrocute effects by ID
+    let healingEffects = {}; // Store active healing effects by ID
 
     // NEW: Simplified direction and animation state system
     let playerDirection = 'down'; // Current facing direction
@@ -1174,6 +1175,20 @@
           delete electrocuteEffects[msg.effectId];
           console.log(`Electrocute effect ${msg.effectId} removed`);
           break;
+
+        case 'healing_created':
+          healingEffects[msg.effectId] = {
+            id: msg.effectId,
+            x: msg.x,
+            y: msg.y
+          };
+          console.log(`Healing effect ${msg.effectId} created at (${msg.x}, ${msg.y})`);
+          break;
+
+        case 'healing_removed':
+          delete healingEffects[msg.effectId];
+          console.log(`Healing effect ${msg.effectId} removed`);
+          break;
           
         case 'enemy_spawned':
           // Add new enemy to the client
@@ -1379,7 +1394,9 @@
           285: { cost: 10, result: 323 }, // Item 285 -> Item 323
           283: { cost: 10, result: -1 },  // Item 283 -> Random (special case)
           58: { cost: 20, result: -2 },   // Item 58 -> Teleport to map 1 (special case)
-          97: { cost: 10, result: -3 }    // Item 97 -> Fire pillar spell (special case)
+          97: { cost: 10, result: -3 },   // Item 97 -> Fire pillar spell (special case)
+          100: { cost: 15, result: -4 },  // Item 100 -> Full heal spell (special case)
+          131: { cost: 20, result: -5 }   // Item 131 -> Partial heal spell (special case)
         };
         
         // First check if item is consumable
@@ -1415,6 +1432,12 @@
               // Special fire pillar spell
               send({ 
                 type: 'use_fire_pillar_spell', 
+                itemId: handsItem
+              });
+            } else if (handsItem === 100 || handsItem === 131) {
+              // Healing spells
+              send({ 
+                type: 'use_heal_spell', 
                 itemId: handsItem
               });
             } else {
@@ -2475,6 +2498,13 @@
             for (const [effectId, effect] of Object.entries(electrocuteEffects)) {
               if (effect.x === x && effect.y === y) {
                 drawItemAtTile(screenX, screenY, 291);
+              }
+            }
+
+            // Draw healing effects after electrocute effects (renders item 309 for healing)
+            for (const [effectId, effect] of Object.entries(healingEffects)) {
+              if (effect.x === x && effect.y === y) {
+                drawItemAtTile(screenX, screenY, 309);
               }
             }
           }
