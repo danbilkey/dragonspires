@@ -2460,25 +2460,23 @@
     
     let currentY = y + padding + 12; // Start position for text
     
-    // Draw NPC name (keep same position)
+    // Draw NPC name
     if (npcInteraction.name) {
       ctx.fillText(npcInteraction.name, x + padding, currentY);
       currentY += lineHeight;
       
-      // Draw horizontal line under name (moved up 17 pixels)
-      const lineY = currentY - 17;
+      // Draw horizontal line directly under name
       ctx.strokeStyle = textColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(x + padding, lineY);
-      ctx.lineTo(x + width - padding, lineY);
+      ctx.moveTo(x + padding, currentY);
+      ctx.lineTo(x + width - padding, currentY);
       ctx.stroke();
-      currentY += lineHeight - 17; // Adjust for moved line
+      currentY += 5; // Small gap after line
     }
     
-    // Draw description with word wrapping (moved up 13 pixels)
+    // Draw description with word wrapping
     if (npcInteraction.description) {
-      const descriptionY = currentY - 13;
       const maxWidth = width - (padding * 2);
       const words = npcInteraction.description.split(' ');
       let line = '';
@@ -2491,7 +2489,7 @@
         
         if (testWidth > maxWidth && line !== '') {
           // Draw current line and start new one
-          ctx.fillText(line.trim(), x + padding, descriptionY + (lineCount * lineHeight));
+          ctx.fillText(line.trim(), x + padding, currentY + (lineCount * lineHeight));
           line = words[i] + ' ';
           lineCount++;
         } else {
@@ -2501,16 +2499,15 @@
       
       // Draw the last line if there's content and we haven't exceeded max lines
       if (line.trim() !== '' && lineCount < maxLines) {
-        ctx.fillText(line.trim(), x + padding, descriptionY + (lineCount * lineHeight));
+        ctx.fillText(line.trim(), x + padding, currentY + (lineCount * lineHeight));
         lineCount++;
       }
       
-      currentY += (lineCount * lineHeight) + 5 - 13; // Extra space after description, adjusted for move
+      currentY += (lineCount * lineHeight) + 10; // Space after description
     }
     
-    // Draw questions (moved up 14 pixels)
-    const questionsY = currentY - 14;
-    let questionY = questionsY;
+    // Draw questions with proper spacing
+    let questionY = currentY;
     
     if (npcInteraction.question_1 && npcInteraction.question_1.trim() !== '') {
       ctx.fillText(npcInteraction.question_1, x + padding, questionY);
