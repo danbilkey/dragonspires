@@ -4556,7 +4556,21 @@ wss.on('connection', (ws) => {
         }
       }
       
-      // No readable found, check for enemy
+      // No readable found, check for other players first (priority)
+      const otherPlayerAtPosition = Array.from(clients.values()).find(otherPlayer => 
+        otherPlayer &&
+        otherPlayer.id !== playerData.id &&
+        Number(otherPlayer.map_id) === Number(playerData.map_id) &&
+        otherPlayer.pos_x === adjacentPos.x &&
+        otherPlayer.pos_y === adjacentPos.y
+      );
+      
+      if (otherPlayerAtPosition) {
+        send(ws, { type: 'chat', text: `You see ${otherPlayerAtPosition.username} in front of you.` });
+        return;
+      }
+      
+      // No player found, check for enemy
       const enemyAtPosition = Object.values(enemies).find(enemy => 
         Number(enemy.map_id) === Number(playerData.map_id) &&
         enemy.pos_x === adjacentPos.x &&
@@ -4880,6 +4894,64 @@ wss.on('connection', (ws) => {
         const buffMessage = `You hold a ${itemName}, which gives you a +${statMax} buff to your ${statEffected} regeneration.`;
         
         send(ws, { type: 'chat', text: buffMessage, color: 'cornflowerblue' });
+        return;
+      }
+
+      // Check for private message commands (/tell <name> <message> or /<name> <message>)
+      const tellMatch = t.match(/^\/tell\s+(\S+)\s+(.+)$/i) || t.match(/^\/(\S+)\s+(.+)$/);
+      if (tellMatch) {
+        const targetUsername = tellMatch[1];
+        const message = tellMatch[2];
+        
+        // Basic sanitization for SQL injection prevention
+        const sanitizedMessage = message.replace(/[<>'"\\;&|`]/g, '').trim();
+        
+        // Check message length (use same limits as regular chat)
+        if (sanitizedMessage.length === 0) {
+          send(ws, { type: 'chat', text: '~ Your message cannot be empty.' });
+          return;
+        }
+        if (sanitizedMessage.length > 200) { // Assuming 200 char limit for chat
+          send(ws, { type: 'chat', text: '~ Your message is too long.' });
+          return;
+        }
+        
+        // Find target player (case-insensitive)
+        let targetPlayer = null;
+        let targetWs = null;
+        
+        for (const [clientWs, clientPlayer] of clients.entries()) {
+          if (clientPlayer && clientPlayer.username.toLowerCase() === targetUsername.toLowerCase()) {
+            targetPlayer = clientPlayer;
+            targetWs = clientWs;
+            break;
+          }
+        }
+        
+        if (!targetPlayer || !targetWs) {
+          send(ws, { 
+            type: 'chat', 
+            text: `~ No players named ${targetUsername} were found online. Check -players to see who's online now.` 
+          });
+          return;
+        }
+        
+        // Send whisper message to target player
+        const whisperMessage = `~ ${playerData.username} whispers, "${sanitizedMessage}" to you.`;
+        send(targetWs, { 
+          type: 'chat', 
+          text: whisperMessage,
+          color: 'pink'
+        });
+        
+        // Send confirmation to sender (optional - shows what was sent)
+        send(ws, { 
+          type: 'chat', 
+          text: `~ You whisper to ${targetPlayer.username}: "${sanitizedMessage}"`,
+          color: 'pink'
+        });
+        
+        console.log(`Private message from ${playerData.username} to ${targetPlayer.username}: ${sanitizedMessage}`);
         return;
       }
 
