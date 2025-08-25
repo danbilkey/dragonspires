@@ -767,6 +767,9 @@ async function loadNPCDetails() {
         sell_price_3: npc.sell_price_3,
         sell_price_4: npc.sell_price_4
       }));
+      
+      npcDetailsReady = true;
+      console.log(`Server loaded ${npcDetails.length} NPC details from: ${usedPath}`);
     } else {
       console.error('Invalid npcdetails.json format');
       npcDetailsReady = true;
@@ -777,9 +780,6 @@ async function loadNPCDetails() {
     npcDetailsReady = true;
     return;
   }
-  
-  npcDetailsReady = true;
-  console.log(`Server loaded ${npcDetails.length} NPC details from: ${usedPath}`);
 }
 
 function getNPCDetails(npcType) {
