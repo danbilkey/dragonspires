@@ -1917,6 +1917,22 @@
         showPlayerStats();
         return;
       }
+      // Handle buff area click (74,211 to 110,224)
+      if (connected && loggedIn && mx >= 74 && mx <= 110 && my >= 211 && my <= 224) {
+        // Show buff message (same as -buff command)
+        if (localPlayer && localPlayer.hands && localPlayer.hands > 0) {
+          const itemDetails = getItemDetails(localPlayer.hands);
+          if (itemDetails && itemDetails.type === 'buff') {
+            const buffMessage = `You hold a ${itemDetails.name}, which gives you a +${itemDetails.statMax || 0} buff to your ${itemDetails.statEffected || 'unknown'} regeneration.`;
+            pushChat(buffMessage, 'cornflowerblue');
+          } else {
+            pushChat('No buffs currently active.', 'cornflowerblue');
+          }
+        } else {
+          pushChat('No buffs currently active.', 'cornflowerblue');
+        }
+        return;
+      }
       // Handle BRB area click (114,196 to 150,209)
       if (connected && loggedIn && mx >= 114 && mx <= 150 && my >= 196 && my <= 209) {
         toggleBRB();
@@ -2216,9 +2232,11 @@
 
       const gold = localPlayer.gold ?? 0;
       ctx.font = '14px sans-serif';
-      ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(String(gold), 177, 273);
-      ctx.fillStyle = 'white'; ctx.fillText(String(gold), 177, 273);
+      ctx.textAlign = 'center'; // Center the text
+      ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(String(gold), 194, 264);
+      ctx.fillStyle = 'white'; ctx.fillText(String(gold), 194, 264);
       ctx.lineWidth = 1;
+      ctx.textAlign = 'left'; // Reset text alignment
     }
 
     function drawChatHistory() {
@@ -2247,6 +2265,7 @@
           case 'signblue': color = 'rgb(0,35,45)'; break;
           case 'red': color = 'red'; break;
           case 'purple': color = 'rgb(128,0,128)'; break;
+          case 'pink': color = 'rgb(185,114,164)'; break;
           case 'grey': color = 'grey'; break;
           default: color = 'black'; break;
         }
