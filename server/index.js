@@ -4472,9 +4472,9 @@ wss.on('connection', (ws) => {
         const itemName = itemDetails.name;
         const statMax = itemDetails.statMax || 0;
         const statEffected = itemDetails.statEffected || 'unknown';
-        const buffMessage = `${itemName} gives you a +${statMax} buff to your ${statEffected}.`;
+        const buffMessage = `You hold a ${itemName}, which gives you a +${statMax} buff to your ${statEffected} regeneration.`;
         
-        send(ws, { type: 'chat', text: buffMessage });
+        send(ws, { type: 'chat', text: buffMessage, color: 'cornflowerblue' });
         return;
       }
 
