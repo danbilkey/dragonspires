@@ -5340,7 +5340,12 @@ setInterval(async () => {
 
 // NPC Speaker system - runs every 30 seconds
 setInterval(() => {
-  if (!npcDetailsReady || !npcDetails || npcLocations.length === 0) return;
+  if (!npcDetailsReady || !npcDetails || npcLocations.length === 0) {
+    console.log('NPC Speaker: Not ready yet or no locations loaded');
+    return;
+  }
+  
+  console.log(`NPC Speaker: Processing ${npcLocations.length} NPCs, phase ${npcSpeakerPhaseIndex}`);
   
   // Get all valid phrases from all speaker NPCs for current phase
   const speakerPhrases = [];
@@ -5348,22 +5353,26 @@ setInterval(() => {
   const phraseKey = `speaker_phrase_${currentPhaseIndex + 1}`;
   
   for (const npcLocation of npcLocations) {
-    const npcDetails = getNPCDetails(npcLocation.type);
-    if (npcDetails && npcDetails.speaker && npcDetails[phraseKey] && npcDetails[phraseKey].trim() !== '') {
+    const npcDetailsData = getNPCDetails(npcLocation.type);
+    if (npcDetailsData && npcDetailsData.speaker && npcDetailsData[phraseKey] && npcDetailsData[phraseKey].trim() !== '') {
       speakerPhrases.push({
-        phrase: npcDetails[phraseKey],
+        phrase: npcDetailsData[phraseKey],
         npcLocation: npcLocation
       });
+      console.log(`NPC Speaker: Found speaker NPC type ${npcLocation.type} at (${npcLocation.x},${npcLocation.y}) on map ${npcLocation.mapId} with phrase: "${npcDetailsData[phraseKey]}"`);
     }
   }
+  
+  console.log(`NPC Speaker: Found ${speakerPhrases.length} speaker NPCs with valid phrases`);
   
   // Send phrases to players within range
   for (const speakerData of speakerPhrases) {
     const { phrase, npcLocation } = speakerData;
+    let playersMessaged = 0;
     
     // Find all players within 6-tile square range
     for (const [ws, playerData] of clients.entries()) {
-      if (playerData && playerData.map_id === npcLocation.mapId) {
+      if (playerData && Number(playerData.map_id) === Number(npcLocation.mapId)) {
         const dx = Math.abs(playerData.pos_x - npcLocation.x);
         const dy = Math.abs(playerData.pos_y - npcLocation.y);
         
@@ -5381,14 +5390,19 @@ setInterval(() => {
               text: phrase,
               color: 'black'
             });
+            playersMessaged++;
+            console.log(`NPC Speaker: Sent phrase to player ${playerData.username} at (${playerData.pos_x},${playerData.pos_y}), distance: (${dx},${dy})`);
           }
         }
       }
     }
+    
+    console.log(`NPC Speaker: Messaged ${playersMessaged} players for NPC at (${npcLocation.x},${npcLocation.y})`);
   }
   
   // Advance to next phrase index for all NPCs
   npcSpeakerPhaseIndex = (npcSpeakerPhaseIndex + 1) % 4;
+  console.log(`NPC Speaker: Advanced to phase ${npcSpeakerPhaseIndex}`);
   
 }, 30000); // 30 seconds
 
