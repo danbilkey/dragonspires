@@ -499,6 +499,53 @@ function removeElectrocuteEffect(effectId) {
   delete electrocuteEffects[effectId];
 }
 
+// Healing effects system
+let healingEffects = {}; // Store active healing effects
+
+function createHealingEffect(effectId, x, y, mapId) {
+  // Create healing effect
+  const effect = {
+    id: effectId,
+    x: x,
+    y: y,
+    mapId: mapId,
+    startTime: Date.now()
+  };
+  
+  healingEffects[effectId] = effect;
+  
+  console.log(`Created healing effect ${effectId} at (${x}, ${y}) on map ${mapId}`);
+  
+  // Broadcast healing effect creation to all clients on the map
+  broadcastToMap(mapId, {
+    type: 'healing_created',
+    effectId: effectId,
+    x: x,
+    y: y
+  });
+  
+  // Schedule removal after 1 second
+  setTimeout(() => {
+    removeHealingEffect(effectId);
+  }, 1000);
+}
+
+function removeHealingEffect(effectId) {
+  const effect = healingEffects[effectId];
+  if (!effect) return;
+  
+  console.log(`Removing healing effect ${effectId}`);
+  
+  // Broadcast healing effect removal
+  broadcastToMap(effect.mapId, {
+    type: 'healing_removed',
+    effectId: effectId
+  });
+  
+  // Remove from memory
+  delete healingEffects[effectId];
+}
+
 // Enemy details loading and management
 let enemyDetails = [];
 let enemyDetailsReady = false;
@@ -4017,6 +4064,143 @@ wss.on('connection', (ws) => {
       }
       
       console.log(`Player ${playerData.username} used consumable ${itemDetails.name}, ${statEffected} increased by ${statIncrease} to ${newStatValue}`);
+    }
+
+    else if (msg.type === 'use_heal_spell') {
+      if (!playerData) return;
+      
+      const { itemId } = msg;
+      
+      // Check for item #100 (full heal spell)
+      if (itemId === 100) {
+        // Verify player has item 100 in hands
+        if (playerData.hands !== 100) return;
+        
+        // Verify player has enough magic (15)
+        if ((playerData.magic || 0) < 15) {
+          send(ws, { type: 'chat', text: 'You do not have enough magic to cast this spell!' });
+          return;
+        }
+        
+        // Deduct magic cost
+        playerData.magic = Math.max(0, (playerData.magic || 0) - 15);
+        
+        // Update magic in database
+        updateStatsInDb(playerData.id, { magic: playerData.magic })
+          .catch(err => console.error('Error updating magic after heal spell:', err));
+        
+        // Send magic update to client
+        send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
+        
+        // Get position in front of player based on direction
+        const targetPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+        
+        // Check if there's another player at target position
+        let targetPlayer = null;
+        for (const [otherWs, otherPlayerData] of clients.entries()) {
+          if (otherPlayerData && 
+              otherPlayerData.id !== playerData.id &&
+              Number(otherPlayerData.map_id) === Number(playerData.map_id) &&
+              otherPlayerData.pos_x === targetPos.x &&
+              otherPlayerData.pos_y === targetPos.y) {
+            targetPlayer = { ws: otherWs, data: otherPlayerData };
+            break;
+          }
+        }
+        
+        // If no other player found, heal self
+        if (!targetPlayer) {
+          targetPlayer = { ws: ws, data: playerData };
+        }
+        
+        // Heal the target player to full HP
+        const oldHp = targetPlayer.data.life || 0;
+        targetPlayer.data.life = targetPlayer.data.max_life || 100;
+        
+        // Update database
+        updateStatsInDb(targetPlayer.data.id, { life: targetPlayer.data.life })
+          .catch(err => console.error('Error updating life after heal spell:', err));
+        
+        // Send stat update to target player
+        send(targetPlayer.ws, { type: 'stats_update', id: targetPlayer.data.id, life: targetPlayer.data.life });
+        
+        // Send healing message to target player
+        send(targetPlayer.ws, { 
+          type: 'chat', 
+          text: 'You are magically fully healed by the power of the scrolls!',
+          color: 'purple'
+        });
+        
+        // Create healing visual effect
+        const healingId = Date.now() + Math.random();
+        createHealingEffect(healingId, targetPlayer.data.pos_x, targetPlayer.data.pos_y, targetPlayer.data.map_id);
+        
+        console.log(`Player ${playerData.username} cast full heal on ${targetPlayer.data.username}, HP: ${oldHp} -> ${targetPlayer.data.life}`);
+      }
+      
+      // Check for item #131 (partial heal spell)
+      else if (itemId === 131) {
+        // Verify player has item 131 in hands
+        if (playerData.hands !== 131) return;
+        
+        // Verify player has enough magic (20)
+        if ((playerData.magic || 0) < 20) {
+          send(ws, { type: 'chat', text: 'You do not have enough magic to cast this spell!' });
+          return;
+        }
+        
+        // Deduct magic cost
+        playerData.magic = Math.max(0, (playerData.magic || 0) - 20);
+        
+        // Update magic in database
+        updateStatsInDb(playerData.id, { magic: playerData.magic })
+          .catch(err => console.error('Error updating magic after heal spell:', err));
+        
+        // Send magic update to client
+        send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
+        
+        // Get position in front of player based on direction
+        const targetPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+        
+        // Check if there's another player at target position
+        let targetPlayer = null;
+        for (const [otherWs, otherPlayerData] of clients.entries()) {
+          if (otherPlayerData && 
+              otherPlayerData.id !== playerData.id &&
+              Number(otherPlayerData.map_id) === Number(playerData.map_id) &&
+              otherPlayerData.pos_x === targetPos.x &&
+              otherPlayerData.pos_y === targetPos.y) {
+            targetPlayer = { ws: otherWs, data: otherPlayerData };
+            break;
+          }
+        }
+        
+        // If no other player found, heal self
+        if (!targetPlayer) {
+          targetPlayer = { ws: ws, data: playerData };
+        }
+        
+        // Heal the target player by 50 HP (up to max)
+        const oldHp = targetPlayer.data.life || 0;
+        const maxHp = targetPlayer.data.max_life || 100;
+        targetPlayer.data.life = Math.min(oldHp + 50, maxHp);
+        
+        // Update database
+        updateStatsInDb(targetPlayer.data.id, { life: targetPlayer.data.life })
+          .catch(err => console.error('Error updating life after heal spell:', err));
+        
+        // Send stat update to target player
+        send(targetPlayer.ws, { type: 'stats_update', id: targetPlayer.data.id, life: targetPlayer.data.life });
+        
+        // Send healing message to target player
+        send(targetPlayer.ws, { 
+          type: 'chat', 
+          text: 'The power of the runes has restored some of your life force!',
+          color: 'purple'
+        });
+        
+        console.log(`Player ${playerData.username} cast partial heal on ${targetPlayer.data.username}, HP: ${oldHp} -> ${targetPlayer.data.life}`);
+      }
     }
 
     else if (msg.type === 'use_teleport_item') {
