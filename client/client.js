@@ -1429,6 +1429,11 @@
       if (loggedIn && localPlayer && e.key === 'l') {
         e.preventDefault();
         
+        // Close inventory if it's open
+        if (inventoryVisible) {
+          inventoryVisible = false;
+        }
+        
         // Send look request to server
         send({ type: 'look' });
         
@@ -2460,15 +2465,15 @@
       ctx.fillText(npcInteraction.name, x + padding, currentY);
       currentY += lineHeight;
       
-      // Draw horizontal line under name (moved up 14 pixels)
-      const lineY = currentY - 14;
+      // Draw horizontal line under name (moved down 5 pixels from original position)
+      const lineY = currentY + 5;
       ctx.strokeStyle = textColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x + padding, lineY);
       ctx.lineTo(x + width - padding, lineY);
       ctx.stroke();
-      currentY += lineHeight - 14; // Adjust for moved line
+      currentY += lineHeight + 5; // Adjust for moved line
     }
     
     // Draw description with word wrapping (moved down 10 pixels from original position)
