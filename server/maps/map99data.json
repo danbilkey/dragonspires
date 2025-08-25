@@ -51,5 +51,11 @@
       "type": 12,
       "coordinates": "23,31"
     }
+  ],
+  "npcs": [
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
   ]
 }

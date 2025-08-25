@@ -36,5 +36,11 @@
       "type": 3,
       "coordinates": "18,33"
     }
+  ],
+  "npcs": [
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
   ]
 }

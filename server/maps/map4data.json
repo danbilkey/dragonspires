@@ -25,10 +25,6 @@
     {
       "coordinates": "21,45",
       "message": "The sign reads: Welcome to the Inn."
-    },
-    {
-      "coordinates": "51,26",
-      "message": "The sign reads: Magical Graffiti Board (the magic seems to be lost)."
     }
   ],
   "holders": [
@@ -62,6 +58,11 @@
       "type": 2,
       "coordinates": "20,39"
     }
+  ],
+  "npcs": [
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
   ]
-
 }

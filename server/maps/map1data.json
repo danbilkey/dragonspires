@@ -56,5 +56,23 @@
       "type": 0,
       "coordinates": "63,56"
     }
+  ],
+  "npcs": [
+    {
+      "type": 1,
+      "coordinates": "37,37"
+    },
+    {
+      "type": 2,
+      "coordinates": "24,31"
+    },
+    {
+      "type": 3,
+      "coordinates": "10,24"
+    },
+    {
+      "type": 4,
+      "coordinates": "51,36"
+    }
   ]
 }
