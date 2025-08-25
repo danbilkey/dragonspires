@@ -1330,6 +1330,11 @@
         return;
       }
 
+      // Debug: Log all key presses when logged in
+      if (loggedIn && localPlayer) {
+        console.log(`Debug: Key pressed: '${e.key}' (code: ${e.code})`);
+      }
+
       // Look command with 'l' key
       if (loggedIn && localPlayer && e.key === 'l') {
         e.preventDefault();
@@ -1341,7 +1346,8 @@
       }
 
       // Transformation with 'U' key
-      if (loggedIn && localPlayer && e.key === 'u' || e.key === 'U') {
+      if (loggedIn && localPlayer && (e.key === 'u' || e.key === 'U')) {
+        console.log(`Debug: 'u' key pressed! loggedIn=${loggedIn}, localPlayer=${!!localPlayer}`);
         e.preventDefault();
         
         const handsItem = localPlayer.hands || 0;
