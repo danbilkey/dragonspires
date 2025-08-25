@@ -337,31 +337,7 @@ function scheduleSpellMovement(spellId) {
   setTimeout(() => moveSpell(spellId), 200);
 }
 
-// Check if a position has floor collision
-function hasFloorCollision(x, y, mapId) {
-  if (!floorCollisionReady || !floorCollision || 
-      x < 0 || y < 0) {
-    return false; // No collision data or out of bounds
-  }
-  
-  const mapSpec = getMapSpec(mapId);
-  if (!mapSpec || !mapSpec.tiles || x >= mapSpec.width || y >= mapSpec.height) {
-    return false; // No map data or out of bounds
-  }
-  
-  // Get the floor tile ID at this position
-  const tileId = (mapSpec.tiles && mapSpec.tiles[y] && 
-                  typeof mapSpec.tiles[y][x] !== 'undefined') 
-                  ? mapSpec.tiles[y][x] : 0;
-  
-  // If no tile (ID 0) or tile ID is out of range, no collision
-  if (tileId <= 0 || tileId > floorCollision.length) {
-    return false;
-  }
-  
-  // Look up collision for this tile ID (convert to 0-based index)
-  return floorCollision[tileId - 1] === true || floorCollision[tileId - 1] === "true";
-}
+
 
 // Check for spell collisions
 async function checkSpellCollision(spell, x, y) {
@@ -379,13 +355,13 @@ async function checkSpellCollision(spell, x, y) {
     }
   }
   
-  // Check for collidable floor tiles
-  if (hasFloorCollision(x, y, spell.mapId)) {
+  // Check for collidable floor tiles and items
+  const mapSpec = getMapSpec(spell.mapId);
+  if (hasFloorCollision(x, y, mapSpec)) {
     return { type: 'floor', data: { x, y } };
   }
   
   // Check for collidable items
-  const mapSpec = getMapSpec(spell.mapId);
   const itemId = getItemAtPosition(x, y, mapSpec, spell.mapId);
   if (itemId > 0) {
     const itemDetails = getItemDetails(itemId);
@@ -2107,6 +2083,38 @@ async function moveEnemyToward(enemy, targetX, targetY) {
       direction: enemy.direction,
       step: enemy.step || 1
     });
+  } else {
+    // Can't move to target position - check if we're adjacent to the target player for attack
+    const dx = Math.abs(targetX - currentX);
+    const dy = Math.abs(targetY - currentY);
+    const isAdjacent = (dx <= 1 && dy <= 1) && (dx + dy === 1); // Only orthogonally adjacent
+    
+    if (isAdjacent) {
+      // We're next to the player and can't move - attempt to attack
+      console.log(`Enemy ${enemy.id} adjacent to player at (${targetX}, ${targetY}), attempting attack`);
+      await enemyAttackPlayer(enemy, targetX, targetY);
+    }
+    
+    // Update last move time and direction even if we can't move (for animation)
+    enemy.last_move_time = Date.now();
+    
+    // Update direction in database
+    try {
+      await pool.query('UPDATE enemies SET direction = $1, last_move_time = $2 WHERE id = $3', 
+        [enemy.direction, new Date(), enemy.id]);
+    } catch (err) {
+      console.error('Error updating enemy direction in database:', err);
+    }
+    
+    // Broadcast enemy "movement" (direction change) to show attack animation
+    broadcastToMap(enemy.map_id, {
+      type: 'enemy_moved',
+      id: enemy.id,
+      pos_x: currentX, // Stay in same position
+      pos_y: currentY, // Stay in same position
+      direction: enemy.direction,
+      step: enemy.step || 1
+    });
   }
 }
 
@@ -2171,6 +2179,11 @@ function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1, excl
   // Check map bounds
   if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) {
     return false;
+  }
+  
+  // Get mapSpec if not provided
+  if (!mapSpec) {
+    mapSpec = getMapSpec(mapId);
   }
   
   // Check floor collision
