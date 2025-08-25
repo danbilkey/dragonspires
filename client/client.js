@@ -2460,25 +2460,25 @@
     
     let currentY = y + padding + 12; // Start position for text
     
-    // Draw NPC name
+    // Draw NPC name (keep same position)
     if (npcInteraction.name) {
       ctx.fillText(npcInteraction.name, x + padding, currentY);
       currentY += lineHeight;
       
-      // Draw horizontal line under name (moved down 5 pixels from original position)
-      const lineY = currentY + 5;
+      // Draw horizontal line under name (moved up 17 pixels)
+      const lineY = currentY - 17;
       ctx.strokeStyle = textColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x + padding, lineY);
       ctx.lineTo(x + width - padding, lineY);
       ctx.stroke();
-      currentY += lineHeight + 5; // Adjust for moved line
+      currentY += lineHeight - 17; // Adjust for moved line
     }
     
-    // Draw description with word wrapping (moved down 10 pixels from original position)
+    // Draw description with word wrapping (moved up 13 pixels)
     if (npcInteraction.description) {
-      const descriptionY = currentY + 10;
+      const descriptionY = currentY - 13;
       const maxWidth = width - (padding * 2);
       const words = npcInteraction.description.split(' ');
       let line = '';
@@ -2505,11 +2505,11 @@
         lineCount++;
       }
       
-      currentY += (lineCount * lineHeight) + 5 + 10; // Extra space after description, adjusted for move
+      currentY += (lineCount * lineHeight) + 5 - 13; // Extra space after description, adjusted for move
     }
     
-    // Draw questions (moved down 14 pixels)
-    const questionsY = currentY + 14;
+    // Draw questions (moved up 14 pixels)
+    const questionsY = currentY - 14;
     let questionY = questionsY;
     
     if (npcInteraction.question_1 && npcInteraction.question_1.trim() !== '') {
