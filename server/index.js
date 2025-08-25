@@ -4453,6 +4453,31 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // Check for -buff command (available to all players)
+      if (t.toLowerCase() === '-buff') {
+        const handsItem = playerData.hands || 0;
+        
+        if (handsItem <= 0) {
+          send(ws, { type: 'chat', text: 'No buffs currently active.' });
+          return;
+        }
+        
+        const itemDetails = getItemDetails(handsItem);
+        if (!itemDetails || itemDetails.type !== 'buff') {
+          send(ws, { type: 'chat', text: 'No buffs currently active.' });
+          return;
+        }
+        
+        // Format the buff message
+        const itemName = itemDetails.name;
+        const statMax = itemDetails.statMax || 0;
+        const statEffected = itemDetails.statEffected || 'unknown';
+        const buffMessage = `${itemName} gives you a +${statMax} buff to your ${statEffected}.`;
+        
+        send(ws, { type: 'chat', text: buffMessage });
+        return;
+      }
+
       // Check for existing admin placeitem command
       const placeItemMatch = t.match(/^-placeitem\s+(\d+)$/i);
       if (placeItemMatch) {
