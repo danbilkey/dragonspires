@@ -2201,6 +2201,7 @@
           case 'blue': color = 'rgb(0,35,245)'; break;
           case 'signblue': color = 'rgb(0,35,45)'; break;
           case 'red': color = 'red'; break;
+          case 'purple': color = 'rgb(128,0,128)'; break;
           case 'grey': color = 'grey'; break;
           default: color = 'black'; break;
         }
