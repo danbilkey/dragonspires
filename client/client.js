@@ -58,6 +58,19 @@
       selectionCircleDiameter: 32
     };
 
+    // NPC interaction configuration
+    const NPC_DIALOG = {
+      x: 241,
+      y: 28,
+      width: 250,
+      height: 150,
+      backgroundColor: 'rgb(0, 133, 182)',
+      borderColor: 'black',
+      textColor: 'yellow',
+      lineHeight: 17,
+      padding: 8
+    };
+
     // Animation constants
     const ANIMATION_NAMES = [
       'down_walk_1', 'down', 'down_walk_2', 'down_attack_1', 'down_attack_2',
@@ -219,6 +232,9 @@
     let connectionAttempted = false; // Track if we've started connecting
     // BRB/AFK state
     let isBRB = false;
+    
+    // NPC interaction state
+    let npcInteraction = null; // Will hold NPC details when interacting
 
     // Assets ready flags
     let tilesReady = false;
@@ -1312,6 +1328,18 @@
         case 'signup_error':
           pushChat(msg.message || 'Auth error');
           break;
+          
+        case 'npc_interaction_start':
+          // Start NPC interaction with provided details
+          npcInteraction = msg.npcDetails;
+          console.log('Started NPC interaction:', npcInteraction);
+          break;
+          
+        case 'npc_interaction_end':
+          // End NPC interaction
+          npcInteraction = null;
+          console.log('Ended NPC interaction');
+          break;
       }
     }
 
@@ -2233,8 +2261,8 @@
       const gold = localPlayer.gold ?? 0;
       ctx.font = '14px sans-serif';
       ctx.textAlign = 'center'; // Center the text
-      ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(String(gold), 194, 264);
-      ctx.fillStyle = 'white'; ctx.fillText(String(gold), 194, 264);
+      ctx.lineWidth = 3; ctx.strokeStyle = 'black'; ctx.strokeText(String(gold), 194, 273);
+      ctx.fillStyle = 'white'; ctx.fillText(String(gold), 194, 273);
       ctx.lineWidth = 1;
       ctx.textAlign = 'left'; // Reset text alignment
     }
@@ -2382,6 +2410,68 @@
         ctx.stroke();
         ctx.lineWidth = 1;
       }
+    }
+  }
+
+  function drawNPCDialog() {
+    if (!npcInteraction) return;
+    
+    const { x, y, width, height, backgroundColor, borderColor, textColor, lineHeight, padding } = NPC_DIALOG;
+    
+    // Draw background rectangle (same as inventory)
+    ctx.fillStyle = backgroundColor;
+    ctx.fillRect(x, y, width, height);
+    
+    // Draw border
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, width, height);
+    ctx.lineWidth = 1;
+    
+    // Draw text content
+    ctx.fillStyle = textColor;
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'left';
+    
+    let currentY = y + padding + 12; // Start position for text
+    
+    // Draw NPC name
+    if (npcInteraction.name) {
+      ctx.fillText(npcInteraction.name, x + padding, currentY);
+      currentY += lineHeight;
+      
+      // Draw horizontal line under name
+      ctx.strokeStyle = textColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + padding, currentY);
+      ctx.lineTo(x + width - padding, currentY);
+      ctx.stroke();
+      currentY += lineHeight;
+    }
+    
+    // Draw description
+    if (npcInteraction.description) {
+      ctx.fillText(npcInteraction.description, x + padding, currentY);
+      currentY += lineHeight + 5; // Extra space after description
+    }
+    
+    // Draw questions
+    if (npcInteraction.question_1 && npcInteraction.question_1.trim() !== '') {
+      ctx.fillText(npcInteraction.question_1, x + padding, currentY);
+      currentY += lineHeight;
+    }
+    if (npcInteraction.question_2 && npcInteraction.question_2.trim() !== '') {
+      ctx.fillText(npcInteraction.question_2, x + padding, currentY);
+      currentY += lineHeight;
+    }
+    if (npcInteraction.question_3 && npcInteraction.question_3.trim() !== '') {
+      ctx.fillText(npcInteraction.question_3, x + padding, currentY);
+      currentY += lineHeight;
+    }
+    if (npcInteraction.question_4 && npcInteraction.question_4.trim() !== '') {
+      ctx.fillText(npcInteraction.question_4, x + padding, currentY);
+      currentY += lineHeight;
     }
   }
 
@@ -2600,6 +2690,9 @@
         }
       }
 
+      // Draw NPC dialog (on top of everything but below inventory)
+      drawNPCDialog();
+      
       // Draw inventory last (on top of everything)
       drawInventory();
       
