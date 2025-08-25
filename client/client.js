@@ -250,6 +250,7 @@
     let spells = {}; // Store active spells by ID
     let electrocuteEffects = {}; // Store active electrocute effects by ID
     let healingEffects = {}; // Store active healing effects by ID
+    let silverMistEffects = {}; // Store active silver mist effects by ID
 
     // NEW: Simplified direction and animation state system
     let playerDirection = 'down'; // Current facing direction
@@ -1189,6 +1190,20 @@
           delete healingEffects[msg.effectId];
           console.log(`Healing effect ${msg.effectId} removed`);
           break;
+
+        case 'silver_mist_created':
+          silverMistEffects[msg.effectId] = {
+            id: msg.effectId,
+            x: msg.x,
+            y: msg.y
+          };
+          console.log(`Silver Mist effect ${msg.effectId} created at (${msg.x}, ${msg.y})`);
+          break;
+
+        case 'silver_mist_removed':
+          delete silverMistEffects[msg.effectId];
+          console.log(`Silver Mist effect ${msg.effectId} removed`);
+          break;
           
         case 'enemy_spawned':
           // Add new enemy to the client
@@ -1396,7 +1411,8 @@
           58: { cost: 20, result: -2 },   // Item 58 -> Teleport to map 1 (special case)
           97: { cost: 10, result: -3 },   // Item 97 -> Fire pillar spell (special case)
           100: { cost: 15, result: -4 },  // Item 100 -> Full heal spell (special case)
-          131: { cost: 20, result: -5 }   // Item 131 -> Partial heal spell (special case)
+          131: { cost: 20, result: -5 },  // Item 131 -> Partial heal spell (special case)
+          102: { cost: 20, result: -6 }   // Item 102 -> Silver Mist spell (special case)
         };
         
         // First check if item is consumable
@@ -1438,6 +1454,12 @@
               // Healing spells
               send({ 
                 type: 'use_heal_spell', 
+                itemId: handsItem
+              });
+            } else if (handsItem === 102) {
+              // Silver Mist spell
+              send({ 
+                type: 'use_silver_mist_spell', 
                 itemId: handsItem
               });
             } else {
@@ -2505,6 +2527,13 @@
             for (const [effectId, effect] of Object.entries(healingEffects)) {
               if (effect.x === x && effect.y === y) {
                 drawItemAtTile(screenX, screenY, 309);
+              }
+            }
+
+            // Draw silver mist effects after healing effects (renders item 290 for silver mist)
+            for (const [effectId, effect] of Object.entries(silverMistEffects)) {
+              if (effect.x === x && effect.y === y) {
+                drawItemAtTile(screenX, screenY, 290);
               }
             }
           }
