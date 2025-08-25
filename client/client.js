@@ -1353,8 +1353,8 @@
       }
       if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
 
-      // Inventory toggle with 'i' key
-      if (loggedIn && localPlayer && (e.key === 'i' || e.key === 'I')) {
+      // Inventory toggle with 'i' key (only when not in chat mode)
+      if (loggedIn && localPlayer && (e.key === 'i' || e.key === 'I') && !chatMode) {
         e.preventDefault();
         
         // End NPC interaction if active
@@ -1428,6 +1428,13 @@
       // Look command with 'l' key
       if (loggedIn && localPlayer && e.key === 'l') {
         e.preventDefault();
+        
+        // End NPC interaction if active
+        if (npcInteraction) {
+          npcInteraction = null;
+          console.log('Ended NPC interaction with l key');
+          return;
+        }
         
         // Close inventory if it's open
         if (inventoryVisible) {
@@ -2356,6 +2363,12 @@
     
     function drawChatInput() {
       if (!chatMode) return;
+      
+      // Draw yellow border rectangle when typing
+      ctx.strokeStyle = 'yellow';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(156, 411, 462, 42);
+      
       const { x1, y1, x2, y2, pad, extraY } = CHAT_INPUT;
       const w = x2 - x1;
       ctx.font = '12px monospace'; ctx.fillStyle = '#000'; ctx.textAlign = 'left';
@@ -2469,8 +2482,8 @@
       ctx.strokeStyle = textColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(x + padding, currentY + 2);
-      ctx.lineTo(x + width - padding, currentY + 2);
+      ctx.moveTo(x + padding, currentY - 11);
+      ctx.lineTo(x + width - padding, currentY - 11);
       ctx.stroke();
       currentY += 8; // Gap after line before description
     }
@@ -2716,7 +2729,7 @@
         ctx.font = 'bold 14px "Times New Roman", serif';
         ctx.fillStyle = 'yellow';
         ctx.textAlign = 'left';
-        ctx.fillText('*Warning* The window is not in focus. Click to regain focus.', 10, 30);
+        ctx.fillText('*Warning* The window is not in focus. Click to regain focus.', 10, 15);
       }
       drawChatHistory();
       drawChatInput();
