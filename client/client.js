@@ -1353,6 +1353,21 @@
       }
       if (connected && connectionPaused) { connectionPaused = false; showLoginGUI = true; return; }
 
+      // Inventory toggle with 'i' key
+      if (loggedIn && localPlayer && (e.key === 'i' || e.key === 'I')) {
+        e.preventDefault();
+        
+        // End NPC interaction if active
+        if (npcInteraction) {
+          npcInteraction = null;
+          console.log('Ended NPC interaction due to inventory toggle');
+        }
+        
+        // Toggle inventory visibility
+        inventoryVisible = !inventoryVisible;
+        return;
+      }
+
       // Toggle / submit chat
       if (e.key === 'Enter' && loggedIn) {
         if (!chatMode) { chatMode = true; typingBuffer = ""; }
@@ -2418,8 +2433,8 @@
     
     const { x, y, width, height, backgroundColor, borderColor, textColor, lineHeight, padding } = NPC_DIALOG;
     
-    // Draw background rectangle (same as inventory)
-    ctx.fillStyle = backgroundColor;
+    // Draw background rectangle with transparency (same as inventory)
+    ctx.fillStyle = 'rgba(0, 133, 182, 0.85)'; // Same transparency as inventory
     ctx.fillRect(x, y, width, height);
     
     // Draw border
@@ -2440,38 +2455,68 @@
       ctx.fillText(npcInteraction.name, x + padding, currentY);
       currentY += lineHeight;
       
-      // Draw horizontal line under name
+      // Draw horizontal line under name (moved up 14 pixels)
+      const lineY = currentY - 14;
       ctx.strokeStyle = textColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(x + padding, currentY);
-      ctx.lineTo(x + width - padding, currentY);
+      ctx.moveTo(x + padding, lineY);
+      ctx.lineTo(x + width - padding, lineY);
       ctx.stroke();
-      currentY += lineHeight;
+      currentY += lineHeight - 14; // Adjust for moved line
     }
     
-    // Draw description
+    // Draw description with word wrapping (moved up 14 pixels)
     if (npcInteraction.description) {
-      ctx.fillText(npcInteraction.description, x + padding, currentY);
-      currentY += lineHeight + 5; // Extra space after description
+      const descriptionY = currentY - 14;
+      const maxWidth = width - (padding * 2);
+      const words = npcInteraction.description.split(' ');
+      let line = '';
+      let lineCount = 0;
+      const maxLines = 2;
+      
+      for (let i = 0; i < words.length && lineCount < maxLines; i++) {
+        const testLine = line + words[i] + ' ';
+        const testWidth = ctx.measureText(testLine).width;
+        
+        if (testWidth > maxWidth && line !== '') {
+          // Draw current line and start new one
+          ctx.fillText(line.trim(), x + padding, descriptionY + (lineCount * lineHeight));
+          line = words[i] + ' ';
+          lineCount++;
+        } else {
+          line = testLine;
+        }
+      }
+      
+      // Draw the last line if there's content and we haven't exceeded max lines
+      if (line.trim() !== '' && lineCount < maxLines) {
+        ctx.fillText(line.trim(), x + padding, descriptionY + (lineCount * lineHeight));
+        lineCount++;
+      }
+      
+      currentY += (lineCount * lineHeight) + 5 - 14; // Extra space after description, adjusted for move
     }
     
-    // Draw questions
+    // Draw questions (moved down 14 pixels)
+    const questionsY = currentY + 14;
+    let questionY = questionsY;
+    
     if (npcInteraction.question_1 && npcInteraction.question_1.trim() !== '') {
-      ctx.fillText(npcInteraction.question_1, x + padding, currentY);
-      currentY += lineHeight;
+      ctx.fillText(npcInteraction.question_1, x + padding, questionY);
+      questionY += lineHeight;
     }
     if (npcInteraction.question_2 && npcInteraction.question_2.trim() !== '') {
-      ctx.fillText(npcInteraction.question_2, x + padding, currentY);
-      currentY += lineHeight;
+      ctx.fillText(npcInteraction.question_2, x + padding, questionY);
+      questionY += lineHeight;
     }
     if (npcInteraction.question_3 && npcInteraction.question_3.trim() !== '') {
-      ctx.fillText(npcInteraction.question_3, x + padding, currentY);
-      currentY += lineHeight;
+      ctx.fillText(npcInteraction.question_3, x + padding, questionY);
+      questionY += lineHeight;
     }
     if (npcInteraction.question_4 && npcInteraction.question_4.trim() !== '') {
-      ctx.fillText(npcInteraction.question_4, x + padding, currentY);
-      currentY += lineHeight;
+      ctx.fillText(npcInteraction.question_4, x + padding, questionY);
+      questionY += lineHeight;
     }
   }
 
