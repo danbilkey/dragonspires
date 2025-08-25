@@ -1436,6 +1436,17 @@
         console.log(`Debug: Player state - hands: ${localPlayer.hands}, magic: ${localPlayer.magic}`);
       }
 
+      // Handle NPC interaction number keys (1-5) - only when not in chat mode
+      if (loggedIn && localPlayer && npcInteraction && /^[1-5]$/.test(e.key) && !chatMode) {
+        e.preventDefault();
+        // Send the number as a chat message to trigger NPC interaction
+        send({ 
+          type: 'chat', 
+          text: e.key 
+        });
+        return;
+      }
+
       // Look command with 'l' key
       if (loggedIn && localPlayer && e.key === 'l') {
         e.preventDefault();
@@ -2572,21 +2583,6 @@
   function drawNPCShopDialog(npcDetails, x, y, width, height, textColor, lineHeight, padding, shopType) {
     let currentY = y + padding + 12;
     
-    // Draw NPC name
-    if (npcDetails.name) {
-      ctx.fillText(npcDetails.name, x + padding, currentY);
-      currentY += lineHeight;
-      
-      // Draw horizontal line
-      ctx.strokeStyle = textColor;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x + padding, currentY - 11);
-      ctx.lineTo(x + width - padding, currentY - 11);
-      ctx.stroke();
-      currentY += 8;
-    }
-    
     // Draw table headers
     const valueColumnX = x + (width * 0.75); // 75% across the dialog
     
@@ -2601,15 +2597,15 @@
     ctx.moveTo(x + padding, currentY);
     ctx.lineTo(x + width - padding, currentY);
     ctx.stroke();
-    currentY += 5;
+    currentY += 10; // Space after header line
     
     // Draw vertical line for column separator
     ctx.beginPath();
     ctx.moveTo(valueColumnX - 5, y + padding + 12 + lineHeight);
-    ctx.lineTo(valueColumnX - 5, currentY + (4 * lineHeight) + 20);
+    ctx.lineTo(valueColumnX - 5, currentY + (4 * 32) + 20); // Adjusted for 32px spacing
     ctx.stroke();
     
-    // Draw shop items
+    // Draw shop items with 32px vertical spacing
     for (let i = 1; i <= 4; i++) {
       const itemKey = `${shopType}_item_${i}`;
       const priceKey = `${shopType}_price_${i}`;
@@ -2620,43 +2616,48 @@
       if (itemId > 0) {
         const itemDetails = getItemDetails(itemId);
         if (itemDetails) {
-          currentY += lineHeight;
+          currentY += 32; // 32px vertical spacing
+          
+          // Draw item image if available (full size)
+          if (window.getItemMeta && window.itemsReady()) {
+            const meta = window.getItemMeta(itemId);
+            if (meta && meta.img && meta.img.complete) {
+              ctx.drawImage(meta.img, x + padding + 15, currentY - 16, 32, 32); // Full size 32x32
+            }
+          }
           
           // Draw item number and name
           let itemText = `${i}. ${itemDetails.name}`;
           // Truncate if too long
-          const maxTextWidth = (valueColumnX - 5) - (x + padding + 20); // Leave space for item image
+          const maxTextWidth = (valueColumnX - 5) - (x + padding + 55); // Leave space for full-size item image
           while (ctx.measureText(itemText).width > maxTextWidth && itemText.length > 10) {
             itemText = itemText.slice(0, -1);
           }
           
-          // Draw item image if available
-          if (window.getItemMeta && window.itemsReady()) {
-            const meta = window.getItemMeta(itemId);
-            if (meta && meta.img && meta.img.complete) {
-              ctx.drawImage(meta.img, x + padding + 15, currentY - 12, 16, 16);
-            }
-          }
+          ctx.fillText(itemText, x + padding + 55, currentY);
           
-          ctx.fillText(itemText, x + padding + 35, currentY);
-          
-          // Draw price and gold pile
+          // Draw price
           ctx.fillText(`${price}`, valueColumnX, currentY);
           
-          // Draw gold pile image (item #25)
+          // Draw gold pile image (item #25) - keeping smaller size for price display
           if (window.getItemMeta && window.itemsReady()) {
             const goldMeta = window.getItemMeta(25);
             if (goldMeta && goldMeta.img && goldMeta.img.complete) {
-              ctx.drawImage(goldMeta.img, valueColumnX + 30, currentY - 12, 12, 12);
+              ctx.drawImage(goldMeta.img, valueColumnX + 30, currentY - 8, 16, 16);
             }
           }
         }
       }
     }
     
-    // Add "5. Return to main menu" option
-    currentY += lineHeight * 2;
-    ctx.fillText('5. Return to main menu', x + padding, currentY);
+    // Add "5. Return to main menu" option at bottom center in evergreen color
+    currentY += 50; // Extra space before return option
+    ctx.fillStyle = 'rgb(0, 128, 0)'; // Evergreen color
+    const returnText = '5. Return to main menu';
+    const returnTextWidth = ctx.measureText(returnText).width;
+    const centerX = x + (width / 2) - (returnTextWidth / 2);
+    ctx.fillText(returnText, centerX, currentY);
+    ctx.fillStyle = textColor; // Reset to yellow
   }
 
     // ---------- SCENES ----------
