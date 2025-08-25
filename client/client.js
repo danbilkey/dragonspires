@@ -1724,7 +1724,12 @@
     // Inventory navigation when inventory is visible
     if (loggedIn && localPlayer && inventoryVisible) {
       const k = e.key.toLowerCase();
-      if (k === 'w' || k === 'arrowup') {
+      if (k === 'l') {
+        // Close inventory when 'l' is pressed
+        e.preventDefault();
+        inventoryVisible = false;
+        return;
+      } else if (k === 'w' || k === 'arrowup') {
         e.preventDefault();
         moveInventorySelection('up');
         return;
@@ -2466,9 +2471,9 @@
       currentY += lineHeight - 14; // Adjust for moved line
     }
     
-    // Draw description with word wrapping (moved up 14 pixels)
+    // Draw description with word wrapping (moved down 10 pixels from original position)
     if (npcInteraction.description) {
-      const descriptionY = currentY - 14;
+      const descriptionY = currentY + 10;
       const maxWidth = width - (padding * 2);
       const words = npcInteraction.description.split(' ');
       let line = '';
@@ -2495,7 +2500,7 @@
         lineCount++;
       }
       
-      currentY += (lineCount * lineHeight) + 5 - 14; // Extra space after description, adjusted for move
+      currentY += (lineCount * lineHeight) + 5 + 10; // Extra space after description, adjusted for move
     }
     
     // Draw questions (moved down 14 pixels)
