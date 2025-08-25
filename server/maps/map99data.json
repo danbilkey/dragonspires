@@ -1,0 +1,55 @@
+{
+  "start": "32,32",
+  "exits": "0,0,0,0",
+  "stamval": -5,
+  "diemap": 1,
+  "allowupload": false,
+  "maxuploads": 7,
+  "allowcombat": true,
+  "combatarea": "0,0,64,64",
+  "portals": [
+    "30,30,1,41,37"
+  ],
+  "readables": [
+    {
+      "coordinates": "34,34",
+      "message": "The sign reads: You shouldn't be here..."
+    }
+  ],
+  "holders": [
+    {
+      "coordinates": "21,35",
+      "item": 285
+    },
+    {
+      "coordinates": "33,24",
+      "item": 345
+    },
+    {
+      "coordinates": "41,38",
+      "item": 156
+    }
+  ],
+  "enemies": [
+    {
+      "type": 8,
+      "coordinates": "40,38"
+    },
+    {
+      "type": 7,
+      "coordinates": "22,35"
+    },
+    {
+      "type": 12,
+      "coordinates": "33,25"
+    },
+    {
+      "type": 8,
+      "coordinates": "34,37"
+    },
+    {
+      "type": 12,
+      "coordinates": "23,31"
+    }
+  ]
+}
