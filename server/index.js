@@ -684,6 +684,8 @@ function getEnemyDetails(enemyType) {
 // NPC details loading and management
 let npcDetails = [];
 let npcDetailsReady = false;
+let npcLocations = []; // Store NPC locations for quick lookup: { type, x, y, mapId }
+let npcSpeakerPhaseIndex = 0; // Global phrase index for all speaker NPCs
 
 async function loadNPCDetails() {
   try {
@@ -787,6 +789,29 @@ function getNPCDetails(npcType) {
     return null;
   }
   return npcDetails[npcType - 1];
+}
+
+// Load NPC locations from map data
+function loadNPCLocations() {
+  npcLocations = [];
+  
+  // Load NPCs from all map data files
+  for (let mapId = 1; mapId <= 4; mapId++) {
+    const mapData = getMapData(mapId);
+    if (mapData && mapData.npcs) {
+      for (const npc of mapData.npcs) {
+        const [x, y] = npc.coordinates.split(',').map(Number);
+        npcLocations.push({
+          type: npc.type,
+          x: x,
+          y: y,
+          mapId: mapId
+        });
+      }
+    }
+  }
+  
+  console.log(`Loaded ${npcLocations.length} NPC locations from map data`);
 }
 
 function getRandomItemByTypes(types) {
@@ -1139,6 +1164,9 @@ async function reloadGameData() {
     
     // Reload NPC details
     await loadNPCDetails();
+    
+    // Load NPC locations from map data
+    loadNPCLocations();
     
     // Reload floor collision data
     await loadFloorCollision();
@@ -5310,6 +5338,60 @@ setInterval(async () => {
   }
 }, 30000);
 
+// NPC Speaker system - runs every 30 seconds
+setInterval(() => {
+  if (!npcDetailsReady || !npcDetails || npcLocations.length === 0) return;
+  
+  // Get all valid phrases from all speaker NPCs for current phase
+  const speakerPhrases = [];
+  const currentPhaseIndex = npcSpeakerPhaseIndex % 4; // 0,1,2,3 cycle
+  const phraseKey = `speaker_phrase_${currentPhaseIndex + 1}`;
+  
+  for (const npcLocation of npcLocations) {
+    const npcDetails = getNPCDetails(npcLocation.type);
+    if (npcDetails && npcDetails.speaker && npcDetails[phraseKey] && npcDetails[phraseKey].trim() !== '') {
+      speakerPhrases.push({
+        phrase: npcDetails[phraseKey],
+        npcLocation: npcLocation
+      });
+    }
+  }
+  
+  // Send phrases to players within range
+  for (const speakerData of speakerPhrases) {
+    const { phrase, npcLocation } = speakerData;
+    
+    // Find all players within 6-tile square range
+    for (const [ws, playerData] of clients.entries()) {
+      if (playerData && playerData.map_id === npcLocation.mapId) {
+        const dx = Math.abs(playerData.pos_x - npcLocation.x);
+        const dy = Math.abs(playerData.pos_y - npcLocation.y);
+        
+        // Check if player is within 6-tile square range and within map bounds
+        if (dx <= 6 && dy <= 6) {
+          // Ensure we don't extend beyond map boundaries
+          const playerInBounds = playerData.pos_x >= 0 && playerData.pos_x < MAP_WIDTH && 
+                                playerData.pos_y >= 0 && playerData.pos_y < MAP_HEIGHT;
+          const npcInBounds = npcLocation.x >= 0 && npcLocation.x < MAP_WIDTH && 
+                             npcLocation.y >= 0 && npcLocation.y < MAP_HEIGHT;
+          
+          if (playerInBounds && npcInBounds) {
+            send(ws, {
+              type: 'chat',
+              text: phrase,
+              color: 'black'
+            });
+          }
+        }
+      }
+    }
+  }
+  
+  // Advance to next phrase index for all NPCs
+  npcSpeakerPhaseIndex = (npcSpeakerPhaseIndex + 1) % 4;
+  
+}, 30000); // 30 seconds
+
 // Enemy AI loop - process every 500ms
 setInterval(async () => {
   try {
@@ -5326,5 +5408,10 @@ loadFloorCollision();
 
 // Initialize NPC details
 loadNPCDetails();
+
+// Load NPC locations after all maps are loaded
+setTimeout(() => {
+  loadNPCLocations();
+}, 1000); // Delay to ensure maps are loaded first
 
 server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
