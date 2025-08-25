@@ -401,7 +401,7 @@ async function handleSpellCollision(spell, collision) {
         send(ws, {
           type: 'chat',
           text: `Your Fire Pillar spell deals 5 damage to ${enemyName}!`,
-          color: 'red'
+          color: 'purple'
         });
         break;
       }
@@ -1302,6 +1302,7 @@ async function playerAttackEnemy(playerData, playerWs) {
 
   // Check for electrocute spell if player has item #99 in hands
   let electrocuteTriggered = false;
+  let electrocuteEnemyName = '';
   if (playerData.hands === 99 && (playerData.magic || 0) >= 5) {
     // Deduct magic cost
     playerData.magic = Math.max(0, (playerData.magic || 0) - 5);
@@ -1321,16 +1322,9 @@ async function playerAttackEnemy(playerData, playerWs) {
     // Deal electrocute damage (2 damage)
     targetEnemy.hp = Math.max(0, targetEnemy.hp - 2);
     
-    // Get enemy name for chat message
+    // Store enemy name for later message
     const enemyDetails = targetEnemy.details;
-    const enemyName = enemyDetails?.name || `Enemy ${targetEnemy.enemy_type}`;
-    
-    // Send electrocute message to player
-    send(playerWs, { 
-      type: 'chat', 
-      text: `Your attack also electrocutes ${enemyName} for 2 damage!`,
-      color: 'red'
-    });
+    electrocuteEnemyName = enemyDetails?.name || `Enemy ${targetEnemy.enemy_type}`;
     
     console.log(`Player ${playerData.username} electrocuted enemy ${targetEnemy.id} for 2 damage, enemy HP now: ${targetEnemy.hp}`);
   }
@@ -1373,6 +1367,15 @@ async function playerAttackEnemy(playerData, playerWs) {
   // Send attack message to player
   const enemyName = enemyDetails?.name || `Enemy ${targetEnemy.enemy_type}`;
   send(playerWs, { type: 'chat', text: `~ You attack ${enemyName} for ${finalDamage} damage!` });
+  
+  // Send electrocute message after attack message if electrocute triggered
+  if (electrocuteTriggered) {
+    send(playerWs, { 
+      type: 'chat', 
+      text: `Your attack also electrocutes ${electrocuteEnemyName} for 2 damage!`,
+      color: 'purple'
+    });
+  }
 
   // Apply damage to enemy
   const oldHp = targetEnemy.hp;
