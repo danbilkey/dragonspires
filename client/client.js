@@ -1305,6 +1305,7 @@
 
       // Capture chat text
       if (chatMode) {
+        console.log(`Debug: In chat mode, ignoring key: ${e.key}`);
         if (e.key === 'Backspace') { typingBuffer = typingBuffer.slice(0, -1); e.preventDefault(); }
         else if (e.key.length === 1 && typingBuffer.length < CHAT_INPUT.maxLen) typingBuffer += e.key;
         return;
@@ -1330,9 +1331,10 @@
         return;
       }
 
-      // Debug: Log all key presses when logged in
+      // Debug: Log all key presses and state
+      console.log(`Debug: Key pressed: '${e.key}', loggedIn=${loggedIn}, localPlayer=${!!localPlayer}`);
       if (loggedIn && localPlayer) {
-        console.log(`Debug: Key pressed: '${e.key}' (code: ${e.code})`);
+        console.log(`Debug: Player state - hands: ${localPlayer.hands}, magic: ${localPlayer.magic}`);
       }
 
       // Look command with 'l' key
