@@ -681,6 +681,114 @@ function getEnemyDetails(enemyType) {
   return enemyDetails[enemyType - 1];
 }
 
+// NPC details loading and management
+let npcDetails = [];
+let npcDetailsReady = false;
+
+async function loadNPCDetails() {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    
+    const possiblePaths = [
+      path.join(__dirname, 'assets', 'npcdetails.json'),
+      path.join(__dirname, '..', 'assets', 'npcdetails.json'),
+      path.join(__dirname, '..', 'client', 'assets', 'npcdetails.json'),
+      path.join(__dirname, '..', 'server', 'assets', 'npcdetails.json'),
+      path.join(process.cwd(), 'assets', 'npcdetails.json'),
+      path.join(process.cwd(), 'client', 'assets', 'npcdetails.json'),
+      path.join(process.cwd(), 'server', 'assets', 'npcdetails.json'),
+      // Additional paths for potential Render deployment structure
+      path.join(process.cwd(), 'src', 'server', 'assets', 'npcdetails.json'),
+      path.join(process.cwd(), 'src', 'assets', 'npcdetails.json'),
+      path.join(process.cwd(), 'src', 'client', 'assets', 'npcdetails.json')
+    ];
+    
+    let data = null;
+    let usedPath = null;
+    
+    for (const npcDetailsPath of possiblePaths) {
+      try {
+        data = await fs.readFile(npcDetailsPath, 'utf8');
+        usedPath = npcDetailsPath;
+        break;
+      } catch (err) {
+        // Try next path
+        continue;
+      }
+    }
+    
+    if (!data) {
+      console.error('Could not find npcdetails.json in any of the expected paths');
+      npcDetailsReady = true; // Don't block server startup
+      return;
+    }
+    
+    const parsed = JSON.parse(data);
+    
+    if (parsed && Array.isArray(parsed.npc)) {
+      npcDetails = parsed.npc.map((npc, index) => ({
+        id: index + 1,
+        name: npc.name,
+        description: npc.description,
+        item_number: npc.item_number,
+        shop: npc.shop === "true",
+        quest_giver: npc.quest_giver === "true",
+        quest_complete: npc.quest_complete === "true",
+        quest_item_required: npc.quest_item_required,
+        quest_item_reward: npc.quest_item_reward,
+        speaker: npc.speaker === "true",
+        speaker_phrase_1: npc.speaker_phrase_1,
+        speaker_phrase_2: npc.speaker_phrase_2,
+        speaker_phrase_3: npc.speaker_phrase_3,
+        speaker_phrase_4: npc.speaker_phrase_4,
+        question_1: npc.question_1,
+        question_2: npc.question_2,
+        question_3: npc.question_3,
+        question_4: npc.question_4,
+        response_1: npc.response_1,
+        response_2: npc.response_2,
+        response_3: npc.response_3,
+        response_4: npc.response_4,
+        buy_item_1: npc.buy_item_1,
+        buy_item_2: npc.buy_item_2,
+        buy_item_3: npc.buy_item_3,
+        buy_item_4: npc.buy_item_4,
+        buy_price_1: npc.buy_price_1,
+        buy_price_2: npc.buy_price_2,
+        buy_price_3: npc.buy_price_3,
+        buy_price_4: npc.buy_price_4,
+        sell_item_1: npc.sell_item_1,
+        sell_item_2: npc.sell_item_2,
+        sell_item_3: npc.sell_item_3,
+        sell_item_4: npc.sell_item_4,
+        sell_price_1: npc.sell_price_1,
+        sell_price_2: npc.sell_price_2,
+        sell_price_3: npc.sell_price_3,
+        sell_price_4: npc.sell_price_4
+      }));
+    } else {
+      console.error('Invalid npcdetails.json format');
+      npcDetailsReady = true;
+      return;
+    }
+  } catch (error) {
+    console.error('Error loading NPC details:', error);
+    npcDetailsReady = true;
+    return;
+  }
+  
+  npcDetailsReady = true;
+  console.log(`Server loaded ${npcDetails.length} NPC details from: ${usedPath}`);
+}
+
+function getNPCDetails(npcType) {
+  if (!npcDetailsReady || !npcDetails || npcType < 1 || npcType > npcDetails.length) {
+    return null;
+  }
+  return npcDetails[npcType - 1];
+}
+
 function getRandomItemByTypes(types) {
   if (!itemDetailsReady || !itemDetails) return 0;
   
@@ -1028,6 +1136,9 @@ async function reloadGameData() {
     
     // Reload item details
     await loadItemDetails();
+    
+    // Reload NPC details
+    await loadNPCDetails();
     
     // Reload floor collision data
     await loadFloorCollision();
@@ -2942,6 +3053,13 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'move') {
       if (!playerData) return;
       
+      // End NPC interaction on movement
+      if (playerData.npcInteraction) {
+        playerData.npcInteraction = null;
+        send(ws, { type: 'npc_interaction_end' });
+        console.log(`Player ${playerData.username} ended NPC interaction due to movement`);
+      }
+      
       // Cancel resting when moving
       if (playerData.isResting) {
         playerData.isResting = false;
@@ -3246,6 +3364,13 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'attack') {
       if (!playerData) return;
       
+      // End NPC interaction on attack
+      if (playerData.npcInteraction) {
+        playerData.npcInteraction = null;
+        send(ws, { type: 'npc_interaction_end' });
+        console.log(`Player ${playerData.username} ended NPC interaction due to attack`);
+      }
+      
       // Cancel resting when attacking
       if (playerData.isResting) {
         playerData.isResting = false;
@@ -3528,6 +3653,13 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'pickup_item') {
       if (!playerData) return;
+      
+      // End NPC interaction on pickup/drop
+      if (playerData.npcInteraction) {
+        playerData.npcInteraction = null;
+        send(ws, { type: 'npc_interaction_end' });
+        console.log(`Player ${playerData.username} ended NPC interaction due to pickup/drop`);
+      }
       
       // Check if item at current position is item 201 (drop container)
       const playerMapSpec = getMapSpec(playerData.map_id);
@@ -4544,7 +4676,35 @@ wss.on('connection', (ws) => {
       // Get map data for readables
       const mapData = getMapData(playerData.map_id);
       
-      // Check for readables first
+      // Check for NPCs first (highest priority)
+      if (mapData && mapData.npcs) {
+        const coordinateString = `${adjacentPos.x},${adjacentPos.y}`;
+        const npc = mapData.npcs.find(n => n.coordinates === coordinateString);
+        
+        if (npc) {
+          // Found an NPC - start interaction
+          const npcDetails = getNPCDetails(npc.type);
+          if (npcDetails) {
+            // Set NPC interaction state for this player
+            playerData.npcInteraction = {
+              npcType: npc.type,
+              npcDetails: npcDetails,
+              position: { x: adjacentPos.x, y: adjacentPos.y }
+            };
+            
+            // Send NPC interaction data to client
+            send(ws, {
+              type: 'npc_interaction_start',
+              npcDetails: npcDetails
+            });
+            
+            console.log(`Player ${playerData.username} started NPC interaction with type ${npc.type}`);
+            return;
+          }
+        }
+      }
+      
+      // Check for readables second
       if (mapData && mapData.readables) {
         const coordinateString = `${adjacentPos.x},${adjacentPos.y}`;
         const readable = mapData.readables.find(r => r.coordinates === coordinateString);
@@ -4605,6 +4765,29 @@ wss.on('connection', (ws) => {
       if (!playerData || typeof msg.text !== 'string') return;
       const t = msg.text.trim();
       if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
+
+      // Check if player is in NPC interaction and entered 1-4
+      if (playerData.npcInteraction && /^[1-4]$/.test(t)) {
+        const npcDetails = playerData.npcInteraction.npcDetails;
+        
+        // Check if it's a question/response NPC (not shop or quest giver)
+        if (!npcDetails.shop && !npcDetails.quest_giver) {
+          const responseKey = `response_${t}`;
+          const response = npcDetails[responseKey];
+          
+          if (response && response.trim() !== '') {
+            // Send NPC response with pink color
+            send(ws, { 
+              type: 'chat', 
+              text: response,
+              color: 'pink'
+            });
+          }
+        }
+        
+        // Don't send the "1", "2", etc. to chat - interaction is handled
+        return;
+      }
 
       // Check for -resetserver admin command
       if (t.toLowerCase() === '-resetserver') {
@@ -5140,5 +5323,8 @@ const PORT = process.env.PORT || 3000;
 
 // Initialize floor collision data
 loadFloorCollision();
+
+// Initialize NPC details
+loadNPCDetails();
 
 server.listen(PORT, '0.0.0.0', () => console.log(`Server listening on ${PORT}`));
