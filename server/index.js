@@ -4798,8 +4798,68 @@ wss.on('connection', (ws) => {
       if (playerData.npcInteraction && /^[1-4]$/.test(t)) {
         const npcDetails = playerData.npcInteraction.npcDetails;
         
-        // Check if it's a question/response NPC (not shop or quest giver)
-        if (!npcDetails.shop && !npcDetails.quest_giver) {
+        // Handle quest giver NPCs
+        if (npcDetails.quest_giver && t === '4') {
+          const playerHandsItem = playerData.hands || 0;
+          const questItemRequired = npcDetails.quest_item_required || 0;
+          const questItemReward = npcDetails.quest_item_reward || 0;
+          
+          // Check if player has nothing in hands
+          if (playerHandsItem === 0) {
+            send(ws, {
+              type: 'chat',
+              text: `There is nothing in your hands to give to ${npcDetails.name}.`,
+              color: 'black'
+            });
+          }
+          // Check if player has the required quest item
+          else if (playerHandsItem === questItemRequired && questItemRequired > 0) {
+            // Validate that the reward item exists
+            const rewardItemDetails = getItemDetails(questItemReward);
+            if (rewardItemDetails && questItemReward > 0) {
+              // Complete the quest: give reward item
+              playerData.hands = questItemReward;
+              
+              // Update database
+              await updateStatsInDb(playerData.id, { hands: playerData.hands });
+              
+              // Send equipment update to client and broadcast to other players
+              broadcast({
+                type: 'player_equipment_update',
+                id: playerData.id,
+                hands: playerData.hands
+              });
+              
+              // Send quest completion response in gold color
+              if (npcDetails.response_4 && npcDetails.response_4.trim() !== '') {
+                send(ws, {
+                  type: 'chat',
+                  text: npcDetails.response_4,
+                  color: 'gold'
+                });
+              }
+              
+              console.log(`Player ${playerData.username} completed quest for NPC ${npcDetails.name}, gave item ${questItemRequired}, received item ${questItemReward}`);
+            } else {
+              // Invalid reward item
+              send(ws, {
+                type: 'chat',
+                text: `${npcDetails.name} seems uninterested in the item in your hands.`,
+                color: 'black'
+              });
+            }
+          }
+          // Player has wrong item or quest_item_required is 0
+          else {
+            send(ws, {
+              type: 'chat',
+              text: `${npcDetails.name} seems uninterested in the item in your hands.`,
+              color: 'black'
+            });
+          }
+        }
+        // Handle regular question/response NPCs (including quest NPCs for responses 1-3)
+        else if (!npcDetails.shop) {
           const responseKey = `response_${t}`;
           const response = npcDetails[responseKey];
           
