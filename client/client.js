@@ -2618,42 +2618,42 @@
       if (itemId > 0) {
         const itemDetails = getItemDetails(itemId);
         if (itemDetails) {
-          // Draw item number to the left of the image
-          ctx.fillText(`${i}.`, x + padding, currentY + 16); // Centered with image
+          // Draw item number to the left of the image with y:-16 offset
+          ctx.fillText(`${i}.`, x + padding, currentY + 16 - 16); // y:-16 offset
           
-          // Draw item image if available (original size, no scaling)
+          // Draw item image if available (original size, no scaling) with x:-16, y:-20 offset
           const imageX = x + padding + 20; // Space after number
           const imageY = currentY; // Image Y position
           if (window.getItemMeta && window.itemsReady()) {
             const meta = window.getItemMeta(itemId);
             if (meta && meta.img && meta.img.complete) {
-              // Draw at original size - no scaling
+              // Draw at original size with x:-16, y:-20 offset
               const originalWidth = meta.img.naturalWidth || meta.img.width;
               const originalHeight = meta.img.naturalHeight || meta.img.height;
-              ctx.drawImage(meta.img, imageX, imageY, originalWidth, originalHeight);
+              ctx.drawImage(meta.img, imageX - 16, imageY - 20, originalWidth, originalHeight);
             }
           }
           
-          // Draw item name to the right of the image
+          // Draw item name to the right of the image with y:-16 offset
           let itemText = itemDetails.name;
           const nameX = imageX + 35; // Space after image
           const maxTextWidth = (valueColumnX - 10) - nameX; // Leave space before value column
           while (ctx.measureText(itemText).width > maxTextWidth && itemText.length > 10) {
             itemText = itemText.slice(0, -1);
           }
-          ctx.fillText(itemText, nameX, currentY + 16); // Aligned with image center
+          ctx.fillText(itemText, nameX, currentY + 16 - 16); // y:-16 offset
           
-          // Draw price
-          ctx.fillText(`${price}`, valueColumnX, currentY + 16);
+          // Draw price with y:-16 offset
+          ctx.fillText(`${price}`, valueColumnX, currentY + 16 - 16); // y:-16 offset
           
-          // Draw gold pile image aligned with text
+          // Draw gold pile image with x:-23, y:-24 offset
           if (window.getItemMeta && window.itemsReady()) {
             const goldMeta = window.getItemMeta(25);
             if (goldMeta && goldMeta.img && goldMeta.img.complete) {
-              // Draw at original size, aligned with text
+              // Draw at original size with x:-23, y:-24 offset
               const goldOriginalWidth = goldMeta.img.naturalWidth || goldMeta.img.width;
               const goldOriginalHeight = goldMeta.img.naturalHeight || goldMeta.img.height;
-              ctx.drawImage(goldMeta.img, valueColumnX + 30, currentY + 16 - (goldOriginalHeight / 2), goldOriginalWidth, goldOriginalHeight);
+              ctx.drawImage(goldMeta.img, valueColumnX + 30 - 23, currentY + 16 - (goldOriginalHeight / 2) - 24, goldOriginalWidth, goldOriginalHeight);
             }
           }
           
@@ -2668,7 +2668,7 @@
     const returnText = '5. Return to main menu';
     const returnTextWidth = ctx.measureText(returnText).width;
     const centerX = x + (width / 2) - (returnTextWidth / 2);
-    ctx.fillText(returnText, centerX, currentY);
+    ctx.fillText(returnText, centerX, currentY - 16); // y:-16 offset
     ctx.fillStyle = textColor; // Reset to yellow
   }
 
