@@ -2662,13 +2662,20 @@
       }
     }
     
-    // Add "5. Return to main menu" option at bottom center in evergreen color
+    // Add "5. Return to main menu" option at bottom center with new color and black background
     currentY += 20; // Space before return option
-    ctx.fillStyle = 'rgb(0, 128, 0)'; // Evergreen color
     const returnText = '5. Return to main menu';
     const returnTextWidth = ctx.measureText(returnText).width;
     const centerX = x + (width / 2) - (returnTextWidth / 2);
-    ctx.fillText(returnText, centerX, currentY - 16); // y:-16 offset
+    const returnTextY = currentY - 16 + 14; // y:-16 then y:+14 offset
+    
+    // Draw black background for text (like player names)
+    ctx.fillStyle = 'black';
+    ctx.fillRect(centerX - 2, returnTextY - 12, returnTextWidth + 4, 14);
+    
+    // Draw the text with new green color
+    ctx.fillStyle = 'rgb(34, 177, 76)'; // New green color
+    ctx.fillText(returnText, centerX, returnTextY);
     ctx.fillStyle = textColor; // Reset to yellow
   }
 
