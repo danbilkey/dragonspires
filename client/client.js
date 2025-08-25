@@ -248,6 +248,7 @@
     let otherPlayers = {};
     let enemies = {}; // Store enemies by ID
     let spells = {}; // Store active spells by ID
+    let electrocuteEffects = {}; // Store active electrocute effects by ID
 
     // NEW: Simplified direction and animation state system
     let playerDirection = 'down'; // Current facing direction
@@ -1158,6 +1159,20 @@
         case 'spell_removed':
           delete spells[msg.spellId];
           console.log(`Spell ${msg.spellId} removed`);
+          break;
+
+        case 'electrocute_created':
+          electrocuteEffects[msg.effectId] = {
+            id: msg.effectId,
+            x: msg.x,
+            y: msg.y
+          };
+          console.log(`Electrocute effect ${msg.effectId} created at (${msg.x}, ${msg.y})`);
+          break;
+
+        case 'electrocute_removed':
+          delete electrocuteEffects[msg.effectId];
+          console.log(`Electrocute effect ${msg.effectId} removed`);
           break;
           
         case 'enemy_spawned':
@@ -2452,6 +2467,13 @@
             for (const [spellId, spell] of Object.entries(spells)) {
               if (spell.currentX === x && spell.currentY === y && spell.mapId === localPlayer.map_id) {
                 drawItemAtTile(screenX, screenY, spell.itemId);
+              }
+            }
+
+            // Draw electrocute effects after spells (renders item 291 for electrocute)
+            for (const [effectId, effect] of Object.entries(electrocuteEffects)) {
+              if (effect.x === x && effect.y === y) {
+                drawItemAtTile(screenX, screenY, 291);
               }
             }
           }
