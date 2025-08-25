@@ -791,6 +791,140 @@ function getNPCDetails(npcType) {
   return npcDetails[npcType - 1];
 }
 
+// Handle shop buy transactions
+async function handleShopBuy(playerData, ws, npcDetails, option) {
+  if (option < 1 || option > 4) return;
+  
+  const buyItemKey = `buy_item_${option}`;
+  const buyPriceKey = `buy_price_${option}`;
+  
+  const itemToBuy = npcDetails[buyItemKey] || 0;
+  const price = npcDetails[buyPriceKey] || 0;
+  
+  // Ignore if no item in this slot
+  if (itemToBuy === 0) return;
+  
+  // Validate item exists
+  const itemDetails = getItemDetails(itemToBuy);
+  if (!itemDetails) return;
+  
+  // Check if hands are empty
+  if (playerData.hands && playerData.hands > 0) {
+    send(ws, {
+      type: 'chat',
+      text: '~ Your hands are too full to hold another item.',
+      color: 'black'
+    });
+    return;
+  }
+  
+  // Check if player has enough gold
+  const playerGold = playerData.gold || 0;
+  if (playerGold < price) {
+    send(ws, {
+      type: 'chat',
+      text: '~ You do not have enough gold to buy this.',
+      color: 'black'
+    });
+    return;
+  }
+  
+  // Complete the purchase
+  playerData.hands = itemToBuy;
+  playerData.gold = playerGold - price;
+  
+  // Update database
+  await updateStatsInDb(playerData.id, { 
+    hands: playerData.hands,
+    gold: playerData.gold 
+  });
+  
+  // Send equipment update to client and broadcast to other players
+  broadcast({
+    type: 'player_equipment_update',
+    id: playerData.id,
+    hands: playerData.hands
+  });
+  
+  // Send stats update for gold
+  send(ws, { 
+    type: 'stats_update', 
+    id: playerData.id, 
+    gold: playerData.gold 
+  });
+  
+  // Send success message
+  send(ws, {
+    type: 'chat',
+    text: `You bought a ${itemDetails.name} for ${price} gold!`,
+    color: 'gold'
+  });
+  
+  console.log(`Player ${playerData.username} bought ${itemDetails.name} for ${price} gold from NPC ${npcDetails.name}`);
+}
+
+// Handle shop sell transactions
+async function handleShopSell(playerData, ws, npcDetails, option) {
+  if (option < 1 || option > 4) return;
+  
+  const sellItemKey = `sell_item_${option}`;
+  const sellPriceKey = `sell_price_${option}`;
+  
+  const itemToSell = npcDetails[sellItemKey] || 0;
+  const price = npcDetails[sellPriceKey] || 0;
+  
+  // Ignore if no item in this slot
+  if (itemToSell === 0) return;
+  
+  // Validate item exists
+  const itemDetails = getItemDetails(itemToSell);
+  if (!itemDetails) return;
+  
+  // Check if player has the correct item in hands
+  const playerHandsItem = playerData.hands || 0;
+  if (playerHandsItem !== itemToSell) {
+    send(ws, {
+      type: 'chat',
+      text: `~ You don't seem to have ${itemDetails.name} in your hands.`,
+      color: 'black'
+    });
+    return;
+  }
+  
+  // Complete the sale
+  playerData.hands = 0;
+  playerData.gold = (playerData.gold || 0) + price;
+  
+  // Update database
+  await updateStatsInDb(playerData.id, { 
+    hands: playerData.hands,
+    gold: playerData.gold 
+  });
+  
+  // Send equipment update to client and broadcast to other players
+  broadcast({
+    type: 'player_equipment_update',
+    id: playerData.id,
+    hands: playerData.hands
+  });
+  
+  // Send stats update for gold
+  send(ws, { 
+    type: 'stats_update', 
+    id: playerData.id, 
+    gold: playerData.gold 
+  });
+  
+  // Send success message
+  send(ws, {
+    type: 'chat',
+    text: `You have sold ${itemDetails.name} for ${price} gold!`,
+    color: 'gold'
+  });
+  
+  console.log(`Player ${playerData.username} sold ${itemDetails.name} for ${price} gold to NPC ${npcDetails.name}`);
+}
+
 // Load NPC locations from map data
 function loadNPCLocations() {
   npcLocations = [];
@@ -4717,7 +4851,8 @@ wss.on('connection', (ws) => {
             playerData.npcInteraction = {
               npcType: npc.type,
               npcDetails: npcDetails,
-              position: { x: adjacentPos.x, y: adjacentPos.y }
+              position: { x: adjacentPos.x, y: adjacentPos.y },
+              stage: 'main' // main, buy, sell
             };
             
             // Send NPC interaction data to client
@@ -4794,12 +4929,74 @@ wss.on('connection', (ws) => {
       const t = msg.text.trim();
       if (looksMalicious(t)) return send(ws, { type: 'chat_error' });
 
-      // Check if player is in NPC interaction and entered 1-4
-      if (playerData.npcInteraction && /^[1-4]$/.test(t)) {
+      // Check if player is in NPC interaction and entered 1-5
+      if (playerData.npcInteraction && /^[1-5]$/.test(t)) {
         const npcDetails = playerData.npcInteraction.npcDetails;
+        const currentStage = playerData.npcInteraction.stage || 'main';
+        
+        // Handle shop NPCs
+        if (npcDetails.shop) {
+          if (currentStage === 'main') {
+            // Main menu: 1=buy, 2=sell, others=regular responses
+            if (t === '1') {
+              playerData.npcInteraction.stage = 'buy';
+              send(ws, {
+                type: 'npc_interaction_update',
+                stage: 'buy',
+                npcDetails: npcDetails
+              });
+              return;
+            } else if (t === '2') {
+              playerData.npcInteraction.stage = 'sell';
+              send(ws, {
+                type: 'npc_interaction_update',
+                stage: 'sell',
+                npcDetails: npcDetails
+              });
+              return;
+            } else {
+              // Handle regular responses for options 3, 4
+              const responseKey = `response_${t}`;
+              const response = npcDetails[responseKey];
+              
+              if (response && response.trim() !== '') {
+                send(ws, { 
+                  type: 'chat', 
+                  text: response,
+                  color: 'pink'
+                });
+              }
+            }
+          } else if (currentStage === 'buy') {
+            if (t === '5') {
+              // Return to main menu
+              playerData.npcInteraction.stage = 'main';
+              send(ws, {
+                type: 'npc_interaction_update',
+                stage: 'main',
+                npcDetails: npcDetails
+              });
+            } else {
+              await handleShopBuy(playerData, ws, npcDetails, parseInt(t));
+            }
+          } else if (currentStage === 'sell') {
+            if (t === '5') {
+              // Return to main menu
+              playerData.npcInteraction.stage = 'main';
+              send(ws, {
+                type: 'npc_interaction_update',
+                stage: 'main',
+                npcDetails: npcDetails
+              });
+            } else {
+              await handleShopSell(playerData, ws, npcDetails, parseInt(t));
+            }
+          }
+          return;
+        }
         
         // Handle quest giver NPCs
-        if (npcDetails.quest_giver && t === '4') {
+        if (npcDetails.quest_giver && currentStage === 'main' && t === '4') {
           const playerHandsItem = playerData.hands || 0;
           const questItemRequired = npcDetails.quest_item_required || 0;
           const questItemReward = npcDetails.quest_item_reward || 0;
@@ -4859,7 +5056,7 @@ wss.on('connection', (ws) => {
           }
         }
         // Handle regular question/response NPCs (including quest NPCs for responses 1-3)
-        else if (!npcDetails.shop) {
+        else if (!npcDetails.shop && currentStage === 'main') {
           const responseKey = `response_${t}`;
           const response = npcDetails[responseKey];
           
