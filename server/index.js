@@ -546,6 +546,53 @@ function removeHealingEffect(effectId) {
   delete healingEffects[effectId];
 }
 
+// Silver Mist effects system
+let silverMistEffects = {}; // Store active silver mist effects
+
+function createSilverMistEffect(effectId, x, y, mapId) {
+  // Create silver mist effect
+  const effect = {
+    id: effectId,
+    x: x,
+    y: y,
+    mapId: mapId,
+    startTime: Date.now()
+  };
+  
+  silverMistEffects[effectId] = effect;
+  
+  console.log(`Created silver mist effect ${effectId} at (${x}, ${y}) on map ${mapId}`);
+  
+  // Broadcast silver mist effect creation to all clients on the map
+  broadcastToMap(mapId, {
+    type: 'silver_mist_created',
+    effectId: effectId,
+    x: x,
+    y: y
+  });
+  
+  // Schedule removal after 1 second
+  setTimeout(() => {
+    removeSilverMistEffect(effectId);
+  }, 1000);
+}
+
+function removeSilverMistEffect(effectId) {
+  const effect = silverMistEffects[effectId];
+  if (!effect) return;
+  
+  console.log(`Removing silver mist effect ${effectId}`);
+  
+  // Broadcast silver mist effect removal
+  broadcastToMap(effect.mapId, {
+    type: 'silver_mist_removed',
+    effectId: effectId
+  });
+  
+  // Remove from memory
+  delete silverMistEffects[effectId];
+}
+
 // Enemy details loading and management
 let enemyDetails = [];
 let enemyDetailsReady = false;
@@ -4201,6 +4248,98 @@ wss.on('connection', (ws) => {
         
         console.log(`Player ${playerData.username} cast partial heal on ${targetPlayer.data.username}, HP: ${oldHp} -> ${targetPlayer.data.life}`);
       }
+    }
+
+    else if (msg.type === 'use_silver_mist_spell') {
+      if (!playerData) return;
+      
+      const { itemId } = msg;
+      
+      // Verify player has item 102 in hands
+      if (playerData.hands !== 102 || itemId !== 102) {
+        return;
+      }
+      
+      // Verify player has enough magic (20)
+      if ((playerData.magic || 0) < 20) {
+        send(ws, { type: 'chat', text: 'You do not have enough magic to cast this spell!' });
+        return;
+      }
+      
+      // Deduct magic cost
+      playerData.magic = Math.max(0, (playerData.magic || 0) - 20);
+      
+      // Update magic in database
+      updateStatsInDb(playerData.id, { magic: playerData.magic })
+        .catch(err => console.error('Error updating magic after silver mist:', err));
+      
+      // Send magic update to client
+      send(ws, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
+      
+      // Send success message to player
+      send(ws, { 
+        type: 'chat', 
+        text: 'The scroll summons a silver mist all around you.',
+        color: 'purple'
+      });
+      
+      // Create Silver Mist effects in 8 surrounding tiles
+      const playerX = playerData.pos_x;
+      const playerY = playerData.pos_y;
+      const mapId = playerData.map_id;
+      
+      // Define the 8 surrounding positions (3x3 grid minus center)
+      const mistPositions = [
+        { x: playerX - 1, y: playerY - 1 }, // Top-left
+        { x: playerX,     y: playerY - 1 }, // Top
+        { x: playerX + 1, y: playerY - 1 }, // Top-right
+        { x: playerX - 1, y: playerY     }, // Left
+        { x: playerX + 1, y: playerY     }, // Right
+        { x: playerX - 1, y: playerY + 1 }, // Bottom-left
+        { x: playerX,     y: playerY + 1 }, // Bottom
+        { x: playerX + 1, y: playerY + 1 }  // Bottom-right
+      ];
+      
+      // Create Silver Mist effects and damage enemies
+      mistPositions.forEach(pos => {
+        // Check if position is within map bounds
+        if (pos.x >= 0 && pos.x < MAP_WIDTH && pos.y >= 0 && pos.y < MAP_HEIGHT) {
+          // Create Silver Mist visual effect
+          const mistId = Date.now() + Math.random() + pos.x + pos.y; // Unique ID
+          createSilverMistEffect(mistId, pos.x, pos.y, mapId);
+          
+          // Check for enemies at this position and damage them
+          for (const [enemyId, enemy] of Object.entries(enemies)) {
+            if (Number(enemy.map_id) === Number(mapId) &&
+                enemy.pos_x === pos.x &&
+                enemy.pos_y === pos.y &&
+                !enemy.is_dead) {
+              
+              // Deal 3 damage to enemy
+              const oldHp = enemy.hp;
+              enemy.hp = Math.max(0, enemy.hp - 3);
+              
+              // Update enemy HP in database
+              pool.query('UPDATE enemies SET hp = $1 WHERE id = $2', [enemy.hp, enemy.id])
+                .catch(err => console.error('Error updating enemy HP after silver mist:', err));
+              
+              // Get enemy name for potential death message
+              const enemyDetails = enemy.details;
+              const enemyName = enemyDetails?.name || `Enemy ${enemy.enemy_type}`;
+              
+              console.log(`Silver Mist damaged enemy ${enemyId} at (${pos.x}, ${pos.y}) for 3 damage: ${oldHp} -> ${enemy.hp}`);
+              
+              // Check if enemy died
+              if (enemy.hp <= 0) {
+                console.log(`Enemy ${enemyId} died from Silver Mist`);
+                handleEnemyDeath(enemy, null); // No attacking player for spell kills
+              }
+            }
+          }
+        }
+      });
+      
+      console.log(`Player ${playerData.username} cast Silver Mist spell around (${playerX}, ${playerY})`);
     }
 
     else if (msg.type === 'use_teleport_item') {
