@@ -2469,10 +2469,10 @@
       ctx.strokeStyle = textColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(x + padding, currentY);
-      ctx.lineTo(x + width - padding, currentY);
+      ctx.moveTo(x + padding, currentY + 2);
+      ctx.lineTo(x + width - padding, currentY + 2);
       ctx.stroke();
-      currentY += 5; // Small gap after line
+      currentY += 8; // Gap after line before description
     }
     
     // Draw description with word wrapping
