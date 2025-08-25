@@ -1331,8 +1331,19 @@
           
         case 'npc_interaction_start':
           // Start NPC interaction with provided details
-          npcInteraction = msg.npcDetails;
+          npcInteraction = {
+            npcDetails: msg.npcDetails,
+            stage: 'main'
+          };
           console.log('Started NPC interaction:', npcInteraction);
+          break;
+          
+        case 'npc_interaction_update':
+          // Update NPC interaction stage
+          if (npcInteraction) {
+            npcInteraction.stage = msg.stage;
+            console.log('Updated NPC interaction stage:', msg.stage);
+          }
           break;
           
         case 'npc_interaction_end':
@@ -2454,6 +2465,9 @@
   function drawNPCDialog() {
     if (!npcInteraction) return;
     
+    const npcDetails = npcInteraction.npcDetails;
+    const stage = npcInteraction.stage || 'main';
+    
     const { x, y, width, height, backgroundColor, borderColor, textColor, lineHeight, padding } = NPC_DIALOG;
     
     // Draw background rectangle with transparency (same as inventory)
@@ -2473,9 +2487,24 @@
     
     let currentY = y + padding + 12; // Start position for text
     
+    if (stage === 'main') {
+      // Draw main interaction (question/response)
+      drawNPCMainDialog(npcDetails, x, y, width, height, textColor, lineHeight, padding);
+    } else if (stage === 'buy') {
+      // Draw shop buy interface
+      drawNPCShopDialog(npcDetails, x, y, width, height, textColor, lineHeight, padding, 'buy');
+    } else if (stage === 'sell') {
+      // Draw shop sell interface
+      drawNPCShopDialog(npcDetails, x, y, width, height, textColor, lineHeight, padding, 'sell');
+    }
+  }
+
+  function drawNPCMainDialog(npcDetails, x, y, width, height, textColor, lineHeight, padding) {
+    let currentY = y + padding + 12; // Start position for text
+    
     // Draw NPC name
-    if (npcInteraction.name) {
-      ctx.fillText(npcInteraction.name, x + padding, currentY);
+    if (npcDetails.name) {
+      ctx.fillText(npcDetails.name, x + padding, currentY);
       currentY += lineHeight;
       
       // Draw horizontal line directly under name
@@ -2489,9 +2518,9 @@
     }
     
     // Draw description with word wrapping
-    if (npcInteraction.description) {
+    if (npcDetails.description) {
       const maxWidth = width - (padding * 2);
-      const words = npcInteraction.description.split(' ');
+      const words = npcDetails.description.split(' ');
       let line = '';
       let lineCount = 0;
       const maxLines = 2;
@@ -2522,22 +2551,112 @@
     // Draw questions with proper spacing
     let questionY = currentY;
     
-    if (npcInteraction.question_1 && npcInteraction.question_1.trim() !== '') {
-      ctx.fillText(npcInteraction.question_1, x + padding, questionY);
+    if (npcDetails.question_1 && npcDetails.question_1.trim() !== '') {
+      ctx.fillText(npcDetails.question_1, x + padding, questionY);
       questionY += lineHeight;
     }
-    if (npcInteraction.question_2 && npcInteraction.question_2.trim() !== '') {
-      ctx.fillText(npcInteraction.question_2, x + padding, questionY);
+    if (npcDetails.question_2 && npcDetails.question_2.trim() !== '') {
+      ctx.fillText(npcDetails.question_2, x + padding, questionY);
       questionY += lineHeight;
     }
-    if (npcInteraction.question_3 && npcInteraction.question_3.trim() !== '') {
-      ctx.fillText(npcInteraction.question_3, x + padding, questionY);
+    if (npcDetails.question_3 && npcDetails.question_3.trim() !== '') {
+      ctx.fillText(npcDetails.question_3, x + padding, questionY);
       questionY += lineHeight;
     }
-    if (npcInteraction.question_4 && npcInteraction.question_4.trim() !== '') {
-      ctx.fillText(npcInteraction.question_4, x + padding, questionY);
+    if (npcDetails.question_4 && npcDetails.question_4.trim() !== '') {
+      ctx.fillText(npcDetails.question_4, x + padding, questionY);
       questionY += lineHeight;
     }
+  }
+
+  function drawNPCShopDialog(npcDetails, x, y, width, height, textColor, lineHeight, padding, shopType) {
+    let currentY = y + padding + 12;
+    
+    // Draw NPC name
+    if (npcDetails.name) {
+      ctx.fillText(npcDetails.name, x + padding, currentY);
+      currentY += lineHeight;
+      
+      // Draw horizontal line
+      ctx.strokeStyle = textColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + padding, currentY - 11);
+      ctx.lineTo(x + width - padding, currentY - 11);
+      ctx.stroke();
+      currentY += 8;
+    }
+    
+    // Draw table headers
+    const valueColumnX = x + (width * 0.75); // 75% across the dialog
+    
+    ctx.fillText(`Item to ${shopType === 'buy' ? 'Buy' : 'Sell'}`, x + padding, currentY);
+    ctx.fillText('Value', valueColumnX, currentY);
+    currentY += lineHeight;
+    
+    // Draw horizontal line under headers
+    ctx.strokeStyle = textColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x + padding, currentY);
+    ctx.lineTo(x + width - padding, currentY);
+    ctx.stroke();
+    currentY += 5;
+    
+    // Draw vertical line for column separator
+    ctx.beginPath();
+    ctx.moveTo(valueColumnX - 5, y + padding + 12 + lineHeight);
+    ctx.lineTo(valueColumnX - 5, currentY + (4 * lineHeight) + 20);
+    ctx.stroke();
+    
+    // Draw shop items
+    for (let i = 1; i <= 4; i++) {
+      const itemKey = `${shopType}_item_${i}`;
+      const priceKey = `${shopType}_price_${i}`;
+      
+      const itemId = npcDetails[itemKey] || 0;
+      const price = npcDetails[priceKey] || 0;
+      
+      if (itemId > 0) {
+        const itemDetails = getItemDetails(itemId);
+        if (itemDetails) {
+          currentY += lineHeight;
+          
+          // Draw item number and name
+          let itemText = `${i}. ${itemDetails.name}`;
+          // Truncate if too long
+          const maxTextWidth = (valueColumnX - 5) - (x + padding + 20); // Leave space for item image
+          while (ctx.measureText(itemText).width > maxTextWidth && itemText.length > 10) {
+            itemText = itemText.slice(0, -1);
+          }
+          
+          // Draw item image if available
+          if (window.getItemMeta && window.itemsReady()) {
+            const meta = window.getItemMeta(itemId);
+            if (meta && meta.img && meta.img.complete) {
+              ctx.drawImage(meta.img, x + padding + 15, currentY - 12, 16, 16);
+            }
+          }
+          
+          ctx.fillText(itemText, x + padding + 35, currentY);
+          
+          // Draw price and gold pile
+          ctx.fillText(`${price}`, valueColumnX, currentY);
+          
+          // Draw gold pile image (item #25)
+          if (window.getItemMeta && window.itemsReady()) {
+            const goldMeta = window.getItemMeta(25);
+            if (goldMeta && goldMeta.img && goldMeta.img.complete) {
+              ctx.drawImage(goldMeta.img, valueColumnX + 30, currentY - 12, 12, 12);
+            }
+          }
+        }
+      }
+    }
+    
+    // Add "5. Return to main menu" option
+    currentY += lineHeight * 2;
+    ctx.fillText('5. Return to main menu', x + padding, currentY);
   }
 
     // ---------- SCENES ----------
