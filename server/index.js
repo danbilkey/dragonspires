@@ -452,6 +452,53 @@ function broadcastToMap(mapId, message) {
   }
 }
 
+// Electrocute effects system
+let electrocuteEffects = {}; // Store active electrocute effects
+
+function createElectrocuteEffect(effectId, x, y, mapId) {
+  // Create electrocute effect
+  const effect = {
+    id: effectId,
+    x: x,
+    y: y,
+    mapId: mapId,
+    startTime: Date.now()
+  };
+  
+  electrocuteEffects[effectId] = effect;
+  
+  console.log(`Created electrocute effect ${effectId} at (${x}, ${y}) on map ${mapId}`);
+  
+  // Broadcast electrocute effect creation to all clients on the map
+  broadcastToMap(mapId, {
+    type: 'electrocute_created',
+    effectId: effectId,
+    x: x,
+    y: y
+  });
+  
+  // Schedule removal after 1 second
+  setTimeout(() => {
+    removeElectrocuteEffect(effectId);
+  }, 1000);
+}
+
+function removeElectrocuteEffect(effectId) {
+  const effect = electrocuteEffects[effectId];
+  if (!effect) return;
+  
+  console.log(`Removing electrocute effect ${effectId}`);
+  
+  // Broadcast electrocute effect removal
+  broadcastToMap(effect.mapId, {
+    type: 'electrocute_removed',
+    effectId: effectId
+  });
+  
+  // Remove from memory
+  delete electrocuteEffects[effectId];
+}
+
 // Enemy details loading and management
 let enemyDetails = [];
 let enemyDetailsReady = false;
@@ -1252,6 +1299,41 @@ async function playerAttackEnemy(playerData, playerWs) {
   }
   
   console.log(`Found enemy ${targetEnemy.id} (type ${targetEnemy.enemy_type}) at position (${targetPos.x}, ${targetPos.y}), HP: ${targetEnemy.hp}`);
+
+  // Check for electrocute spell if player has item #99 in hands
+  let electrocuteTriggered = false;
+  if (playerData.hands === 99 && (playerData.magic || 0) >= 5) {
+    // Deduct magic cost
+    playerData.magic = Math.max(0, (playerData.magic || 0) - 5);
+    electrocuteTriggered = true;
+    
+    // Update magic in database
+    updateStatsInDb(playerData.id, { magic: playerData.magic })
+      .catch(err => console.error('Error updating magic after electrocute:', err));
+    
+    // Send magic update to client
+    send(playerWs, { type: 'stats_update', id: playerData.id, magic: playerData.magic });
+    
+    // Create electrocute effect
+    const electrocuteId = Date.now() + Math.random(); // Unique ID for this effect
+    createElectrocuteEffect(electrocuteId, targetPos.x, targetPos.y, playerData.map_id);
+    
+    // Deal electrocute damage (2 damage)
+    targetEnemy.hp = Math.max(0, targetEnemy.hp - 2);
+    
+    // Get enemy name for chat message
+    const enemyDetails = targetEnemy.details;
+    const enemyName = enemyDetails?.name || `Enemy ${targetEnemy.enemy_type}`;
+    
+    // Send electrocute message to player
+    send(playerWs, { 
+      type: 'chat', 
+      text: `Your attack also electrocutes ${enemyName} for 2 damage!`,
+      color: 'red'
+    });
+    
+    console.log(`Player ${playerData.username} electrocuted enemy ${targetEnemy.id} for 2 damage, enemy HP now: ${targetEnemy.hp}`);
+  }
 
   // Calculate player's attack damage
   let minDamage = 0;
