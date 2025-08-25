@@ -3919,20 +3919,17 @@ wss.on('connection', (ws) => {
       statUpdate[playerStatField] = newStatValue;
       send(ws, statUpdate);
       
-      // Send hands update to client
-      send(ws, { type: 'hands_update', id: playerData.id, hands: 0 });
+      // Send equipment update to client and broadcast to other players
+      broadcast({
+        type: 'player_equipment_update',
+        id: playerData.id,
+        hands: playerData.hands
+      });
       
       // Send use message to player chat
       if (useMessage) {
         send(ws, { type: 'chat', text: useMessage, color: 'green' });
       }
-      
-      // Broadcast hands update to other players
-      broadcast({
-        type: 'hands_update',
-        id: playerData.id,
-        hands: 0
-      });
       
       console.log(`Player ${playerData.username} used consumable ${itemDetails.name}, ${statEffected} increased by ${statIncrease} to ${newStatValue}`);
     }
