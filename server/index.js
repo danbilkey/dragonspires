@@ -1177,6 +1177,13 @@ async function loadSingleMapData(mapId) {
       const parsed = JSON.parse(data);
       serverMapData[mapId] = parsed;
       console.log(`Server loaded map ${mapId} data from: ${usedPath}`);
+      
+      // Debug logging for NPCs
+      if (parsed.npcs) {
+        console.log(`Debug: Map ${mapId} has ${parsed.npcs.length} NPCs:`, parsed.npcs.map(n => `${n.coordinates} (type ${n.type})`));
+      } else {
+        console.log(`Debug: Map ${mapId} has no NPCs`);
+      }
     } catch (parseError) {
       console.error(`JSON parse error in ${mapDataFileName}:`, parseError.message);
       console.error(`File content length: ${data.length} characters`);
@@ -5033,10 +5040,19 @@ wss.on('connection', (ws) => {
       // Get map data for readables
       const mapData = getMapData(playerData.map_id);
       
+      // Debug logging for NPC detection
+      console.log(`Debug NPC: Player ${playerData.username} on map ${playerData.map_id} looking at ${adjacentPos.x},${adjacentPos.y}`);
+      console.log(`Debug NPC: mapData exists: ${!!mapData}, has npcs: ${!!(mapData && mapData.npcs)}`);
+      if (mapData && mapData.npcs) {
+        console.log(`Debug NPC: Found ${mapData.npcs.length} NPCs on map ${playerData.map_id}:`, mapData.npcs.map(n => `${n.coordinates} (type ${n.type})`));
+      }
+      
       // Check for NPCs first (highest priority)
       if (mapData && mapData.npcs) {
         const coordinateString = `${adjacentPos.x},${adjacentPos.y}`;
         const npc = mapData.npcs.find(n => n.coordinates === coordinateString);
+        
+        console.log(`Debug NPC: Looking for NPC at ${coordinateString}, found: ${!!npc}`);
         
         if (npc) {
           // Found an NPC - start interaction
