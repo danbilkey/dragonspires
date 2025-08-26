@@ -74,6 +74,9 @@ const playerAttackIndex = new Map(); // Map<playerId, attackIndex> for alternati
 // In-memory item storage
 let mapItems = {}; // { "x,y": itemId }
 
+// In-memory container storage (for dropped gold)
+let mapContainers = {}; // { "x,y": { gold: number, items: [] } }
+
 // Active spells storage
 let spells = {}; // { id: spellData }
 let spellIdCounter = 1;
@@ -3910,9 +3913,64 @@ wss.on('connection', (ws) => {
         console.log(`Player ${playerData.username} ended NPC interaction due to pickup/drop`);
       }
       
-      // Check if item at current position is item 201 (drop container)
+      // Check if item at current position is item 201 (drop container) or item 25 (gold pile)
       const playerMapSpec = getMapSpec(playerData.map_id);
       const itemAtPosition = getItemAtPosition(playerData.pos_x, playerData.pos_y, playerMapSpec, playerData.map_id);
+      
+      // Handle gold pile pickup (item #25)
+      if (itemAtPosition === 25) {
+        const playerPos = `${playerData.pos_x},${playerData.pos_y}`;
+        const goldContainer = mapContainers[playerPos];
+        
+        if (goldContainer && goldContainer.gold > 0) {
+          // Pick up all the gold
+          const goldAmount = goldContainer.gold;
+          playerData.gold = (playerData.gold || 0) + goldAmount;
+          
+          // Update database and send stats update
+          await updateStatsInDb(playerData.id, { gold: playerData.gold });
+          send(ws, { type: 'stats_update', id: playerData.id, gold: playerData.gold });
+          
+          // Send pickup message
+          send(ws, { 
+            type: 'chat', 
+            text: `You picked up ${goldAmount} gold pieces.`, 
+            color: 'gold' 
+          });
+          
+          // Check if there were items in the container to restore
+          if (goldContainer.items && goldContainer.items.length > 0) {
+            // Restore the first item to the ground
+            const restoredItem = goldContainer.items[0];
+            mapItems[playerPos] = restoredItem;
+            
+            // Broadcast item restoration
+            broadcast({
+              type: 'item_placed',
+              x: playerData.pos_x,
+              y: playerData.pos_y,
+              itemId: restoredItem
+            });
+          } else {
+            // Remove gold pile from ground
+            delete mapItems[playerPos];
+            
+            // Broadcast item removal
+            broadcast({
+              type: 'item_placed',
+              x: playerData.pos_x,
+              y: playerData.pos_y,
+              itemId: 0
+            });
+          }
+          
+          // Remove container from memory
+          delete mapContainers[playerPos];
+          
+          console.log(`Player ${playerData.username} picked up ${goldAmount} gold from ground, total now: ${playerData.gold}`);
+        }
+        return;
+      }
       
       if (itemAtPosition === 201) {
         // Handle drop container pickup
@@ -5806,44 +5864,25 @@ wss.on('connection', (ws) => {
         try {
           const playerPos = `${playerData.pos_x},${playerData.pos_y}`;
           
-          // Check if there's already a container at this position
+          // Simple approach: Create a container in memory and place a gold pile visual (item #25)
           let existingContainer = mapContainers[playerPos];
           
           if (existingContainer) {
             // Add gold to existing container
             existingContainer.gold = (existingContainer.gold || 0) + amount;
-            
-            // Update container in database
-            await pool.query(
-              'UPDATE map_containers SET gold = $1 WHERE x = $2 AND y = $3 AND map_id = $4',
-              [existingContainer.gold, playerData.pos_x, playerData.pos_y, playerData.map_id]
-            );
           } else {
             // Check if there's an item on the ground
             const existingItem = mapItems[playerPos];
             
             // Create new container
-            const newContainer = {
+            mapContainers[playerPos] = {
               gold: amount,
               items: existingItem ? [existingItem] : []
             };
             
-            // Save container to database
-            await pool.query(
-              'INSERT INTO map_containers (x, y, map_id, gold, items) VALUES ($1, $2, $3, $4, $5)',
-              [playerData.pos_x, playerData.pos_y, playerData.map_id, amount, JSON.stringify(newContainer.items)]
-            );
-            
-            // Add to memory
-            mapContainers[playerPos] = newContainer;
-            
-            // Remove the item from the ground if it existed
+            // Remove the item from the ground if it existed and add to container
             if (existingItem) {
               delete mapItems[playerPos];
-              await pool.query(
-                'DELETE FROM map_items WHERE x = $1 AND y = $2 AND map_id = $3',
-                [playerData.pos_x, playerData.pos_y, playerData.map_id]
-              );
               
               // Broadcast item removal
               broadcast({
@@ -5853,6 +5892,17 @@ wss.on('connection', (ws) => {
                 itemId: 0
               });
             }
+            
+            // Place gold pile visual (item #25 - gold pile)
+            mapItems[playerPos] = 25;
+            
+            // Broadcast gold pile placement
+            broadcast({
+              type: 'item_placed',
+              x: playerData.pos_x,
+              y: playerData.pos_y,
+              itemId: 25
+            });
           }
           
           // Deduct gold from player
@@ -5864,14 +5914,6 @@ wss.on('connection', (ws) => {
             type: 'stats_update', 
             id: playerData.id, 
             gold: playerData.gold 
-          });
-          
-          // Broadcast container update
-          broadcast({
-            type: 'container_update',
-            x: playerData.pos_x,
-            y: playerData.pos_y,
-            container: mapContainers[playerPos]
           });
           
           // Send success message
