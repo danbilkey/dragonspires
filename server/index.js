@@ -5475,6 +5475,328 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // Check for -give command
+      if (t.toLowerCase() === '-give') {
+        const playerHandsItem = playerData.hands || 0;
+        
+        // Check if player has an item in hands
+        if (playerHandsItem === 0) {
+          send(ws, { 
+            type: 'chat', 
+            text: 'You have nothing in your hands to give.',
+            color: 'black'
+          });
+          return;
+        }
+        
+        // Get adjacent position in front of player
+        const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+        
+        // Find other player at adjacent position
+        let otherPlayer = null;
+        let otherPlayerWs = null;
+        
+        for (const [clientWs, clientPlayer] of clients.entries()) {
+          if (clientPlayer && 
+              clientPlayer.pos_x === adjacentPos.x && 
+              clientPlayer.pos_y === adjacentPos.y && 
+              clientPlayer.map_id === playerData.map_id &&
+              clientPlayer.id !== playerData.id) {
+            otherPlayer = clientPlayer;
+            otherPlayerWs = clientWs;
+            break;
+          }
+        }
+        
+        if (!otherPlayer) {
+          send(ws, { 
+            type: 'chat', 
+            text: 'There is no one in front of you to give the item to.',
+            color: 'black'
+          });
+          return;
+        }
+        
+        // Check if other player's hands are empty
+        if (otherPlayer.hands && otherPlayer.hands > 0) {
+          const itemDetails = getItemDetails(playerHandsItem);
+          const itemName = itemDetails ? itemDetails.name : 'item';
+          send(ws, { 
+            type: 'chat', 
+            text: `${otherPlayer.username}'s hands are full, they cannot accept ${itemName}.`,
+            color: 'black'
+          });
+          return;
+        }
+        
+        try {
+          // Get item name for messages
+          const itemDetails = getItemDetails(playerHandsItem);
+          const itemName = itemDetails ? itemDetails.name : 'item';
+          
+          // Transfer item: give to other player, remove from current player
+          otherPlayer.hands = playerHandsItem;
+          playerData.hands = 0;
+          
+          // Update database for both players
+          await updateStatsInDb(otherPlayer.id, { hands: otherPlayer.hands });
+          await updateStatsInDb(playerData.id, { hands: playerData.hands });
+          
+          // Send equipment updates
+          broadcast({
+            type: 'player_equipment_update',
+            id: otherPlayer.id,
+            hands: otherPlayer.hands
+          });
+          
+          broadcast({
+            type: 'player_equipment_update',
+            id: playerData.id,
+            hands: playerData.hands
+          });
+          
+          // Send success messages
+          send(otherPlayerWs, { 
+            type: 'chat', 
+            text: `${playerData.username} gives you a ${itemName}.`,
+            color: 'gold'
+          });
+          
+          send(ws, { 
+            type: 'chat', 
+            text: `You gave ${itemName} to ${otherPlayer.username}.`,
+            color: 'gold'
+          });
+          
+          console.log(`Player ${playerData.username} gave ${itemName} to ${otherPlayer.username}`);
+        } catch (error) {
+          console.error('Error giving item:', error);
+          send(ws, { 
+            type: 'chat', 
+            text: 'An error occurred while giving the item.',
+            color: 'black'
+          });
+        }
+        return;
+      }
+
+      // Check for -givegold command
+      const giveGoldMatch = t.match(/^-givegold\s+(\d+)$/i);
+      if (giveGoldMatch) {
+        const amount = parseInt(giveGoldMatch[1]);
+        
+        // Validate amount
+        if (amount <= 0) {
+          send(ws, { 
+            type: 'chat', 
+            text: 'Invalid gold amount.',
+            color: 'black'
+          });
+          return;
+        }
+        
+        // Check if player has enough gold
+        const playerGold = playerData.gold || 0;
+        if (playerGold < amount) {
+          send(ws, { 
+            type: 'chat', 
+            text: 'You do not have that much gold.',
+            color: 'black'
+          });
+          return;
+        }
+        
+        // Get adjacent position in front of player
+        const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+        
+        // Find other player at adjacent position
+        let otherPlayer = null;
+        let otherPlayerWs = null;
+        
+        for (const [clientWs, clientPlayer] of clients.entries()) {
+          if (clientPlayer && 
+              clientPlayer.pos_x === adjacentPos.x && 
+              clientPlayer.pos_y === adjacentPos.y && 
+              clientPlayer.map_id === playerData.map_id &&
+              clientPlayer.id !== playerData.id) {
+            otherPlayer = clientPlayer;
+            otherPlayerWs = clientWs;
+            break;
+          }
+        }
+        
+        if (!otherPlayer) {
+          send(ws, { 
+            type: 'chat', 
+            text: 'There is no one in front of you to give gold to.',
+            color: 'black'
+          });
+          return;
+        }
+        
+        try {
+          // Transfer gold
+          playerData.gold = playerGold - amount;
+          otherPlayer.gold = (otherPlayer.gold || 0) + amount;
+          
+          // Update database for both players
+          await updateStatsInDb(playerData.id, { gold: playerData.gold });
+          await updateStatsInDb(otherPlayer.id, { gold: otherPlayer.gold });
+          
+          // Send stats updates
+          send(ws, { 
+            type: 'stats_update', 
+            id: playerData.id, 
+            gold: playerData.gold 
+          });
+          
+          send(otherPlayerWs, { 
+            type: 'stats_update', 
+            id: otherPlayer.id, 
+            gold: otherPlayer.gold 
+          });
+          
+          // Send success messages
+          send(otherPlayerWs, { 
+            type: 'chat', 
+            text: `${playerData.username} has given you ${amount} gold pieces!`,
+            color: 'gold'
+          });
+          
+          send(ws, { 
+            type: 'chat', 
+            text: `You have given ${otherPlayer.username} ${amount} gold pieces.`,
+            color: 'gold'
+          });
+          
+          console.log(`Player ${playerData.username} gave ${amount} gold to ${otherPlayer.username}`);
+        } catch (error) {
+          console.error('Error giving gold:', error);
+          send(ws, { 
+            type: 'chat', 
+            text: 'An error occurred while giving gold.',
+            color: 'black'
+          });
+        }
+        return;
+      }
+
+      // Check for -dropgold command
+      const dropGoldMatch = t.match(/^-dropgold\s+(\d+)$/i);
+      if (dropGoldMatch) {
+        const amount = parseInt(dropGoldMatch[1]);
+        
+        // Validate amount
+        if (amount <= 0) {
+          send(ws, { 
+            type: 'chat', 
+            text: 'Invalid gold amount.',
+            color: 'black'
+          });
+          return;
+        }
+        
+        // Check if player has enough gold
+        const playerGold = playerData.gold || 0;
+        if (playerGold < amount) {
+          send(ws, { 
+            type: 'chat', 
+            text: 'You don\'t have that much gold.',
+            color: 'black'
+          });
+          return;
+        }
+        
+        try {
+          const playerPos = `${playerData.pos_x},${playerData.pos_y}`;
+          
+          // Check if there's already a container at this position
+          let existingContainer = mapContainers[playerPos];
+          
+          if (existingContainer) {
+            // Add gold to existing container
+            existingContainer.gold = (existingContainer.gold || 0) + amount;
+            
+            // Update container in database
+            await pool.query(
+              'UPDATE map_containers SET gold = $1 WHERE x = $2 AND y = $3 AND map_id = $4',
+              [existingContainer.gold, playerData.pos_x, playerData.pos_y, playerData.map_id]
+            );
+          } else {
+            // Check if there's an item on the ground
+            const existingItem = mapItems[playerPos];
+            
+            // Create new container
+            const newContainer = {
+              gold: amount,
+              items: existingItem ? [existingItem] : []
+            };
+            
+            // Save container to database
+            await pool.query(
+              'INSERT INTO map_containers (x, y, map_id, gold, items) VALUES ($1, $2, $3, $4, $5)',
+              [playerData.pos_x, playerData.pos_y, playerData.map_id, amount, JSON.stringify(newContainer.items)]
+            );
+            
+            // Add to memory
+            mapContainers[playerPos] = newContainer;
+            
+            // Remove the item from the ground if it existed
+            if (existingItem) {
+              delete mapItems[playerPos];
+              await pool.query(
+                'DELETE FROM map_items WHERE x = $1 AND y = $2 AND map_id = $3',
+                [playerData.pos_x, playerData.pos_y, playerData.map_id]
+              );
+              
+              // Broadcast item removal
+              broadcast({
+                type: 'item_placed',
+                x: playerData.pos_x,
+                y: playerData.pos_y,
+                itemId: 0
+              });
+            }
+          }
+          
+          // Deduct gold from player
+          playerData.gold = playerGold - amount;
+          await updateStatsInDb(playerData.id, { gold: playerData.gold });
+          
+          // Send stats update
+          send(ws, { 
+            type: 'stats_update', 
+            id: playerData.id, 
+            gold: playerData.gold 
+          });
+          
+          // Broadcast container update
+          broadcast({
+            type: 'container_update',
+            x: playerData.pos_x,
+            y: playerData.pos_y,
+            container: mapContainers[playerPos]
+          });
+          
+          // Send success message
+          send(ws, { 
+            type: 'chat', 
+            text: `You dropped ${amount} gold pieces on the ground.`,
+            color: 'gold'
+          });
+          
+          console.log(`Player ${playerData.username} dropped ${amount} gold at (${playerData.pos_x}, ${playerData.pos_y})`);
+        } catch (error) {
+          console.error('Error dropping gold:', error);
+          send(ws, { 
+            type: 'chat', 
+            text: 'An error occurred while dropping gold.',
+            color: 'black'
+          });
+        }
+        return;
+      }
+
       // Regular chat message
       const chatMessage = `${playerData.username}: ${t}`;
       broadcast({ type: 'chat', text: chatMessage });
@@ -5595,7 +5917,7 @@ setInterval(async () => {
   }
 }, 30000);
 
-// NPC Speaker system - runs every 30 seconds
+// NPC Speaker system - runs every 60 seconds
 setInterval(() => {
   if (!npcDetailsReady || !npcDetails || npcLocations.length === 0) {
     console.log('NPC Speaker: Not ready yet or no locations loaded');
@@ -5661,7 +5983,7 @@ setInterval(() => {
   npcSpeakerPhaseIndex = (npcSpeakerPhaseIndex + 1) % 4;
   console.log(`NPC Speaker: Advanced to phase ${npcSpeakerPhaseIndex}`);
   
-}, 30000); // 30 seconds
+}, 60000); // 60 seconds
 
 // Enemy AI loop - process every 500ms
 setInterval(async () => {
