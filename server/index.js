@@ -791,6 +791,32 @@ function getNPCDetails(npcType) {
   return npcDetails[npcType - 1];
 }
 
+// Helper function to end follow mode for a player
+function endFollowMode(playerData, ws) {
+  if (playerData.following) {
+    playerData.following = null;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      send(ws, { 
+        type: 'chat', 
+        text: 'You are no longer following anyone.',
+        color: 'black'
+      });
+    }
+    console.log(`Player ${playerData.username} stopped following`);
+  }
+}
+
+// Helper function to get opposite direction for following
+function getOppositeDirection(direction) {
+  const opposites = {
+    'up': 'down',
+    'down': 'up',
+    'left': 'right',
+    'right': 'left'
+  };
+  return opposites[direction] || 'down';
+}
+
 // Handle shop buy transactions
 async function handleShopBuy(playerData, ws, npcDetails, option) {
   if (option < 1 || option > 4) return;
@@ -3215,6 +3241,9 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'move') {
       if (!playerData) return;
       
+      // End follow mode when player manually moves
+      endFollowMode(playerData, ws);
+      
       // End NPC interaction on movement
       if (playerData.npcInteraction) {
         playerData.npcInteraction = null;
@@ -3415,6 +3444,13 @@ wss.on('connection', (ws) => {
                 isAttacking: false
               });
               
+              // End follow mode for any followers when leader changes maps
+              for (const [followerWs, followerData] of clients.entries()) {
+                if (followerData && followerData.following === playerData.id) {
+                  endFollowMode(followerData, followerWs);
+                }
+              }
+              
               // If map changed, send teleport result to client (same as item#58 logic)
               if (oldMapId !== newMapId) {
                 // Send loading message
@@ -3467,6 +3503,48 @@ wss.on('connection', (ws) => {
           isAttacking: playerData.isAttacking
         });
         send(ws, { type: 'stats_update', id: playerData.id, stamina: playerData.stamina });
+
+        // Handle followers - process all players following this player
+        for (const [followerWs, followerData] of clients.entries()) {
+          if (followerData && followerData.following === playerData.id && followerData.map_id === playerData.map_id) {
+            // Calculate where the follower should move to (right behind the leader)
+            const followPos = getAdjacentPosition(nx, ny, getOppositeDirection(playerData.direction));
+            
+            // Check if the follower can move to this position
+            if (canMoveTo(followPos.x, followPos.y, followerData.map_id)) {
+              // Move the follower
+              followerData.pos_x = followPos.x;
+              followerData.pos_y = followPos.y;
+              followerData.direction = playerData.direction; // Face same direction as leader
+              followerData.step = (followerData.step % 3) + 1; // Cycle through steps
+              
+              // Update follower in database
+              Promise.allSettled([
+                updatePosition(followerData.id, followPos.x, followPos.y),
+                updateDirectionAndStep(followerData.id, followerData.direction, followerData.step)
+              ]).catch(()=>{});
+              
+              // Broadcast follower movement
+              broadcast({
+                type: 'player_moved', 
+                id: followerData.id, 
+                x: followPos.x, 
+                y: followPos.y, 
+                map_id: followerData.map_id,
+                direction: followerData.direction,
+                step: followerData.step,
+                isMoving: true,
+                isAttacking: false
+              });
+              
+              console.log(`Player ${followerData.username} followed ${playerData.username} to (${followPos.x}, ${followPos.y})`);
+            } else {
+              // Follower can't move, end follow mode
+              endFollowMode(followerData, followerWs);
+              console.log(`Player ${followerData.username} stopped following ${playerData.username} due to blocked movement`);
+            }
+          }
+        }
       } else {
         // Movement blocked but still increment step for visual feedback
         updateDirectionAndStep(playerData.id, playerData.direction, playerData.step).catch(()=>{});
@@ -3525,6 +3603,9 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'attack') {
       if (!playerData) return;
+      
+      // End follow mode when player attacks
+      endFollowMode(playerData, ws);
       
       // End NPC interaction on attack
       if (playerData.npcInteraction) {
@@ -3742,6 +3823,9 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'toggle_rest') {
       if (!playerData) return;
       
+      // End follow mode when player rests/sits
+      endFollowMode(playerData, ws);
+      
       // Toggle resting state
       playerData.isResting = !playerData.isResting;
       
@@ -3815,6 +3899,9 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'pickup_item') {
       if (!playerData) return;
+      
+      // End follow mode when player picks up items
+      endFollowMode(playerData, ws);
       
       // End NPC interaction on pickup/drop
       if (playerData.npcInteraction) {
@@ -4273,6 +4360,9 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'use_fire_pillar_spell') {
       if (!playerData) return;
       
+      // End follow mode when using items
+      endFollowMode(playerData, ws);
+      
       const { itemId } = msg;
       
       // Verify player has item 97 in hands
@@ -4314,6 +4404,9 @@ wss.on('connection', (ws) => {
     else if (msg.type === 'use_consumable_item') {
       console.log(`Debug: Received use_consumable_item message for item ${msg.itemId}`);
       if (!playerData) return;
+      
+      // End follow mode when using items
+      endFollowMode(playerData, ws);
       
       const { itemId } = msg;
       console.log(`Debug: Player ${playerData.username} trying to use item ${itemId}, hands: ${playerData.hands}`);
@@ -4825,6 +4918,9 @@ wss.on('connection', (ws) => {
 
     else if (msg.type === 'look') {
       if (!playerData) return;
+      
+      // End follow mode when player looks
+      endFollowMode(playerData, ws);
       
       // Get the adjacent position based on player's facing direction
       const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
@@ -5797,6 +5893,48 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // Check for -follow command
+      if (t.toLowerCase() === '-follow') {
+        // Get adjacent position in front of player
+        const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+        
+        // Find other player at adjacent position
+        let otherPlayer = null;
+        
+        for (const [clientWs, clientPlayer] of clients.entries()) {
+          if (clientPlayer && 
+              clientPlayer.pos_x === adjacentPos.x && 
+              clientPlayer.pos_y === adjacentPos.y && 
+              clientPlayer.map_id === playerData.map_id &&
+              clientPlayer.id !== playerData.id) {
+            otherPlayer = clientPlayer;
+            break;
+          }
+        }
+        
+        if (!otherPlayer) {
+          send(ws, { 
+            type: 'chat', 
+            text: 'There is no one in front of you to follow.',
+            color: 'black'
+          });
+          return;
+        }
+        
+        // Set follow mode
+        playerData.following = otherPlayer.id;
+        
+        // Send confirmation message
+        send(ws, { 
+          type: 'chat', 
+          text: `You are now following ${otherPlayer.username}.`,
+          color: 'black'
+        });
+        
+        console.log(`Player ${playerData.username} started following ${otherPlayer.username}`);
+        return;
+      }
+
       // Regular chat message
       const chatMessage = `${playerData.username}: ${t}`;
       broadcast({ type: 'chat', text: chatMessage });
@@ -5814,6 +5952,16 @@ wss.on('connection', (ws) => {
       if (attackTimeout) {
         clearTimeout(attackTimeout);
         attackTimeouts.delete(playerData.id);
+      }
+      
+      // End follow mode for this player and any followers
+      endFollowMode(playerData, null); // No ws since they're disconnecting
+      
+      // End follow mode for any players following this disconnected player
+      for (const [followerWs, followerData] of clients.entries()) {
+        if (followerData && followerData.following === playerData.id) {
+          endFollowMode(followerData, followerWs);
+        }
       }
       
       // Set animation_frame to 6 (right idle) and reset direction/step when player disconnects
