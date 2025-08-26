@@ -20,7 +20,11 @@
   ],
   "holders": [
     {
-      "coordinates": "32,16",
+      "coordinates": "49,20",
+      "item": 0
+    },
+    {
+      "coordinates": "49,19",
       "item": 0
     }
   ],
@@ -36,8 +40,8 @@
   ],
   "npcs": [
     {
-      "type": 0,
-      "coordinates": "0,0"
+      "type": 6,
+      "coordinates": "51,20"
     }
   ]
 }

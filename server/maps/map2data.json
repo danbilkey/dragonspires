@@ -19,8 +19,8 @@
   ],
   "holders": [
     {
-      "coordinates": "63,40",
-      "item": 110
+      "coordinates": "5,22",
+      "item": 0
     }
   ],
   "enemies": [
@@ -39,8 +39,8 @@
   ],
   "npcs": [
     {
-      "type": 0,
-      "coordinates": "0,0"
+      "type": 5,
+      "coordinates": "10,22"
     }
   ]
 }
