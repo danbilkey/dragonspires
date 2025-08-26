@@ -14,7 +14,7 @@ const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
 
 const MAX_CHAT_LEN = 200;
-const sqlLikePattern = /(select|insert|update|delete|drop|alter|truncate|merge|exec|union|;|--|\/\*|\*\/|xp_)/i;
+const sqlLikePattern = /(select|insert|update|delete|\bdrop\b|alter|truncate|merge|exec|union|;|--|\/\*|\*\/|xp_)/i;
 function looksMalicious(text) {
   if (!text || typeof text !== 'string') return true;
   if (text.length > MAX_CHAT_LEN) return true;
