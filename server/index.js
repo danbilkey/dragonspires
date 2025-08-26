@@ -74,8 +74,8 @@ const playerAttackIndex = new Map(); // Map<playerId, attackIndex> for alternati
 // In-memory item storage
 let mapItems = {}; // { "x,y": itemId }
 
-// In-memory container storage (for dropped gold)
-let mapContainers = {}; // { "x,y": { gold: number, items: [] } }
+// In-memory container storage (for dropped gold) - now includes map info
+let mapContainers = {}; // { "mapId:x,y": { gold: number, items: [], mapId: number } }
 
 // Active spells storage
 let spells = {}; // { id: spellData }
@@ -818,6 +818,58 @@ function getOppositeDirection(direction) {
     'right': 'left'
   };
   return opposites[direction] || 'down';
+}
+
+// Helper function to get all current map items (database + memory)
+async function getAllMapItems(mapId) {
+  try {
+    // Load database items
+    const dbItems = await loadItemsFromDatabase(mapId);
+    
+    // Merge with memory items (dropped gold, etc.)
+    const allItems = { ...dbItems };
+    
+    // Add memory items (like dropped gold piles) and items from containers for this specific map
+    for (const [posKey, itemId] of Object.entries(mapItems)) {
+      // Memory items override database items for the same position
+      allItems[posKey] = itemId;
+    }
+    
+    // Add gold pile visuals from containers for this specific map
+    for (const [containerKey, container] of Object.entries(mapContainers)) {
+      if (container.mapId === mapId) {
+        // Extract position from containerKey (format: "mapId:x,y")
+        const posKey = containerKey.split(':')[1];
+        if (posKey && !allItems[posKey]) {
+          // Add gold pile visual if no other item is there
+          allItems[posKey] = 25; // Gold pile
+        }
+      }
+    }
+    
+    return allItems;
+  } catch (error) {
+    console.error(`Error loading all map items for map ${mapId}:`, error);
+    // Return filtered memory items as fallback
+    const memoryItems = {};
+    
+    // Include regular memory items
+    for (const [posKey, itemId] of Object.entries(mapItems)) {
+      memoryItems[posKey] = itemId;
+    }
+    
+    // Include gold piles for this map
+    for (const [containerKey, container] of Object.entries(mapContainers)) {
+      if (container.mapId === mapId) {
+        const posKey = containerKey.split(':')[1];
+        if (posKey && !memoryItems[posKey]) {
+          memoryItems[posKey] = 25; // Gold pile
+        }
+      }
+    }
+    
+    return memoryItems;
+  }
 }
 
 // Handle shop buy transactions
@@ -3121,14 +3173,8 @@ wss.on('connection', (ws) => {
         // Load player inventory
         const inventory = await loadPlayerInventory(playerData.id);
 
-        // Load items for the player's current map
-        let playerMapItems = {};
-        try {
-          playerMapItems = await loadItemsFromDatabase(playerData.map_id);
-        } catch (itemError) {
-          console.error(`Error loading items for map ${playerData.map_id}:`, itemError);
-          playerMapItems = {}; // Fallback to empty items
-        }
+        // Load all items for the player's current map (database + memory)
+        const playerMapItems = await getAllMapItems(playerData.map_id);
 
         const others = Array.from(clients.values())
           .filter(p => p.id !== playerData.id)
@@ -3213,14 +3259,8 @@ wss.on('connection', (ws) => {
         // Load player inventory
         const inventory = await loadPlayerInventory(playerData.id);
 
-        // Load items for the player's current map
-        let playerMapItems = {};
-        try {
-          playerMapItems = await loadItemsFromDatabase(playerData.map_id);
-        } catch (itemError) {
-          console.error(`Error loading items for map ${playerData.map_id}:`, itemError);
-          playerMapItems = {}; // Fallback to empty items
-        }
+        // Load all items for the player's current map (database + memory)
+        const playerMapItems = await getAllMapItems(playerData.map_id);
 
         const others = Array.from(clients.values()).filter(p => p.id !== playerData.id);
         
@@ -3920,7 +3960,8 @@ wss.on('connection', (ws) => {
       // Handle gold pile pickup (item #25)
       if (itemAtPosition === 25) {
         const playerPos = `${playerData.pos_x},${playerData.pos_y}`;
-        const goldContainer = mapContainers[playerPos];
+        const containerKey = `${playerData.map_id}:${playerPos}`;
+        const goldContainer = mapContainers[containerKey];
         
         if (goldContainer && goldContainer.gold > 0) {
           // Pick up all the gold
@@ -3965,7 +4006,7 @@ wss.on('connection', (ws) => {
           }
           
           // Remove container from memory
-          delete mapContainers[playerPos];
+          delete mapContainers[containerKey];
           
           console.log(`Player ${playerData.username} picked up ${goldAmount} gold from ground, total now: ${playerData.gold}`);
         }
@@ -5863,9 +5904,10 @@ wss.on('connection', (ws) => {
         
         try {
           const playerPos = `${playerData.pos_x},${playerData.pos_y}`;
+          const containerKey = `${playerData.map_id}:${playerPos}`;
           
           // Simple approach: Create a container in memory and place a gold pile visual (item #25)
-          let existingContainer = mapContainers[playerPos];
+          let existingContainer = mapContainers[containerKey];
           
           if (existingContainer) {
             // Add gold to existing container
@@ -5875,9 +5917,10 @@ wss.on('connection', (ws) => {
             const existingItem = mapItems[playerPos];
             
             // Create new container
-            mapContainers[playerPos] = {
+            mapContainers[containerKey] = {
               gold: amount,
-              items: existingItem ? [existingItem] : []
+              items: existingItem ? [existingItem] : [],
+              mapId: playerData.map_id
             };
             
             // Remove the item from the ground if it existed and add to container
