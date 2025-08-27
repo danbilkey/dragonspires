@@ -4633,35 +4633,50 @@ wss.on('connection', (ws) => {
       const playerMapSpec = getMapSpec(playerData.map_id);
       const targetItemId = getItemAtPosition(targetPos.x, targetPos.y, playerMapSpec, playerData.map_id);
       
+      console.log(`Key usage: Player ${playerData.username} at (${playerData.pos_x},${playerData.pos_y}) facing ${playerData.direction}, target position (${targetPos.x},${targetPos.y}), found item ${targetItemId}`);
+      
       // Check if target contains item #188 or #233
       if (targetItemId !== 188 && targetItemId !== 233) {
+        console.log(`Key usage failed: Item ${targetItemId} is not a gate (188 or 233)`);
         return;
       }
+      
+      console.log(`Key usage successful: Found gate ${targetItemId} at (${targetPos.x},${targetPos.y}), proceeding with removal`);
       
       // Remove the target item (item #188 or #233) using two-step replacement
       const posKey = `${targetPos.x},${targetPos.y}`;
       
-      // Step 1: Replace with item #3
-      mapItems[posKey] = 3;
-      saveItemToDatabase(targetPos.x, targetPos.y, 3, playerData.map_id);
-      broadcast({
-        type: 'item_placed',
-        x: targetPos.x,
-        y: targetPos.y,
-        itemId: 3
-      });
-      
-      // Step 2: Immediately replace with item #0 (remove)
-      setTimeout(() => {
-        mapItems[posKey] = 0;
-        saveItemToDatabase(targetPos.x, targetPos.y, 0, playerData.map_id);
+      try {
+        // Step 1: Replace with item #3
+        mapItems[posKey] = 3;
+        saveItemToDatabase(targetPos.x, targetPos.y, 3, playerData.map_id);
+        console.log(`Broadcasting step 1: item_placed (${targetPos.x},${targetPos.y}) -> 3`);
         broadcast({
           type: 'item_placed',
           x: targetPos.x,
           y: targetPos.y,
-          itemId: 0
+          itemId: 3
         });
-      }, 50); // Small delay to ensure proper replacement
+        
+        // Step 2: Replace with item #0 (remove) - keep in mapItems to override base map data
+        setTimeout(() => {
+          try {
+            mapItems[posKey] = -1; // Use -1 to indicate permanently removed
+            saveItemToDatabase(targetPos.x, targetPos.y, 0, playerData.map_id);
+            console.log(`Broadcasting step 2: item_placed (${targetPos.x},${targetPos.y}) -> 0 (removed)`);
+            broadcast({
+              type: 'item_placed',
+              x: targetPos.x,
+              y: targetPos.y,
+              itemId: 0
+            });
+          } catch (error) {
+            console.error('Error in step 2 of gate removal:', error);
+          }
+        }, 50); // Small delay to ensure proper replacement
+      } catch (error) {
+        console.error('Error in step 1 of gate removal:', error);
+      }
       
       // Check for key crumbling based on item type
       let keyDestroyed = false;
