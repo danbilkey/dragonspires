@@ -1275,8 +1275,8 @@
           const key = `${msg.x},${msg.y}`;
           console.log(`Client received item_placed: (${msg.x},${msg.y}) -> ${msg.itemId}`);
           if (msg.itemId === 0) {
-            delete mapItems[key];
-            console.log(`Removed item at (${msg.x},${msg.y})`);
+            mapItems[key] = -1; // Use -1 to permanently override base map data
+            console.log(`Set item at (${msg.x},${msg.y}) to -1 (permanently removed)`);
           } else {
             mapItems[key] = msg.itemId;
             console.log(`Placed item ${msg.itemId} at (${msg.x},${msg.y})`);
@@ -2956,6 +2956,11 @@
       const mapItem = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
         ? mapSpec.items[y][x] : 0;
       const placedItem = mapItems[`${x},${y}`];
+      
+      // Debug logging for gate positions
+      if ((x === 36 && y === 38) || mapItem === 188 || mapItem === 233 || placedItem === 188 || placedItem === 233) {
+        console.log(`getItemAtPosition(${x},${y}): mapItem=${mapItem}, placedItem=${placedItem}, returning=${placedItem !== undefined ? (placedItem === -1 || placedItem === 0 ? 0 : placedItem) : mapItem}`);
+      }
       
       if (placedItem !== undefined) {
         if (placedItem === -1) {
