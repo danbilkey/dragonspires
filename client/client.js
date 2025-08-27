@@ -1503,6 +1503,12 @@
             type: 'use_consumable_item', 
             itemId: handsItem
           });
+        } else if (handsItem === 200 || handsItem === 249) {
+          // Key items - no magic cost required
+          send({ 
+            type: 'use_key_item', 
+            itemId: handsItem
+          });
         } else if (handsItem > 0 && transformations[handsItem]) {
           const transformation = transformations[handsItem];
           
@@ -2297,13 +2303,28 @@
       if (!loggedIn || !localPlayer) return;
       const topY = 19, bottomY = 135, span = bottomY - topY;
 
+      // Stamina bar with color based on percentage
       const sPct = Math.max(0, Math.min(1, (localPlayer.stamina ?? 0) / Math.max(1, (localPlayer.max_stamina ?? 1))));
       const sFillY = topY + (1 - sPct) * span;
-      ctx.fillStyle = '#00ff00'; ctx.fillRect(187, sFillY, 13, bottomY - sFillY);
+      const staminaPercent = sPct * 100;
+      
+      // Determine stamina bar color based on percentage
+      let staminaColor;
+      if (staminaPercent >= 50) {
+        staminaColor = '#0000ff'; // Blue for 50-100%
+      } else if (staminaPercent >= 25) {
+        staminaColor = '#ffff00'; // Yellow for 25-49%
+      } else {
+        staminaColor = '#ff0000'; // Red for 0-24%
+      }
+      
+      ctx.fillStyle = staminaColor; 
+      ctx.fillRect(187, sFillY, 13, bottomY - sFillY);
 
+      // HP bar (now green like the old stamina bar)
       const lPct = Math.max(0, Math.min(1, (localPlayer.life ?? 0) / Math.max(1, (localPlayer.max_life ?? 1))));
       const lFillY = topY + (1 - lPct) * span;
-      ctx.fillStyle = '#ff0000'; ctx.fillRect(211, lFillY, 13, bottomY - lFillY);
+      ctx.fillStyle = '#00ff00'; ctx.fillRect(211, lFillY, 13, bottomY - lFillY);
 
       const mx = 177, my = 247;
       const mCur = localPlayer.magic ?? 0, mMax = localPlayer.max_magic ?? 0;
