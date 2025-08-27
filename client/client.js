@@ -1273,10 +1273,13 @@
 
         case 'item_placed':
           const key = `${msg.x},${msg.y}`;
+          console.log(`Client received item_placed: (${msg.x},${msg.y}) -> ${msg.itemId}`);
           if (msg.itemId === 0) {
             delete mapItems[key];
+            console.log(`Removed item at (${msg.x},${msg.y})`);
           } else {
             mapItems[key] = msg.itemId;
+            console.log(`Placed item ${msg.itemId} at (${msg.x},${msg.y})`);
           }
           break;
 
