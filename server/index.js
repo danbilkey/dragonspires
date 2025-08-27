@@ -1011,7 +1011,8 @@ function loadNPCLocations() {
   npcLocations = [];
   
   // Load NPCs from all map data files
-  for (let mapId = 1; mapId <= 4; mapId++) {
+  const mapIds = [1, 2, 3, 4, 5, 99];
+  for (const mapId of mapIds) {
     const mapData = getMapData(mapId);
     if (mapData && mapData.npcs) {
       for (const npc of mapData.npcs) {
@@ -1074,8 +1075,9 @@ async function loadAllMaps() {
     const fs = require('fs').promises;
     const path = require('path');
     
-    // Try to load maps 1-4
-    for (let mapId = 1; mapId <= 4; mapId++) {
+    // Load maps 1-5 and 99
+    const mapIds = [1, 2, 3, 4, 5, 99];
+    for (const mapId of mapIds) {
       await loadSingleMap(mapId);
       await loadSingleMapData(mapId);
     }
@@ -1429,7 +1431,8 @@ async function reloadMapContainers() {
     console.log('Cleared all map containers');
     
     // Reload containers from all map data files
-    for (let mapId = 1; mapId <= 4; mapId++) {
+    const mapIds = [1, 2, 3, 4, 5, 99];
+    for (const mapId of mapIds) {
       const mapData = getMapData(mapId);
       if (mapData && mapData.holders) {
         for (const holder of mapData.holders) {
@@ -1492,7 +1495,8 @@ async function reloadEnemies() {
     console.log('Cleared all enemies');
     
     // Reload enemies from all map data files
-    for (let mapId = 1; mapId <= 4; mapId++) {
+    const mapIds = [1, 2, 3, 4, 5, 99];
+    for (const mapId of mapIds) {
       const mapData = getMapData(mapId);
       if (mapData && mapData.enemies) {
         for (const enemy of mapData.enemies) {
@@ -4634,20 +4638,30 @@ wss.on('connection', (ws) => {
         return;
       }
       
-      // Remove the target item (item #188 or #233)
+      // Remove the target item (item #188 or #233) using two-step replacement
       const posKey = `${targetPos.x},${targetPos.y}`;
-      mapItems[posKey] = 0; // Remove the item
       
-      // Save to database (remove item)
-      saveItemToDatabase(targetPos.x, targetPos.y, 0, playerData.map_id);
-      
-      // Broadcast item removal
+      // Step 1: Replace with item #3
+      mapItems[posKey] = 3;
+      saveItemToDatabase(targetPos.x, targetPos.y, 3, playerData.map_id);
       broadcast({
         type: 'item_placed',
         x: targetPos.x,
         y: targetPos.y,
-        itemId: 0
+        itemId: 3
       });
+      
+      // Step 2: Immediately replace with item #0 (remove)
+      setTimeout(() => {
+        mapItems[posKey] = 0;
+        saveItemToDatabase(targetPos.x, targetPos.y, 0, playerData.map_id);
+        broadcast({
+          type: 'item_placed',
+          x: targetPos.x,
+          y: targetPos.y,
+          itemId: 0
+        });
+      }, 50); // Small delay to ensure proper replacement
       
       // Check for key crumbling based on item type
       let keyDestroyed = false;
