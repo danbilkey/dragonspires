@@ -1177,13 +1177,6 @@ async function loadSingleMapData(mapId) {
       const parsed = JSON.parse(data);
       serverMapData[mapId] = parsed;
       console.log(`Server loaded map ${mapId} data from: ${usedPath}`);
-      
-      // Debug logging for NPCs
-      if (parsed.npcs) {
-        console.log(`Debug: Map ${mapId} has ${parsed.npcs.length} NPCs:`, parsed.npcs.map(n => `${n.coordinates} (type ${n.type})`));
-      } else {
-        console.log(`Debug: Map ${mapId} has no NPCs`);
-      }
     } catch (parseError) {
       console.error(`JSON parse error in ${mapDataFileName}:`, parseError.message);
       console.error(`File content length: ${data.length} characters`);
@@ -4605,6 +4598,98 @@ wss.on('connection', (ws) => {
       
       console.log(`Player ${playerData.username} used consumable ${itemDetails.name}, ${statEffected} increased by ${statIncrease} to ${newStatValue}`);
     }
+    
+    else if (msg.type === 'use_key_item') {
+      if (!playerData) return;
+      
+      // End follow mode when using items
+      endFollowMode(playerData, ws);
+      
+      const { itemId } = msg;
+      
+      // Check if player has the key item in hands (item #200 or #249)
+      if (playerData.hands !== 200 && playerData.hands !== 249) {
+        return;
+      }
+      
+      // Verify the item ID matches what's in hands
+      if (playerData.hands !== itemId) {
+        return;
+      }
+      
+      // Get position in front of player
+      const targetPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+      
+      // Check bounds
+      if (targetPos.x < 0 || targetPos.x >= MAP_WIDTH || targetPos.y < 0 || targetPos.y >= MAP_HEIGHT) {
+        return;
+      }
+      
+      // Get item at target position
+      const playerMapSpec = getMapSpec(playerData.map_id);
+      const targetItemId = getItemAtPosition(targetPos.x, targetPos.y, playerMapSpec, playerData.map_id);
+      
+      // Check if target contains item #188 or #233
+      if (targetItemId !== 188 && targetItemId !== 233) {
+        return;
+      }
+      
+      // Remove the target item (item #188 or #233)
+      const posKey = `${targetPos.x},${targetPos.y}`;
+      mapItems[posKey] = 0; // Remove the item
+      
+      // Save to database (remove item)
+      saveItemToDatabase(targetPos.x, targetPos.y, 0, playerData.map_id);
+      
+      // Broadcast item removal
+      broadcast({
+        type: 'item_placed',
+        x: targetPos.x,
+        y: targetPos.y,
+        itemId: 0
+      });
+      
+      // Check for key crumbling based on item type
+      let keyDestroyed = false;
+      if (itemId === 249) {
+        // Steel Key (item #249) - 50% chance to crumble
+        keyDestroyed = Math.random() < 0.5;
+        if (keyDestroyed) {
+          send(ws, {
+            type: 'chat',
+            text: 'Your Steel Key has crumbled to dust!',
+            color: 'black'
+          });
+        }
+      } else if (itemId === 200) {
+        // Gold Key (item #200) - 5% chance to crumble
+        keyDestroyed = Math.random() < 0.05;
+        if (keyDestroyed) {
+          send(ws, {
+            type: 'chat',
+            text: 'Your gold key has crumbled to dust!',
+            color: 'black'
+          });
+        }
+      }
+      
+      // Remove key from hands if it crumbled
+      if (keyDestroyed) {
+        playerData.hands = 0;
+        
+        // Update database
+        await updateStatsInDb(playerData.id, { hands: playerData.hands });
+        
+        // Send equipment update
+        broadcast({
+          type: 'player_equipment_update',
+          id: playerData.id,
+          hands: playerData.hands
+        });
+      }
+      
+      console.log(`Player ${playerData.username} used ${itemId === 200 ? 'Gold' : 'Steel'} Key on item ${targetItemId}, key destroyed: ${keyDestroyed}`);
+    }
 
     else if (msg.type === 'use_heal_spell') {
       if (!playerData) return;
@@ -5040,19 +5125,10 @@ wss.on('connection', (ws) => {
       // Get map data for readables
       const mapData = getMapData(playerData.map_id);
       
-      // Debug logging for NPC detection
-      console.log(`Debug NPC: Player ${playerData.username} on map ${playerData.map_id} looking at ${adjacentPos.x},${adjacentPos.y}`);
-      console.log(`Debug NPC: mapData exists: ${!!mapData}, has npcs: ${!!(mapData && mapData.npcs)}`);
-      if (mapData && mapData.npcs) {
-        console.log(`Debug NPC: Found ${mapData.npcs.length} NPCs on map ${playerData.map_id}:`, mapData.npcs.map(n => `${n.coordinates} (type ${n.type})`));
-      }
-      
       // Check for NPCs first (highest priority)
       if (mapData && mapData.npcs) {
         const coordinateString = `${adjacentPos.x},${adjacentPos.y}`;
         const npc = mapData.npcs.find(n => n.coordinates === coordinateString);
-        
-        console.log(`Debug NPC: Looking for NPC at ${coordinateString}, found: ${!!npc}`);
         
         if (npc) {
           // Found an NPC - start interaction
