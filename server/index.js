@@ -1662,6 +1662,218 @@ function broadcastToMap(mapId, obj) {
   }
 }
 
+// Potion and Statue attack system
+async function handlePotionStatueAttack(playerData, ws, attackPos) {
+  const playerMapSpec = getMapSpec(playerData.map_id);
+  const targetItemId = getItemAtPosition(attackPos.x, attackPos.y, playerMapSpec, playerData.map_id);
+  
+  // Define potion mappings
+  const potionMappings = {
+    165: 2,   // item# 165 -> enemy# 2
+    239: 10,  // item# 239 -> enemy# 10
+    164: 33,  // item# 164 -> enemy# 33
+    248: 14,  // item# 248 -> enemy# 14
+    308: 6,   // item# 308 -> enemy# 6
+    240: 12   // item# 240 -> enemy# 12
+  };
+  
+  // Define statue mappings
+  const statueMappings = {
+    182: { enemyType: 13, direction: 'down' },   // item# 182 -> enemy# 13 facing down
+    183: { enemyType: 13, direction: 'right' },  // item# 183 -> enemy# 13 facing right
+    191: { enemyType: 9, direction: 'down' }     // item# 191 -> enemy# 9 facing down
+  };
+  
+  console.log(`Player ${playerData.username} attacking item ${targetItemId} at (${attackPos.x}, ${attackPos.y})`);
+  
+  // Check if attacking a potion
+  if (potionMappings[targetItemId]) {
+    console.log(`Potion attack detected: item ${targetItemId}`);
+    await handlePotionAttack(playerData.map_id, attackPos.x, attackPos.y, targetItemId, potionMappings[targetItemId], new Set());
+    return;
+  }
+  
+  // Check if attacking a statue
+  if (statueMappings[targetItemId]) {
+    console.log(`Statue attack detected: item ${targetItemId}`);
+    await handleStatueAttack(playerData.map_id, attackPos.x, attackPos.y, targetItemId, statueMappings[targetItemId]);
+    return;
+  }
+}
+
+// Handle potion attack with chain reaction
+async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPositions) {
+  const posKey = `${x},${y}`;
+  
+  // Prevent infinite loops in chain reactions
+  if (processedPositions.has(posKey)) {
+    return;
+  }
+  processedPositions.add(posKey);
+  
+  console.log(`Processing potion at (${x}, ${y}), item ${itemId} -> enemy ${enemyType}`);
+  
+  // Remove the potion from map
+  const key = `${x},${y}`;
+  mapItems[key] = -1; // Mark as removed
+  
+  // Save removal to database
+  await saveItemToDatabase(x, y, 0, mapId);
+  
+  // Broadcast item removal
+  broadcast({
+    type: 'item_placed',
+    x: x,
+    y: y,
+    itemId: 0
+  });
+  
+  // Create temporary spell effect (item #124) for 0.5 seconds
+  const effectId = Date.now() + Math.random();
+  createPotionEffect(effectId, x, y, mapId);
+  
+  // Spawn enemy immediately (effect overlays the enemy)
+  const spawnedEnemy = await spawnEnemy(enemyType, mapId, x, y, true); // Mark as admin spawned for tracking
+  if (spawnedEnemy) {
+    console.log(`Spawned enemy ${enemyType} at (${x}, ${y}) from potion attack`);
+    
+    // Broadcast new enemy to all clients
+    broadcastToMap(mapId, {
+      type: 'enemy_spawned',
+      enemy: {
+        id: spawnedEnemy.id,
+        enemy_type: spawnedEnemy.enemy_type,
+        pos_x: spawnedEnemy.pos_x,
+        pos_y: spawnedEnemy.pos_y,
+        direction: spawnedEnemy.direction,
+        step: spawnedEnemy.step,
+        hp: spawnedEnemy.hp
+      }
+    });
+  }
+  
+  // Check for adjacent potions (4 directions) for chain reaction
+  const directions = [
+    { x: x, y: y - 1 },     // up
+    { x: x, y: y + 1 },     // down
+    { x: x - 1, y: y },     // left
+    { x: x + 1, y: y }      // right
+  ];
+  
+  const playerMapSpec = getMapSpec(mapId);
+  const potionMappings = {
+    165: 2, 239: 10, 164: 33, 248: 14, 308: 6, 240: 12
+  };
+  
+  for (const dir of directions) {
+    // Check map bounds
+    if (dir.x >= 0 && dir.x < MAP_WIDTH && dir.y >= 0 && dir.y < MAP_HEIGHT) {
+      const adjacentItemId = getItemAtPosition(dir.x, dir.y, playerMapSpec, mapId);
+      
+      // If adjacent tile has a potion, trigger chain reaction
+      if (potionMappings[adjacentItemId]) {
+        console.log(`Chain reaction: found adjacent potion ${adjacentItemId} at (${dir.x}, ${dir.y})`);
+        await handlePotionAttack(mapId, dir.x, dir.y, adjacentItemId, potionMappings[adjacentItemId], processedPositions);
+      }
+    }
+  }
+}
+
+// Handle statue attack
+async function handleStatueAttack(mapId, x, y, itemId, statueConfig) {
+  console.log(`Processing statue at (${x}, ${y}), item ${itemId} -> enemy ${statueConfig.enemyType} facing ${statueConfig.direction}`);
+  
+  // Remove the statue from map
+  const key = `${x},${y}`;
+  mapItems[key] = -1; // Mark as removed
+  
+  // Save removal to database
+  await saveItemToDatabase(x, y, 0, mapId);
+  
+  // Broadcast item removal
+  broadcast({
+    type: 'item_placed',
+    x: x,
+    y: y,
+    itemId: 0
+  });
+  
+  // Spawn enemy immediately with specified direction
+  const spawnedEnemy = await spawnEnemy(statueConfig.enemyType, mapId, x, y, true); // Mark as admin spawned
+  if (spawnedEnemy) {
+    // Set the enemy's direction
+    spawnedEnemy.direction = statueConfig.direction;
+    
+    // Update direction in database
+    await pool.query(
+      'UPDATE enemies SET direction = $1 WHERE id = $2',
+      [statueConfig.direction, spawnedEnemy.id]
+    );
+    
+    console.log(`Spawned enemy ${statueConfig.enemyType} at (${x}, ${y}) facing ${statueConfig.direction} from statue attack`);
+    
+    // Broadcast new enemy to all clients
+    broadcastToMap(mapId, {
+      type: 'enemy_spawned',
+      enemy: {
+        id: spawnedEnemy.id,
+        enemy_type: spawnedEnemy.enemy_type,
+        pos_x: spawnedEnemy.pos_x,
+        pos_y: spawnedEnemy.pos_y,
+        direction: spawnedEnemy.direction,
+        step: spawnedEnemy.step,
+        hp: spawnedEnemy.hp
+      }
+    });
+  }
+}
+
+// Potion effects system
+let potionEffects = {}; // Store active potion effects
+
+function createPotionEffect(effectId, x, y, mapId) {
+  const effect = {
+    id: effectId,
+    x: x,
+    y: y,
+    mapId: mapId,
+    startTime: Date.now()
+  };
+  
+  potionEffects[effectId] = effect;
+  
+  console.log(`Created potion effect ${effectId} at (${x}, ${y}) on map ${mapId}`);
+  
+  // Broadcast potion effect creation to all clients on the map
+  broadcastToMap(mapId, {
+    type: 'potion_effect_created',
+    effectId: effectId,
+    x: x,
+    y: y
+  });
+  
+  // Schedule removal after 0.5 seconds
+  setTimeout(() => {
+    removePotionEffect(effectId);
+  }, 500);
+}
+
+function removePotionEffect(effectId) {
+  const effect = potionEffects[effectId];
+  if (!effect) return;
+  
+  console.log(`Removing potion effect ${effectId}`);
+  
+  // Broadcast potion effect removal
+  broadcastToMap(effect.mapId, {
+    type: 'potion_effect_removed',
+    effectId: effectId
+  });
+  
+  // Remove from memory
+  delete potionEffects[effectId];
+}
+
 // Get animation frame based on direction and movement sequence
 function getMovementAnimationFrame(direction, sequenceIndex) {
   const sequenceType = MOVEMENT_SEQUENCE[sequenceIndex];
@@ -3847,6 +4059,9 @@ wss.on('connection', (ws) => {
       if (msg.direction) {
         playerData.direction = msg.direction;
       }
+      
+      // Check for potion/statue attacks before starting animation
+      await handlePotionStatueAttack(playerData, ws, adjacentPos);
       
       // Start attack animation (this will handle alternating)
       startAttackAnimation(playerData, ws);
