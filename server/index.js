@@ -1653,6 +1653,15 @@ function send(ws, obj) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
+function broadcastToMap(mapId, obj) {
+  const s = JSON.stringify(obj);
+  for (const [ws, playerData] of clients.entries()) {
+    if (playerData && Number(playerData.map_id) === Number(mapId) && ws.readyState === WebSocket.OPEN) {
+      ws.send(s);
+    }
+  }
+}
+
 // Get animation frame based on direction and movement sequence
 function getMovementAnimationFrame(direction, sequenceIndex) {
   const sequenceType = MOVEMENT_SEQUENCE[sequenceIndex];
@@ -3553,12 +3562,13 @@ wss.on('connection', (ws) => {
 
         // Handle followers - process all players following this player
         for (const [followerWs, followerData] of clients.entries()) {
-          if (followerData && followerData.following === playerData.id && followerData.map_id === playerData.map_id) {
+          if (followerData && followerData.following === playerData.id && Number(followerData.map_id) === Number(playerData.map_id)) {
             // Calculate where the follower should move to (right behind the leader)
             const followPos = getAdjacentPosition(nx, ny, getOppositeDirection(playerData.direction));
             
             // Check if the follower can move to this position
-            if (canMoveTo(followPos.x, followPos.y, followerData.map_id)) {
+            const followerMapSpec = getMapSpec(followerData.map_id);
+            if (canMoveTo(followPos.x, followPos.y, followerData.id, followerMapSpec, followerData.map_id)) {
               // Move the follower
               followerData.pos_x = followPos.x;
               followerData.pos_y = followPos.y;
