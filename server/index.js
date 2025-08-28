@@ -4749,15 +4749,22 @@ wss.on('connection', (ws) => {
         // Get position in front of player based on direction
         const targetPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
         
+        console.log(`Heal spell (item 100): Player ${playerData.username} at (${playerData.pos_x},${playerData.pos_y}) facing ${playerData.direction}, looking for player at (${targetPos.x},${targetPos.y}) on map ${playerData.map_id}`);
+        
         // Check if there's another player at target position
         let targetPlayer = null;
         for (const [otherWs, otherPlayerData] of clients.entries()) {
+          if (otherPlayerData && otherPlayerData.id !== playerData.id) {
+            console.log(`  Checking player ${otherPlayerData.username} at (${otherPlayerData.pos_x},${otherPlayerData.pos_y}) on map ${otherPlayerData.map_id}`);
+          }
+          
           if (otherPlayerData && 
               otherPlayerData.id !== playerData.id &&
               Number(otherPlayerData.map_id) === Number(playerData.map_id) &&
               otherPlayerData.pos_x === targetPos.x &&
               otherPlayerData.pos_y === targetPos.y) {
             targetPlayer = { ws: otherWs, data: otherPlayerData };
+            console.log(`  Found target player for heal: ${otherPlayerData.username}`);
             break;
           }
         }
@@ -4765,6 +4772,7 @@ wss.on('connection', (ws) => {
         // If no other player found, heal self
         if (!targetPlayer) {
           targetPlayer = { ws: ws, data: playerData };
+          console.log(`  No other player found, healing self: ${playerData.username}`);
         }
         
         // Heal the target player to full HP
@@ -5835,18 +5843,25 @@ wss.on('connection', (ws) => {
         // Get adjacent position in front of player
         const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
         
+        console.log(`-give command: Player ${playerData.username} at (${playerData.pos_x},${playerData.pos_y}) facing ${playerData.direction}, looking for player at (${adjacentPos.x},${adjacentPos.y}) on map ${playerData.map_id}`);
+        
         // Find other player at adjacent position
         let otherPlayer = null;
         let otherPlayerWs = null;
         
         for (const [clientWs, clientPlayer] of clients.entries()) {
+          if (clientPlayer && clientPlayer.id !== playerData.id) {
+            console.log(`  Checking player ${clientPlayer.username} at (${clientPlayer.pos_x},${clientPlayer.pos_y}) on map ${clientPlayer.map_id}`);
+          }
+          
           if (clientPlayer && 
               clientPlayer.pos_x === adjacentPos.x && 
               clientPlayer.pos_y === adjacentPos.y && 
-              clientPlayer.map_id === playerData.map_id &&
+              Number(clientPlayer.map_id) === Number(playerData.map_id) &&
               clientPlayer.id !== playerData.id) {
             otherPlayer = clientPlayer;
             otherPlayerWs = clientWs;
+            console.log(`  Found target player: ${clientPlayer.username}`);
             break;
           }
         }
@@ -5960,7 +5975,7 @@ wss.on('connection', (ws) => {
           if (clientPlayer && 
               clientPlayer.pos_x === adjacentPos.x && 
               clientPlayer.pos_y === adjacentPos.y && 
-              clientPlayer.map_id === playerData.map_id &&
+              Number(clientPlayer.map_id) === Number(playerData.map_id) &&
               clientPlayer.id !== playerData.id) {
             otherPlayer = clientPlayer;
             otherPlayerWs = clientWs;
@@ -6138,7 +6153,7 @@ wss.on('connection', (ws) => {
           if (clientPlayer && 
               clientPlayer.pos_x === adjacentPos.x && 
               clientPlayer.pos_y === adjacentPos.y && 
-              clientPlayer.map_id === playerData.map_id &&
+              Number(clientPlayer.map_id) === Number(playerData.map_id) &&
               clientPlayer.id !== playerData.id) {
             otherPlayer = clientPlayer;
             break;
