@@ -5004,6 +5004,32 @@ wss.on('connection', (ws) => {
       // Get enemies for target map
       const mapEnemies = getEnemiesForMap(targetMap);
       
+      // Get other players on target map (excluding the teleporting player)
+      const mapPlayers = [];
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && 
+            Number(otherPlayer.map_id) === Number(targetMap) && 
+            otherPlayer.id !== playerData.id) {
+          mapPlayers.push({
+            id: otherPlayer.id,
+            username: otherPlayer.username,
+            pos_x: otherPlayer.pos_x,
+            pos_y: otherPlayer.pos_y,
+            map_id: otherPlayer.map_id,
+            direction: otherPlayer.direction || 'down',
+            step: otherPlayer.step || 2,
+            isMoving: otherPlayer.isMoving || false,
+            isAttacking: otherPlayer.isAttacking || false,
+            isPickingUp: otherPlayer.isPickingUp || false,
+            isBRB: otherPlayer.isBRB || false,
+            temporarySprite: otherPlayer.temporarySprite || 0,
+            weapon: otherPlayer.weapon || 0,
+            armor: otherPlayer.armor || 0,
+            hands: otherPlayer.hands || 0
+          });
+        }
+      }
+      
       // Then send success response to teleporting player
       send(ws, {
         type: 'teleport_result',
@@ -5015,6 +5041,7 @@ wss.on('connection', (ws) => {
         mapId: targetMap,
         items: mapItems,
         enemies: mapEnemies,
+        players: mapPlayers, // Include other players on the map
         showLoadingScreen: {
           imagePath: '/assets/loadscreen.gif',
           x: 232,
