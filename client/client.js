@@ -267,6 +267,7 @@
     let electrocuteEffects = {}; // Store active electrocute effects by ID
     let healingEffects = {}; // Store active healing effects by ID
     let silverMistEffects = {}; // Store active silver mist effects by ID
+    let potionEffects = {}; // Store active potion effects by ID
 
     // NEW: Simplified direction and animation state system
     let playerDirection = 'down'; // Current facing direction
@@ -1236,6 +1237,20 @@
         case 'silver_mist_removed':
           delete silverMistEffects[msg.effectId];
           console.log(`Silver Mist effect ${msg.effectId} removed`);
+          break;
+
+        case 'potion_effect_created':
+          potionEffects[msg.effectId] = {
+            id: msg.effectId,
+            x: msg.x,
+            y: msg.y
+          };
+          console.log(`Potion effect ${msg.effectId} created at (${msg.x}, ${msg.y})`);
+          break;
+
+        case 'potion_effect_removed':
+          delete potionEffects[msg.effectId];
+          console.log(`Potion effect ${msg.effectId} removed`);
           break;
           
         case 'enemy_spawned':
@@ -2888,6 +2903,13 @@
             for (const [effectId, effect] of Object.entries(silverMistEffects)) {
               if (effect.x === x && effect.y === y) {
                 drawItemAtTile(screenX, screenY, 290);
+              }
+            }
+
+            // Draw potion effects after silver mist effects (renders item 124 for potions)
+            for (const [effectId, effect] of Object.entries(potionEffects)) {
+              if (effect.x === x && effect.y === y) {
+                drawItemAtTile(screenX, screenY, 124);
               }
             }
           }
