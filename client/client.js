@@ -1113,7 +1113,24 @@
                 localPlayer.map_id = msg.mapId;
               }
               
-              // No need to update otherPlayers here - the server broadcasts position updates
+              // Update other players on the new map
+              if (msg.players) {
+                // Clear existing other players and load players from new map
+                otherPlayers = {};
+                for (const player of msg.players) {
+                  otherPlayers[player.id] = {
+                    ...player,
+                    direction: player.direction || 'down',
+                    step: player.step || 2,
+                    isMoving: player.isMoving || false,
+                    isAttacking: player.isAttacking || false,
+                    isPickingUp: player.isPickingUp || false,
+                    isBRB: player.isBRB || false,
+                    temporarySprite: player.temporarySprite || 0
+                  };
+                }
+                console.log(`Teleport: Updated otherPlayers with ${msg.players.length} players on map ${msg.mapId}`);
+              }
               
               // Update map items
               if (msg.items) {
