@@ -1252,6 +1252,17 @@
           delete potionEffects[msg.effectId];
           console.log(`Potion effect ${msg.effectId} removed`);
           break;
+
+        case 'map_item_changed':
+          // Update the base map data when server changes an item (like removing potions/statues)
+          if (localPlayer && Number(localPlayer.map_id) === Number(msg.mapId)) {
+            if (mapSpec.items && mapSpec.items[msg.y] && typeof mapSpec.items[msg.y][msg.x] !== 'undefined') {
+              const oldItem = mapSpec.items[msg.y][msg.x];
+              mapSpec.items[msg.y][msg.x] = msg.itemId;
+              console.log(`Map item changed at (${msg.x}, ${msg.y}): ${oldItem} -> ${msg.itemId}`);
+            }
+          }
+          break;
           
         case 'enemy_spawned':
           // Add new enemy to the client
