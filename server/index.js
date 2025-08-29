@@ -1815,22 +1815,20 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
   
   console.log(`Confirmed potion ${itemId} at (${x}, ${y}), proceeding with removal and spawning`);
   
-  // Remove the potion from base map data directly
-  const mapSpec = getMapSpec(mapId);
-  if (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') {
-    mapSpec.items[y][x] = 0; // Permanently change base map data
-    console.log(`Set base map item at (${x}, ${y}) from ${itemId} to 0`);
-  }
+  // Remove the potion using mapItems for persistence across map reloads
+  const key = `${mapId}:${x},${y}`;
+  mapItems[key] = 0;
+  saveItemToDatabase(x, y, 0, mapId);
+  console.log(`Stored potion removal in mapItems at (${x}, ${y}) -> 0`);
   
-  // Broadcast map item change to all clients
+  // Broadcast item removal to all clients
   broadcast({
-    type: 'map_item_changed',
+    type: 'item_placed',
     x: x,
     y: y,
-    mapId: mapId,
     itemId: 0
   });
-  console.log(`Broadcasted map item change for (${x}, ${y}) to item 0`);
+  console.log(`Broadcasted item removal for (${x}, ${y}) to item 0`);
   
   // Create temporary spell effect (item #124) for 0.5 seconds
   const effectId = Date.now() + Math.random();
@@ -1890,19 +1888,17 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
 async function handleStatueAttack(mapId, x, y, itemId, statueConfig) {
   console.log(`Processing statue at (${x}, ${y}), item ${itemId} -> enemy ${statueConfig.enemyType} facing ${statueConfig.direction}`);
   
-  // Remove the statue from base map data directly
-  const mapSpec = getMapSpec(mapId);
-  if (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') {
-    mapSpec.items[y][x] = 0; // Permanently change base map data
-    console.log(`Set base map item at (${x}, ${y}) from ${itemId} to 0`);
-  }
+  // Remove the statue using mapItems for persistence across map reloads
+  const key = `${mapId}:${x},${y}`;
+  mapItems[key] = 0;
+  saveItemToDatabase(x, y, 0, mapId);
+  console.log(`Stored statue removal in mapItems at (${x}, ${y}) -> 0`);
   
-  // Broadcast map item change to all clients
+  // Broadcast item removal to all clients
   broadcast({
-    type: 'map_item_changed',
+    type: 'item_placed',
     x: x,
     y: y,
-    mapId: mapId,
     itemId: 0
   });
   
@@ -1997,42 +1993,20 @@ async function handleSkeletonAttack(playerData, ws, attackPos) {
   console.log(`Player ${playerData.username} attacking skeleton at (${attackPos.x}, ${attackPos.y})`);
   
   try {
-    // Check if it's a placed item or base map item
+    // Always store the change in mapItems for persistence across map reloads
     const key = `${playerData.map_id}:${attackPos.x},${attackPos.y}`;
-    const isPlacedItem = mapItems[key] !== undefined;
+    mapItems[key] = 211;
+    saveItemToDatabase(attackPos.x, attackPos.y, 211, playerData.map_id);
     
-    if (isPlacedItem) {
-      // Update the placed item
-      mapItems[key] = 211;
-      saveItemToDatabase(attackPos.x, attackPos.y, 211, playerData.map_id);
-      
-      console.log(`Skeleton crumbled: Updated placed item at (${attackPos.x},${attackPos.y}) -> 211`);
-      
-      // Broadcast item update
-      broadcast({
-        type: 'item_placed',
-        x: attackPos.x,
-        y: attackPos.y,
-        itemId: 211
-      });
-    } else {
-      // Update the base map data
-      if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
-          typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') {
-        playerMapSpec.items[attackPos.y][attackPos.x] = 211;
-        
-        console.log(`Skeleton crumbled: Direct map modification at (${attackPos.x},${attackPos.y}) -> 211`);
-        
-        // Broadcast map item change
-        broadcast({
-          type: 'map_item_changed',
-          x: attackPos.x,
-          y: attackPos.y,
-          itemId: 211,
-          mapId: playerData.map_id
-        });
-      }
-    }
+    console.log(`Skeleton crumbled: Stored change in mapItems at (${attackPos.x},${attackPos.y}) -> 211`);
+    
+    // Broadcast item update
+    broadcast({
+      type: 'item_placed',
+      x: attackPos.x,
+      y: attackPos.y,
+      itemId: 211
+    });
     
     // Send chat message
     send(ws, {
@@ -2060,42 +2034,20 @@ async function handleCoffinAttack(playerData, ws, attackPos) {
   console.log(`Player ${playerData.username} attacking coffin at (${attackPos.x}, ${attackPos.y})`);
   
   try {
-    // Check if it's a placed item or base map item
+    // Always store the change in mapItems for persistence across map reloads
     const key = `${playerData.map_id}:${attackPos.x},${attackPos.y}`;
-    const isPlacedItem = mapItems[key] !== undefined;
+    mapItems[key] = 203;
+    saveItemToDatabase(attackPos.x, attackPos.y, 203, playerData.map_id);
     
-    if (isPlacedItem) {
-      // Update the placed item
-      mapItems[key] = 203;
-      saveItemToDatabase(attackPos.x, attackPos.y, 203, playerData.map_id);
-      
-      console.log(`Coffin opened: Updated placed item at (${attackPos.x},${attackPos.y}) -> 203`);
-      
-      // Broadcast item update
-      broadcast({
-        type: 'item_placed',
-        x: attackPos.x,
-        y: attackPos.y,
-        itemId: 203
-      });
-    } else {
-      // Update the base map data
-      if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
-          typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') {
-        playerMapSpec.items[attackPos.y][attackPos.x] = 203;
-        
-        console.log(`Coffin opened: Direct map modification at (${attackPos.x},${attackPos.y}) -> 203`);
-        
-        // Broadcast map item change
-        broadcast({
-          type: 'map_item_changed',
-          x: attackPos.x,
-          y: attackPos.y,
-          itemId: 203,
-          mapId: playerData.map_id
-        });
-      }
-    }
+    console.log(`Coffin opened: Stored change in mapItems at (${attackPos.x},${attackPos.y}) -> 203`);
+    
+    // Broadcast item update
+    broadcast({
+      type: 'item_placed',
+      x: attackPos.x,
+      y: attackPos.y,
+      itemId: 203
+    });
     
     // Find closest adjacent tile to spawn enemy #33
     const adjacentTiles = [
@@ -6080,6 +6032,13 @@ wss.on('connection', (ws) => {
             }
           }
           
+          // Clear enemies visually for all clients on this map first
+          for (const [clientWs, clientPlayer] of clients.entries()) {
+            if (clientPlayer && Number(clientPlayer.map_id) === Number(mapId) && clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(JSON.stringify({ type: 'enemies_cleared' }));
+            }
+          }
+          
           // Delete enemies from memory and database
           for (const enemyId of enemyKeysToDelete) {
             delete enemies[enemyId];
@@ -6998,42 +6957,85 @@ setInterval(async () => {
         const droppedItem = playerData.hands;
         playerData.hands = 0;
         
-        // Create or update drop container at player's current position
+        // Get current item at player's position
+        const playerMapSpec = getMapSpec(playerData.map_id);
+        const currentFloorItemId = getItemAtPosition(playerData.pos_x, playerData.pos_y, playerMapSpec, playerData.map_id);
+        const currentFloorItemDetails = getItemDetails(currentFloorItemId);
+        
+        // Check if floor item is pickupable
+        const pickupableTypes = ['weapon', 'armor', 'useable', 'consumable', 'buff', 'garbage'];
+        const isFloorItemPickupable = currentFloorItemDetails && pickupableTypes.includes(currentFloorItemDetails.type);
+        
+        console.log(`Player ${playerData.username} died at (${playerData.pos_x}, ${playerData.pos_y}) with floor item ${currentFloorItemId} (type: ${currentFloorItemDetails?.type}), pickupable: ${isFloorItemPickupable}`);
+        
         const playerPos = `${playerData.map_id}:${playerData.pos_x},${playerData.pos_y}`;
         const containerKey = playerPos;
         
-        let existingContainer = mapContainers[containerKey];
-        
-        if (existingContainer) {
-          // Add item to existing container
-          existingContainer.items.push(droppedItem);
+        if (isFloorItemPickupable) {
+          // Floor item is pickupable - create/update container with both items
+          let existingContainer = mapContainers[containerKey];
+          
+          if (existingContainer) {
+            // Add hand item to existing container
+            existingContainer.items.push(droppedItem);
+            console.log(`Added ${droppedItem} to existing container at (${playerData.pos_x}, ${playerData.pos_y})`);
+          } else {
+            // Create new container with both floor item and hand item
+            const existingItem = mapItems[playerPos];
+            mapContainers[containerKey] = {
+              gold: 0,
+              items: existingItem ? [existingItem, droppedItem] : [currentFloorItemId, droppedItem],
+              mapId: playerData.map_id
+            };
+            
+            // Remove the floor item since it's now in container
+            if (existingItem) {
+              delete mapItems[playerPos];
+            }
+            
+            // Place drop container visual (item #201)
+            mapItems[playerPos] = 201;
+            
+            // Broadcast drop container placement
+            broadcast({
+              type: 'item_placed',
+              x: playerData.pos_x,
+              y: playerData.pos_y,
+              itemId: 201
+            });
+            
+            console.log(`Created container with floor item ${currentFloorItemId} and hand item ${droppedItem} at (${playerData.pos_x}, ${playerData.pos_y})`);
+          }
         } else {
-          // Check if there's already an item on the ground
-          const existingItem = mapItems[playerPos];
+          // Floor item is not pickupable - drop hand item on top
+          let existingContainer = mapContainers[containerKey];
           
-          // Create new container
-          mapContainers[containerKey] = {
-            gold: 0,
-            items: existingItem ? [existingItem, droppedItem] : [droppedItem],
-            mapId: playerData.map_id
-          };
-          
-          // Remove the existing ground item if it existed
-          if (existingItem) {
-            delete mapItems[playerPos];
+          if (existingContainer) {
+            // Add hand item to existing container
+            existingContainer.items.push(droppedItem);
+            console.log(`Added ${droppedItem} to existing container (on top of non-pickupable item) at (${playerData.pos_x}, ${playerData.pos_y})`);
+          } else {
+            // Create new container with just the hand item (floor item stays as-is)
+            mapContainers[containerKey] = {
+              gold: 0,
+              items: [droppedItem],
+              mapId: playerData.map_id
+            };
+            
+            // Place drop container visual (item #201) - this will render on top of the floor item
+            mapItems[playerPos] = 201;
+            
+            // Broadcast drop container placement
+            broadcast({
+              type: 'item_placed',
+              x: playerData.pos_x,
+              y: playerData.pos_y,
+              itemId: 201
+            });
+            
+            console.log(`Created container with hand item ${droppedItem} on top of non-pickupable floor item ${currentFloorItemId} at (${playerData.pos_x}, ${playerData.pos_y})`);
           }
         }
-        
-        // Place drop container visual (item #201)
-        mapItems[playerPos] = 201;
-        
-        // Broadcast drop container placement
-        broadcast({
-          type: 'item_placed',
-          x: playerData.pos_x,
-          y: playerData.pos_y,
-          itemId: 201
-        });
         
         console.log(`Player ${playerData.username} dropped item ${droppedItem} on death`);
       }
