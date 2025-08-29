@@ -1986,42 +1986,60 @@ function removePotionEffect(effectId) {
 async function handleSkeletonAttack(playerData, ws, attackPos) {
   const playerMapSpec = getMapSpec(playerData.map_id);
   
-  // Check the base map item directly (not influenced by mapItems)
-  const baseMapItemId = (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
-                        typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') 
-                        ? playerMapSpec.items[attackPos.y][attackPos.x] : 0;
+  // Check both placed items and base map items
+  const targetItemId = getItemAtPosition(attackPos.x, attackPos.y, playerMapSpec, playerData.map_id);
   
   // Check if attacking item #209 (skeleton)
-  if (baseMapItemId !== 209) {
+  if (targetItemId !== 209) {
     return; // Not a skeleton, no action needed
   }
   
   console.log(`Player ${playerData.username} attacking skeleton at (${attackPos.x}, ${attackPos.y})`);
   
   try {
-    // Directly modify the base map data to change item #209 to #211
-    if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
-        typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') {
-      playerMapSpec.items[attackPos.y][attackPos.x] = 211;
+    // Check if it's a placed item or base map item
+    const key = `${playerData.map_id}:${attackPos.x},${attackPos.y}`;
+    const isPlacedItem = mapItems[key] !== undefined;
+    
+    if (isPlacedItem) {
+      // Update the placed item
+      mapItems[key] = 211;
+      saveItemToDatabase(attackPos.x, attackPos.y, 211, playerData.map_id);
       
-      console.log(`Skeleton crumbled: Direct map modification at (${attackPos.x},${attackPos.y}) -> 211`);
+      console.log(`Skeleton crumbled: Updated placed item at (${attackPos.x},${attackPos.y}) -> 211`);
       
-      // Broadcast map item change to all clients on this map
+      // Broadcast item update
       broadcast({
-        type: 'map_item_changed',
+        type: 'item_placed',
         x: attackPos.x,
         y: attackPos.y,
-        itemId: 211,
-        mapId: playerData.map_id
+        itemId: 211
       });
-      
-      // Send chat message
-      send(ws, {
-        type: 'chat',
-        text: 'The skeleton crumbled to dust, leaving behing a Blue Necklace.',
-        color: 'black'
-      });
+    } else {
+      // Update the base map data
+      if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
+          typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') {
+        playerMapSpec.items[attackPos.y][attackPos.x] = 211;
+        
+        console.log(`Skeleton crumbled: Direct map modification at (${attackPos.x},${attackPos.y}) -> 211`);
+        
+        // Broadcast map item change
+        broadcast({
+          type: 'map_item_changed',
+          x: attackPos.x,
+          y: attackPos.y,
+          itemId: 211,
+          mapId: playerData.map_id
+        });
+      }
     }
+    
+    // Send chat message
+    send(ws, {
+      type: 'chat',
+      text: 'The skeleton crumbled to dust, leaving behing a Blue Necklace.',
+      color: 'black'
+    });
   } catch (error) {
     console.error('Error handling skeleton attack:', error);
   }
@@ -2031,85 +2049,103 @@ async function handleSkeletonAttack(playerData, ws, attackPos) {
 async function handleCoffinAttack(playerData, ws, attackPos) {
   const playerMapSpec = getMapSpec(playerData.map_id);
   
-  // Check the base map item directly (not influenced by mapItems)
-  const baseMapItemId = (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
-                        typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') 
-                        ? playerMapSpec.items[attackPos.y][attackPos.x] : 0;
+  // Check both placed items and base map items
+  const targetItemId = getItemAtPosition(attackPos.x, attackPos.y, playerMapSpec, playerData.map_id);
   
   // Check if attacking item #202 (coffin)
-  if (baseMapItemId !== 202) {
+  if (targetItemId !== 202) {
     return; // Not a coffin, no action needed
   }
   
   console.log(`Player ${playerData.username} attacking coffin at (${attackPos.x}, ${attackPos.y})`);
   
   try {
-    // Directly modify the base map data to change item #202 to #203
-    if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
-        typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') {
-      playerMapSpec.items[attackPos.y][attackPos.x] = 203;
+    // Check if it's a placed item or base map item
+    const key = `${playerData.map_id}:${attackPos.x},${attackPos.y}`;
+    const isPlacedItem = mapItems[key] !== undefined;
+    
+    if (isPlacedItem) {
+      // Update the placed item
+      mapItems[key] = 203;
+      saveItemToDatabase(attackPos.x, attackPos.y, 203, playerData.map_id);
       
-      console.log(`Coffin opened: Direct map modification at (${attackPos.x},${attackPos.y}) -> 203`);
+      console.log(`Coffin opened: Updated placed item at (${attackPos.x},${attackPos.y}) -> 203`);
       
-      // Broadcast map item change to all clients on this map
+      // Broadcast item update
       broadcast({
-        type: 'map_item_changed',
+        type: 'item_placed',
         x: attackPos.x,
         y: attackPos.y,
-        itemId: 203,
-        mapId: playerData.map_id
+        itemId: 203
       });
-      
-      // Find closest adjacent tile to spawn enemy #33
-      const adjacentTiles = [
-        { x: attackPos.x, y: attackPos.y - 1 }, // up
-        { x: attackPos.x, y: attackPos.y + 1 }, // down  
-        { x: attackPos.x - 1, y: attackPos.y }, // left
-        { x: attackPos.x + 1, y: attackPos.y }  // right
-      ];
-      
-      let spawnPos = null;
-      
-      // Check each adjacent tile for availability
-      for (const pos of adjacentTiles) {
-        if (pos.x >= 0 && pos.x < MAP_WIDTH && pos.y >= 0 && pos.y < MAP_HEIGHT) {
-          // Check if position is free (no collision, no enemy, no player)
-          if (canMoveTo(pos.x, pos.y, null, playerMapSpec, playerData.map_id)) {
-            spawnPos = pos;
-            break;
-          }
+    } else {
+      // Update the base map data
+      if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
+          typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') {
+        playerMapSpec.items[attackPos.y][attackPos.x] = 203;
+        
+        console.log(`Coffin opened: Direct map modification at (${attackPos.x},${attackPos.y}) -> 203`);
+        
+        // Broadcast map item change
+        broadcast({
+          type: 'map_item_changed',
+          x: attackPos.x,
+          y: attackPos.y,
+          itemId: 203,
+          mapId: playerData.map_id
+        });
+      }
+    }
+    
+    // Find closest adjacent tile to spawn enemy #33
+    const adjacentTiles = [
+      { x: attackPos.x, y: attackPos.y - 1 }, // up
+      { x: attackPos.x, y: attackPos.y + 1 }, // down  
+      { x: attackPos.x - 1, y: attackPos.y }, // left
+      { x: attackPos.x + 1, y: attackPos.y }  // right
+    ];
+    
+    let spawnPos = null;
+    
+    // Check each adjacent tile for availability
+    for (const pos of adjacentTiles) {
+      if (pos.x >= 0 && pos.x < MAP_WIDTH && pos.y >= 0 && pos.y < MAP_HEIGHT) {
+        // Check if position is free (no collision, no enemy, no player)
+        if (canMoveTo(pos.x, pos.y, null, playerMapSpec, playerData.map_id)) {
+          spawnPos = pos;
+          break;
         }
       }
+    }
+    
+    // If no adjacent tile is available, spawn under the attacking player
+    if (!spawnPos) {
+      spawnPos = { x: playerData.pos_x, y: playerData.pos_y };
+      console.log(`No adjacent tile available for enemy spawn, spawning under player at (${spawnPos.x}, ${spawnPos.y})`);
+    } else {
+      console.log(`Spawning enemy at adjacent tile (${spawnPos.x}, ${spawnPos.y})`);
+    }
+    
+    // Spawn enemy #33 at the determined position
+    const newEnemy = await spawnEnemy(33, playerData.map_id, spawnPos.x, spawnPos.y, true);
+    if (newEnemy) {
+      console.log(`Spawned enemy #33 (ID: ${newEnemy.id}) at (${spawnPos.x}, ${spawnPos.y})`);
       
-      // If no adjacent tile is available, spawn under the attacking player
-      if (!spawnPos) {
-        spawnPos = { x: playerData.pos_x, y: playerData.pos_y };
-        console.log(`No adjacent tile available for enemy spawn, spawning under player at (${spawnPos.x}, ${spawnPos.y})`);
-      } else {
-        console.log(`Spawning enemy at adjacent tile (${spawnPos.x}, ${spawnPos.y})`);
-      }
-      
-      // Spawn enemy #33 at the determined position
-      const newEnemy = await spawnEnemy(33, playerData.map_id, spawnPos.x, spawnPos.y, true);
-      if (newEnemy) {
-        console.log(`Spawned enemy #33 (ID: ${newEnemy.id}) at (${spawnPos.x}, ${spawnPos.y})`);
-        
-        // Broadcast new enemy to all players on this map
-        broadcastToMap(playerData.map_id, {
-          type: 'enemy_spawned',
-          enemy: {
-            id: newEnemy.id,
-            enemy_type: newEnemy.enemy_type,
-            pos_x: newEnemy.pos_x,
-            pos_y: newEnemy.pos_y,
-            direction: newEnemy.direction,
-            step: newEnemy.step,
-            hp: newEnemy.hp
-          }
-        });
-      } else {
-        console.error('Failed to spawn enemy #33 from coffin attack');
-      }
+      // Broadcast new enemy to all players on this map
+      broadcastToMap(playerData.map_id, {
+        type: 'enemy_spawned',
+        enemy: {
+          id: newEnemy.id,
+          enemy_type: newEnemy.enemy_type,
+          pos_x: newEnemy.pos_x,
+          pos_y: newEnemy.pos_y,
+          direction: newEnemy.direction,
+          step: newEnemy.step,
+          hp: newEnemy.hp
+        }
+      });
+    } else {
+      console.error('Failed to spawn enemy #33 from coffin attack');
     }
   } catch (error) {
     console.error('Error handling coffin attack:', error);
@@ -6002,9 +6038,25 @@ wss.on('connection', (ws) => {
           // Update the server's map spec
           serverMaps[mapId] = mapSpec;
 
-          // Remove all mapItems for this specific map
+          // Remove all mapItems for this specific map and broadcast removals
           const keysToDelete = Object.keys(mapItems).filter(key => key.startsWith(`${mapId}:`));
           for (const key of keysToDelete) {
+            // Extract coordinates from key format "mapId:x,y"
+            const [, coords] = key.split(':');
+            const [x, y] = coords.split(',').map(Number);
+            
+            // Broadcast item removal to all clients on this map
+            for (const [clientWs, clientPlayer] of clients.entries()) {
+              if (clientPlayer && Number(clientPlayer.map_id) === Number(mapId) && clientWs.readyState === WebSocket.OPEN) {
+                clientWs.send(JSON.stringify({
+                  type: 'item_placed',
+                  x: x,
+                  y: y,
+                  itemId: 0 // Remove item
+                }));
+              }
+            }
+            
             delete mapItems[key];
           }
 
@@ -6401,12 +6453,6 @@ wss.on('connection', (ws) => {
         const itemId = parseInt(placeItemMatch[1]);
         if (itemId < 0 || itemId > 999) return; // Basic validation
 
-        // Check if player has the item in hands (if placing non-zero item)
-        if (itemId > 0 && playerData.hands !== itemId) {
-          send(ws, { type: 'chat', text: `~ You don't have item ${itemId} in your hands.` });
-          return;
-        }
-
         // Get adjacent position based on player's facing direction
         const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
         
@@ -6427,22 +6473,6 @@ wss.on('connection', (ws) => {
           mapItems[key] = itemId;
           // Save to database
           saveItemToDatabase(adjacentPos.x, adjacentPos.y, itemId, playerData.map_id);
-        }
-
-        // Remove item from player's hands if placing a non-zero item
-        if (itemId > 0 && playerData.hands === itemId) {
-          playerData.hands = 0;
-          
-          // Update database
-          updateStatsInDb(playerData.id, { hands: playerData.hands })
-            .catch(err => console.error('Error updating hands after place:', err));
-          
-          // Broadcast equipment update
-          broadcast({
-            type: 'player_equipment_update',
-            id: playerData.id,
-            hands: playerData.hands
-          });
         }
 
         // Broadcast item update to all clients
@@ -7138,7 +7168,7 @@ setInterval(async () => {
       console.error(`Error handling death for player ${playerData.username}:`, error);
     }
   }
-}, 2000); // Run every 2 seconds (more frequent than regen)
+}, 500); // Run every 0.5 seconds for immediate death detection
 
 // NPC Speaker system - runs every 60 seconds
 setInterval(() => {
