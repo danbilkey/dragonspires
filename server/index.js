@@ -4218,7 +4218,7 @@ wss.on('connection', (ws) => {
               const currentMapItem = getItemAtPosition(adjacentPos.x, adjacentPos.y, playerMapSpec, playerData.map_id);
               if (currentMapItem === 15) {
                 // Change item#15 to item#31 on the map
-                const key = `${adjacentPos.x},${adjacentPos.y}`;
+                const key = `${playerData.map_id}:${adjacentPos.x},${adjacentPos.y}`;
                 mapItems[key] = 31;
                 
                 // Save to database
@@ -7080,6 +7080,13 @@ setInterval(async () => {
         updatePosition(playerData.id, respawnX, respawnY),
         pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [respawnMapId, playerData.id])
       ]);
+      
+      // Broadcast equipment update to clear hands from UI
+      broadcast({
+        type: 'player_equipment_update',
+        id: playerData.id,
+        hands: playerData.hands
+      });
       
       // Send death message
       send(ws, {
