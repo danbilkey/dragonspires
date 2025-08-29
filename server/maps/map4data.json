@@ -31,34 +31,26 @@
   ],
   "holders": [
     {
-      "coordinates": "32,16",
-      "item": 110
-    },
-    {
-      "coordinates": "16,39",
-      "item": 25
-    },
-    {
-      "coordinates": "16,40",
-      "item": 12
-    },
-    {
-      "coordinates": "16,41",
-      "item": 109
-    },
-    {
-      "coordinates": "16,42",
-      "item": 48
+      "coordinates": "36,16",
+      "item": 2
     }
   ],
   "enemies": [
     {
-      "type": 1,
-      "coordinates": "20,41"
+      "type": 5,
+      "coordinates": "32,23"
     },
     {
-      "type": 2,
-      "coordinates": "20,39"
+      "type": 5,
+      "coordinates": "24,17"
+    },
+    {
+      "type": 5,
+      "coordinates": "26,22"
+    },
+    {
+      "type": 5,
+      "coordinates": "19,40"
     }
   ],
   "npcs": [
