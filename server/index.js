@@ -1982,6 +1982,132 @@ function removePotionEffect(effectId) {
   delete potionEffects[effectId];
 }
 
+// Handle skeleton attack (item #209 -> #211)
+async function handleSkeletonAttack(playerData, ws, attackPos) {
+  const playerMapSpec = getMapSpec(playerData.map_id);
+  const targetItemId = getItemAtPosition(attackPos.x, attackPos.y, playerMapSpec, playerData.map_id);
+  
+  // Check if attacking item #209 (skeleton)
+  if (targetItemId !== 209) {
+    return; // Not a skeleton, no action needed
+  }
+  
+  console.log(`Player ${playerData.username} attacking skeleton at (${attackPos.x}, ${attackPos.y})`);
+  
+  try {
+    // Directly modify the base map data to change item #209 to #211
+    if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
+        typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') {
+      playerMapSpec.items[attackPos.y][attackPos.x] = 211;
+      
+      console.log(`Skeleton crumbled: Direct map modification at (${attackPos.x},${attackPos.y}) -> 211`);
+      
+      // Broadcast map item change to all clients on this map
+      broadcast({
+        type: 'map_item_changed',
+        x: attackPos.x,
+        y: attackPos.y,
+        itemId: 211,
+        mapId: playerData.map_id
+      });
+      
+      // Send chat message
+      send(ws, {
+        type: 'chat',
+        text: 'The skeleton crumbled to dust, leaving behing a Blue Necklace.',
+        color: 'black'
+      });
+    }
+  } catch (error) {
+    console.error('Error handling skeleton attack:', error);
+  }
+}
+
+// Handle coffin attack (item #202 -> #203 + spawn enemy #33)
+async function handleCoffinAttack(playerData, ws, attackPos) {
+  const playerMapSpec = getMapSpec(playerData.map_id);
+  const targetItemId = getItemAtPosition(attackPos.x, attackPos.y, playerMapSpec, playerData.map_id);
+  
+  // Check if attacking item #202 (coffin)
+  if (targetItemId !== 202) {
+    return; // Not a coffin, no action needed
+  }
+  
+  console.log(`Player ${playerData.username} attacking coffin at (${attackPos.x}, ${attackPos.y})`);
+  
+  try {
+    // Directly modify the base map data to change item #202 to #203
+    if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
+        typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') {
+      playerMapSpec.items[attackPos.y][attackPos.x] = 203;
+      
+      console.log(`Coffin opened: Direct map modification at (${attackPos.x},${attackPos.y}) -> 203`);
+      
+      // Broadcast map item change to all clients on this map
+      broadcast({
+        type: 'map_item_changed',
+        x: attackPos.x,
+        y: attackPos.y,
+        itemId: 203,
+        mapId: playerData.map_id
+      });
+      
+      // Find closest adjacent tile to spawn enemy #33
+      const adjacentTiles = [
+        { x: attackPos.x, y: attackPos.y - 1 }, // up
+        { x: attackPos.x, y: attackPos.y + 1 }, // down  
+        { x: attackPos.x - 1, y: attackPos.y }, // left
+        { x: attackPos.x + 1, y: attackPos.y }  // right
+      ];
+      
+      let spawnPos = null;
+      
+      // Check each adjacent tile for availability
+      for (const pos of adjacentTiles) {
+        if (pos.x >= 0 && pos.x < MAP_WIDTH && pos.y >= 0 && pos.y < MAP_HEIGHT) {
+          // Check if position is free (no collision, no enemy, no player)
+          if (canMoveTo(pos.x, pos.y, null, playerMapSpec, playerData.map_id)) {
+            spawnPos = pos;
+            break;
+          }
+        }
+      }
+      
+      // If no adjacent tile is available, spawn under the attacking player
+      if (!spawnPos) {
+        spawnPos = { x: playerData.pos_x, y: playerData.pos_y };
+        console.log(`No adjacent tile available for enemy spawn, spawning under player at (${spawnPos.x}, ${spawnPos.y})`);
+      } else {
+        console.log(`Spawning enemy at adjacent tile (${spawnPos.x}, ${spawnPos.y})`);
+      }
+      
+      // Spawn enemy #33 at the determined position
+      const newEnemy = await spawnEnemy(33, playerData.map_id, spawnPos.x, spawnPos.y, true);
+      if (newEnemy) {
+        console.log(`Spawned enemy #33 (ID: ${newEnemy.id}) at (${spawnPos.x}, ${spawnPos.y})`);
+        
+        // Broadcast new enemy to all players on this map
+        broadcastToMap(playerData.map_id, {
+          type: 'enemy_spawned',
+          enemy: {
+            id: newEnemy.id,
+            enemy_type: newEnemy.enemy_type,
+            pos_x: newEnemy.pos_x,
+            pos_y: newEnemy.pos_y,
+            direction: newEnemy.direction,
+            step: newEnemy.step,
+            hp: newEnemy.hp
+          }
+        });
+      } else {
+        console.error('Failed to spawn enemy #33 from coffin attack');
+      }
+    }
+  } catch (error) {
+    console.error('Error handling coffin attack:', error);
+  }
+}
+
 // Get animation frame based on direction and movement sequence
 function getMovementAnimationFrame(direction, sequenceIndex) {
   const sequenceType = MOVEMENT_SEQUENCE[sequenceIndex];
@@ -3786,6 +3912,28 @@ wss.on('connection', (ws) => {
         playerData.isMoving = true;
         playerData.isAttacking = false; // Ensure attack state is cleared
 
+        // Check for biting floor damage (item #196)
+        const currentItemId = getItemAtPosition(nx, ny, playerMapSpec, playerData.map_id);
+        if (currentItemId === 196) {
+          // Player stepped on biting floor - deal 5 damage
+          const oldLife = playerData.life ?? 20;
+          playerData.life = Math.max(0, oldLife - 5);
+          
+          console.log(`Player ${playerData.username} stepped on biting floor at (${nx}, ${ny}), life: ${oldLife} -> ${playerData.life}`);
+          
+          // Send damage message
+          send(ws, {
+            type: 'chat',
+            text: 'The biting floor bites your foot for 5 damage!',
+            color: 'red'
+          });
+          
+          // Update life in database and send to client
+          updateStatsInDb(playerData.id, { life: playerData.life })
+            .catch(err => console.error('Error updating life after biting floor damage:', err));
+          send(ws, { type: 'stats_update', id: playerData.id, life: playerData.life });
+        }
+
         // Check for portals after moving to the new position
         const mapData = getMapData(playerData.map_id);
         if (mapData && mapData.portals) {
@@ -4170,6 +4318,12 @@ wss.on('connection', (ws) => {
       
       // Check for potion/statue attacks before starting animation
       await handlePotionStatueAttack(playerData, ws, adjacentPos);
+      
+      // Check for skeleton attack (item #209 -> #211)
+      await handleSkeletonAttack(playerData, ws, adjacentPos);
+      
+      // Check for coffin attack (item #202 -> #203 + spawn enemy #33)
+      await handleCoffinAttack(playerData, ws, adjacentPos);
       
       // Start attack animation (this will handle alternating)
       startAttackAnimation(playerData, ws);
@@ -4976,39 +5130,26 @@ wss.on('connection', (ws) => {
       
       console.log(`Key usage successful: Found gate ${targetItemId} at (${targetPos.x},${targetPos.y}), proceeding with removal`);
       
-      // Remove the target item (item #188 or #233) using two-step replacement
-      const posKey = `${targetPos.x},${targetPos.y}`;
-      
+      // Remove the gate completely using direct map modification (like potions/statues)
       try {
-        // Step 1: Replace with item #3
-        mapItems[posKey] = 3;
-        saveItemToDatabase(targetPos.x, targetPos.y, 3, playerData.map_id);
-        console.log(`Broadcasting step 1: item_placed (${targetPos.x},${targetPos.y}) -> 3`);
-        broadcast({
-          type: 'item_placed',
-          x: targetPos.x,
-          y: targetPos.y,
-          itemId: 3
-        });
-        
-        // Step 2: Replace with item #0 (remove) - keep in mapItems to override base map data
-        setTimeout(() => {
-          try {
-            mapItems[posKey] = -1; // Use -1 to indicate permanently removed
-            saveItemToDatabase(targetPos.x, targetPos.y, 0, playerData.map_id);
-            console.log(`Broadcasting step 2: item_placed (${targetPos.x},${targetPos.y}) -> 0 (removed)`);
-            broadcast({
-              type: 'item_placed',
-              x: targetPos.x,
-              y: targetPos.y,
-              itemId: 0
-            });
-          } catch (error) {
-            console.error('Error in step 2 of gate removal:', error);
-          }
-        }, 50); // Small delay to ensure proper replacement
+        // Directly modify the base map data to remove the gate permanently
+        if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[targetPos.y] && 
+            typeof playerMapSpec.items[targetPos.y][targetPos.x] !== 'undefined') {
+          playerMapSpec.items[targetPos.y][targetPos.x] = 0;
+          
+          console.log(`Gate removed: Direct map modification at (${targetPos.x},${targetPos.y}) -> 0`);
+          
+          // Broadcast map item change to all clients on this map
+          broadcast({
+            type: 'map_item_changed',
+            x: targetPos.x,
+            y: targetPos.y,
+            itemId: 0,
+            mapId: playerData.map_id
+          });
+        }
       } catch (error) {
-        console.error('Error in step 1 of gate removal:', error);
+        console.error('Error removing gate:', error);
       }
       
       // Check for key crumbling based on item type
@@ -5828,6 +5969,87 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // Check for -resetmap admin command
+      if (t.toLowerCase() === '-resetmap') {
+        // Validate admin role
+        if (playerData.role !== 'admin') {
+          // Do nothing for non-admin users
+          return;
+        }
+
+        try {
+          const mapId = playerData.map_id;
+          console.log(`Admin ${playerData.username} resetting map ${mapId}`);
+
+          // Reset the specific map data by reloading from file
+          const mapSpec = await loadMapData(mapId);
+          if (!mapSpec) {
+            send(ws, { type: 'chat', text: `~ Error: Failed to reload map ${mapId}.` });
+            return;
+          }
+
+          // Update the server's map spec
+          serverMaps[mapId] = mapSpec;
+
+          // Remove all mapItems for this specific map
+          const keysToDelete = Object.keys(mapItems).filter(key => key.startsWith(`${mapId}:`));
+          for (const key of keysToDelete) {
+            delete mapItems[key];
+          }
+
+          // Remove all map containers for this specific map
+          const containerKeysToDelete = Object.keys(mapContainers).filter(key => key.startsWith(`${mapId}:`));
+          for (const key of containerKeysToDelete) {
+            delete mapContainers[key];
+          }
+
+          // Clear map items from database for this map
+          await pool.query('DELETE FROM map_items WHERE map_id = $1', [mapId]);
+
+          // Clear map containers from database for this map
+          await pool.query('DELETE FROM map_containers WHERE map_id = $1', [mapId]);
+
+          // Reset enemies on this map
+          const enemyKeysToDelete = [];
+          for (const [enemyId, enemy] of Object.entries(enemies)) {
+            if (Number(enemy.map_id) === Number(mapId)) {
+              enemyKeysToDelete.push(enemyId);
+            }
+          }
+          
+          // Delete enemies from memory and database
+          for (const enemyId of enemyKeysToDelete) {
+            delete enemies[enemyId];
+          }
+          await pool.query('DELETE FROM enemies WHERE map_id = $1', [mapId]);
+
+          // Reload enemies for this map
+          await loadEnemiesFromDatabase(mapId);
+
+          // Broadcast reset to all players on this map
+          const mapEnemies = getEnemiesForMap(mapId);
+          for (const [clientWs, clientPlayer] of clients.entries()) {
+            if (clientPlayer && Number(clientPlayer.map_id) === Number(mapId) && clientWs.readyState === WebSocket.OPEN) {
+              // Send map reset notification
+              clientWs.send(JSON.stringify({
+                type: 'map_reset',
+                mapId: mapId,
+                enemies: mapEnemies,
+                message: `Map ${mapId} has been reset by an administrator.`
+              }));
+            }
+          }
+
+          // Send confirmation to admin
+          send(ws, { type: 'chat', text: `~ Map ${mapId} reset completed successfully.` });
+          
+        } catch (error) {
+          console.error('Error during map reset:', error);
+          send(ws, { type: 'chat', text: '~ Error: Map reset failed.' });
+        }
+        return;
+      }
+
       // Check for -gotomap admin command
       const gotoMapMatch = t.match(/^-gotomap\s+(\d+)$/i);
       if (gotoMapMatch) {
@@ -6156,8 +6378,8 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      // Check for existing admin placeitem command
-      const placeItemMatch = t.match(/^-placeitem\s+(\d+)$/i);
+      // Check for existing admin placeitem command (also supports -place alias)
+      const placeItemMatch = t.match(/^-(?:placeitem|place)\s+(\d+)$/i);
       if (placeItemMatch) {
         // Validate admin role
         if (playerData.role !== 'admin') {
@@ -6686,6 +6908,199 @@ setInterval(async () => {
     try { await updateStatsInDb(u.id, { magic: u.magic }); } catch(e){ console.error('magic regen db', e); }
   }
 }, 30000);
+
+// Death check system - runs every 5 seconds
+setInterval(async () => {
+  const deadPlayers = [];
+  
+  // Check all connected players for death (hp <= 0)
+  for (const [ws, playerData] of clients.entries()) {
+    if (playerData && (playerData.life ?? 20) <= 0) {
+      deadPlayers.push({ ws, playerData });
+    }
+  }
+  
+  // Handle each dead player
+  for (const { ws, playerData } of deadPlayers) {
+    console.log(`Death check: Player ${playerData.username} is dead (HP: ${playerData.life}), initiating respawn`);
+    
+    try {
+      // Drop item in hands if player has one
+      if (playerData.hands && playerData.hands > 0) {
+        const droppedItem = playerData.hands;
+        playerData.hands = 0;
+        
+        // Create or update drop container at player's current position
+        const playerPos = `${playerData.map_id}:${playerData.pos_x},${playerData.pos_y}`;
+        const containerKey = playerPos;
+        
+        let existingContainer = mapContainers[containerKey];
+        
+        if (existingContainer) {
+          // Add item to existing container
+          existingContainer.items.push(droppedItem);
+        } else {
+          // Check if there's already an item on the ground
+          const existingItem = mapItems[playerPos];
+          
+          // Create new container
+          mapContainers[containerKey] = {
+            gold: 0,
+            items: existingItem ? [existingItem, droppedItem] : [droppedItem],
+            mapId: playerData.map_id
+          };
+          
+          // Remove the existing ground item if it existed
+          if (existingItem) {
+            delete mapItems[playerPos];
+          }
+        }
+        
+        // Place drop container visual (item #201)
+        mapItems[playerPos] = 201;
+        
+        // Broadcast drop container placement
+        broadcast({
+          type: 'item_placed',
+          x: playerData.pos_x,
+          y: playerData.pos_y,
+          itemId: 201
+        });
+        
+        console.log(`Player ${playerData.username} dropped item ${droppedItem} on death`);
+      }
+      
+      // Get diemap coordinates from map data
+      const mapData = getMapData(playerData.map_id);
+      let respawnMapId = playerData.map_id;
+      let respawnX = 32; // Default spawn
+      let respawnY = 32; // Default spawn
+      
+      if (mapData && mapData.diemap) {
+        respawnMapId = mapData.diemap;
+        
+        // Get start coordinates for the diemap
+        const respawnMapData = getMapData(respawnMapId);
+        if (respawnMapData && respawnMapData.start) {
+          const [startX, startY] = respawnMapData.start.split(',').map(Number);
+          respawnX = startX;
+          respawnY = startY;
+        }
+      }
+      
+      console.log(`Respawning ${playerData.username} to map ${respawnMapId} at (${respawnX}, ${respawnY})`);
+      
+      // Update player state
+      const oldMapId = playerData.map_id;
+      playerData.map_id = respawnMapId;
+      playerData.pos_x = respawnX;
+      playerData.pos_y = respawnY;
+      playerData.life = playerData.max_life ?? 20;
+      playerData.stamina = playerData.max_stamina ?? 10;
+      playerData.magic = playerData.max_magic ?? 0;
+      
+      // Update database
+      await Promise.allSettled([
+        updateStatsInDb(playerData.id, { 
+          life: playerData.life, 
+          stamina: playerData.stamina, 
+          magic: playerData.magic,
+          hands: playerData.hands
+        }),
+        updatePosition(playerData.id, respawnX, respawnY),
+        pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [respawnMapId, playerData.id])
+      ]);
+      
+      // Send death message
+      send(ws, {
+        type: 'chat',
+        text: 'You have died!',
+        color: 'red'
+      });
+      
+      // Broadcast player movement to all clients
+      broadcast({
+        type: 'player_moved',
+        id: playerData.id,
+        x: respawnX,
+        y: respawnY,
+        map_id: respawnMapId,
+        direction: playerData.direction || 'down',
+        step: playerData.step || 2,
+        isMoving: false,
+        isAttacking: false
+      });
+      
+      // If map changed, send teleport result to player
+      if (oldMapId !== respawnMapId) {
+        // Send loading message
+        send(ws, { type: 'chat', text: '* Loading map. Please wait. *', color: 'cornflowerblue' });
+        
+        const newMapItems = await loadItemsFromDatabase(respawnMapId);
+        const newMapEnemies = getEnemiesForMap(respawnMapId);
+        
+        // Get other players on respawn map
+        const mapPlayers = [];
+        for (const [otherWs, otherPlayer] of clients.entries()) {
+          if (otherPlayer && 
+              Number(otherPlayer.map_id) === Number(respawnMapId) && 
+              otherPlayer.id !== playerData.id) {
+            mapPlayers.push({
+              id: otherPlayer.id,
+              username: otherPlayer.username,
+              pos_x: otherPlayer.pos_x,
+              pos_y: otherPlayer.pos_y,
+              map_id: otherPlayer.map_id,
+              direction: otherPlayer.direction || 'down',
+              step: otherPlayer.step || 2,
+              isMoving: otherPlayer.isMoving || false,
+              isAttacking: otherPlayer.isAttacking || false,
+              isPickingUp: otherPlayer.isPickingUp || false,
+              isBRB: otherPlayer.isBRB || false,
+              temporarySprite: otherPlayer.temporarySprite || 0,
+              weapon: otherPlayer.weapon || 0,
+              armor: otherPlayer.armor || 0,
+              hands: otherPlayer.hands || 0
+            });
+          }
+        }
+        
+        send(ws, {
+          type: 'teleport_result',
+          success: true,
+          id: playerData.id,
+          x: respawnX,
+          y: respawnY,
+          mapId: respawnMapId,
+          items: newMapItems,
+          enemies: newMapEnemies,
+          players: mapPlayers,
+          showLoadingScreen: {
+            imagePath: '/assets/loadscreen.gif',
+            x: 232,
+            y: 20,
+            duration: 500
+          }
+        });
+      }
+      
+      // Send updated stats
+      send(ws, { 
+        type: 'stats_update', 
+        id: playerData.id, 
+        life: playerData.life,
+        stamina: playerData.stamina,
+        magic: playerData.magic,
+        hands: playerData.hands
+      });
+      
+      console.log(`Player ${playerData.username} successfully respawned`);
+      
+    } catch (error) {
+      console.error(`Error handling death for player ${playerData.username}:`, error);
+    }
+  }
+}, 5000); // Run every 5 seconds
 
 // NPC Speaker system - runs every 60 seconds
 setInterval(() => {
