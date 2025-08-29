@@ -170,6 +170,37 @@ function isPlayerAtPosition(x, y, excludePlayerId = null) {
   return false;
 }
 
+function canMoveTo(x, y, excludePlayerId = null, mapSpec = null, mapId = 1, excludeEnemyId = null) {
+  // Check map bounds
+  if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) {
+    return false;
+  }
+  
+  // Check floor collision
+  if (hasFloorCollision(x, y, mapSpec)) {
+    return false;
+  }
+  
+  // Check item collision (using current item state, not base map)
+  const targetItemId = getItemAtPosition(x, y, mapSpec, mapId);
+  const targetItemDetails = getItemDetails(targetItemId);
+  if (targetItemDetails && targetItemDetails.collision) {
+    return false;
+  }
+  
+  // Check player collision
+  if (isPlayerAtPosition(x, y, excludePlayerId)) {
+    return false;
+  }
+  
+  // Check enemy collision
+  if (isEnemyAtPosition(x, y, mapId, excludeEnemyId)) {
+    return false;
+  }
+  
+  return true;
+}
+
 // Load item details on server startup
 async function loadItemDetails() {
   try {
@@ -1041,12 +1072,25 @@ function getRandomItemByTypes(types) {
 }
 
 function getItemAtPosition(x, y, mapSpec, mapId = 1) {
-  // Simply return the base map item (now directly modified when potions/statues are attacked)
+  // Get base map item (directly modified for potions/statues)
   const mapItem = (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
     ? mapSpec.items[y][x] : 0;
   
+  // Check for placed/dropped items that override the base map
+  const key = `${mapId}:${x},${y}`;
+  const placedItem = mapItems[key];
+  
+  // If there's a placed item, it overrides the base map item
+  if (placedItem !== undefined) {
+    // Debug logging
+    if ([165, 239, 164, 248, 308, 240].includes(mapItem) || placedItem !== mapItem) {
+      console.log(`getItemAtPosition(${x},${y}): mapItem=${mapItem}, placedItem=${placedItem}, returning=${placedItem}`);
+    }
+    return placedItem;
+  }
+  
   // Debug logging for potion positions
-  if ([165, 239, 164, 248, 308, 240].includes(mapItem) || mapItem === 0) {
+  if ([165, 239, 164, 248, 308, 240].includes(mapItem)) {
     console.log(`getItemAtPosition(${x},${y}): returning mapItem=${mapItem}`);
   }
   
@@ -1254,7 +1298,15 @@ async function saveItemToDatabase(x, y, itemId, mapId = 1) {
       [x, y, mapId, itemId]
     );
     
-    // No longer need to manage mapItems - we modify base map data directly
+    // Update in-memory mapItems for dropped/placed items
+    const key = `${mapId}:${x},${y}`;
+    if (itemId === 0) {
+      delete mapItems[key];
+    } else {
+      mapItems[key] = itemId;
+    }
+    
+    console.log(`Updated mapItems[${key}] = ${itemId}`);
   } catch (error) {
     console.error('Error saving item to database:', error);
   }
@@ -5765,8 +5817,9 @@ wss.on('connection', (ws) => {
         }
 
         const targetMapId = parseInt(gotoMapMatch[1]);
-        if (targetMapId < 1 || targetMapId > 4) {
-          send(ws, { type: 'chat', text: '~ Invalid map ID. Valid maps: 1-4' });
+        const validMaps = [1, 2, 3, 4, 5, 99];
+        if (!validMaps.includes(targetMapId)) {
+          send(ws, { type: 'chat', text: `~ Invalid map ID. Valid maps: ${validMaps.join(', ')}` });
           return;
         }
 
@@ -5828,6 +5881,54 @@ wss.on('connection', (ws) => {
         } catch (error) {
           console.error('Error changing player map:', error);
           send(ws, { type: 'chat', text: '~ Error changing map.' });
+        }
+        return;
+      }
+
+      // Check for -blink admin command
+      if (t.toLowerCase() === '-blink') {
+        // Validate admin role
+        if (playerData.role !== 'admin') {
+          // Do nothing for non-admin users
+          return;
+        }
+
+        // Calculate position 1 space in the direction they're facing
+        const blinkPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
+        
+        // Check map bounds (prevent blinking off the map)
+        if (blinkPos.x < 0 || blinkPos.x >= MAP_WIDTH || blinkPos.y < 0 || blinkPos.y >= MAP_HEIGHT) {
+          send(ws, { type: 'chat', text: '~ Cannot blink: would go outside map bounds.' });
+          return;
+        }
+
+        // Update player position (ignoring all collision)
+        playerData.pos_x = blinkPos.x;
+        playerData.pos_y = blinkPos.y;
+
+        // Update database
+        try {
+          await updatePosition(playerData.id, blinkPos.x, blinkPos.y);
+          
+          // Broadcast position change
+          broadcast({
+            type: 'player_moved',
+            id: playerData.id,
+            x: blinkPos.x,
+            y: blinkPos.y,
+            map_id: playerData.map_id,
+            direction: playerData.direction,
+            step: playerData.step,
+            isMoving: false,
+            isAttacking: false
+          });
+          
+          send(ws, { type: 'chat', text: `~ Blinked to (${blinkPos.x}, ${blinkPos.y})` });
+          console.log(`Admin ${playerData.username} blinked to (${blinkPos.x}, ${blinkPos.y})`);
+          
+        } catch (error) {
+          console.error('Error during blink:', error);
+          send(ws, { type: 'chat', text: '~ Error occurred during blink.' });
         }
         return;
       }
