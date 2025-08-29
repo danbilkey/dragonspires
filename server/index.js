@@ -1044,19 +1044,34 @@ function getItemAtPosition(x, y, mapSpec, mapId = 1) {
   // Check both map items and placed items
   const mapItem = (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
     ? mapSpec.items[y][x] : 0;
-  const placedItem = mapItems[`${x},${y}`]; // For now, still use old format for backwards compatibility
+  const key = `${x},${y}`;
+  const placedItem = mapItems[key]; // For now, still use old format for backwards compatibility
+  
+  // Debug logging for potion positions
+  if (mapItem === 165 || mapItem === 239 || mapItem === 164 || mapItem === 248 || mapItem === 308 || mapItem === 240) {
+    console.log(`getItemAtPosition(${x},${y}): mapItem=${mapItem}, placedItem=${placedItem}, key="${key}"`);
+  }
   
   // If there's a placed item entry (but not -1 which means "picked up"), it overrides the map item
   if (placedItem !== undefined && placedItem !== -1) {
+    if (mapItem === 165 || mapItem === 239 || mapItem === 164 || mapItem === 248 || mapItem === 308 || mapItem === 240) {
+      console.log(`  -> Returning placedItem: ${placedItem}`);
+    }
     return placedItem;
   }
   
   // If placedItem is -1, it means the map item was picked up, so return 0
   if (placedItem === -1) {
+    if (mapItem === 165 || mapItem === 239 || mapItem === 164 || mapItem === 248 || mapItem === 308 || mapItem === 240) {
+      console.log(`  -> Returning 0 (item removed)`);
+    }
     return 0;
   }
   
   // Otherwise return the map item
+  if (mapItem === 165 || mapItem === 239 || mapItem === 164 || mapItem === 248 || mapItem === 308 || mapItem === 240) {
+    console.log(`  -> Returning mapItem: ${mapItem}`);
+  }
   return mapItem;
 }
 
@@ -1759,6 +1774,7 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
   const key = `${x},${y}`;
   mapItems[key] = -1; // Mark as removed
   console.log(`Set mapItems[${key}] = -1`);
+  console.log(`Current mapItems state:`, mapItems);
   
   // Save removal to database
   await saveItemToDatabase(x, y, 0, mapId);
@@ -6459,10 +6475,6 @@ wss.on('connection', (ws) => {
       // Regular chat message
       const chatMessage = `${playerData.username}: ${t}`;
       broadcast({ type: 'chat', text: chatMessage });
-      
-      // Log the chat message (non-blocking)
-      logChatMessage(playerData.id, playerData.username, 'chat', chatMessage, playerData.map_id)
-        .catch(() => {}); // Silently ignore logging errors
     }
   });
 
@@ -6494,14 +6506,10 @@ wss.on('connection', (ws) => {
       clients.delete(ws);
       usernameToWs.delete(playerData.username);
       
-      // Send global chat about player leaving and log it
+      // Send global chat about player leaving
       const leaveMessage = `${playerData.username} has left DragonSpires.`;
       broadcast({ type: 'chat', text: leaveMessage, color: 'grey' });
       broadcast({ type: 'player_left', id: playerData.id, username: playerData.username });
-      
-      // Log the logout message (non-blocking)
-      logChatMessage(playerData.id, playerData.username, 'logout', leaveMessage, playerData.map_id)
-        .catch(() => {}); // Silently ignore logging errors
     }
   });
 
