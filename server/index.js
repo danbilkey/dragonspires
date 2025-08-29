@@ -1985,10 +1985,14 @@ function removePotionEffect(effectId) {
 // Handle skeleton attack (item #209 -> #211)
 async function handleSkeletonAttack(playerData, ws, attackPos) {
   const playerMapSpec = getMapSpec(playerData.map_id);
-  const targetItemId = getItemAtPosition(attackPos.x, attackPos.y, playerMapSpec, playerData.map_id);
+  
+  // Check the base map item directly (not influenced by mapItems)
+  const baseMapItemId = (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
+                        typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') 
+                        ? playerMapSpec.items[attackPos.y][attackPos.x] : 0;
   
   // Check if attacking item #209 (skeleton)
-  if (targetItemId !== 209) {
+  if (baseMapItemId !== 209) {
     return; // Not a skeleton, no action needed
   }
   
@@ -2026,10 +2030,14 @@ async function handleSkeletonAttack(playerData, ws, attackPos) {
 // Handle coffin attack (item #202 -> #203 + spawn enemy #33)
 async function handleCoffinAttack(playerData, ws, attackPos) {
   const playerMapSpec = getMapSpec(playerData.map_id);
-  const targetItemId = getItemAtPosition(attackPos.x, attackPos.y, playerMapSpec, playerData.map_id);
+  
+  // Check the base map item directly (not influenced by mapItems)
+  const baseMapItemId = (playerMapSpec && playerMapSpec.items && playerMapSpec.items[attackPos.y] && 
+                        typeof playerMapSpec.items[attackPos.y][attackPos.x] !== 'undefined') 
+                        ? playerMapSpec.items[attackPos.y][attackPos.x] : 0;
   
   // Check if attacking item #202 (coffin)
-  if (targetItemId !== 202) {
+  if (baseMapItemId !== 202) {
     return; // Not a coffin, no action needed
   }
   
@@ -5982,7 +5990,10 @@ wss.on('connection', (ws) => {
           console.log(`Admin ${playerData.username} resetting map ${mapId}`);
 
           // Reset the specific map data by reloading from file
-          const mapSpec = await loadMapData(mapId);
+          await loadSingleMap(mapId);
+          await loadSingleMapData(mapId);
+          
+          const mapSpec = getMapSpec(mapId);
           if (!mapSpec) {
             send(ws, { type: 'chat', text: `~ Error: Failed to reload map ${mapId}.` });
             return;
@@ -6390,6 +6401,12 @@ wss.on('connection', (ws) => {
         const itemId = parseInt(placeItemMatch[1]);
         if (itemId < 0 || itemId > 999) return; // Basic validation
 
+        // Check if player has the item in hands (if placing non-zero item)
+        if (itemId > 0 && playerData.hands !== itemId) {
+          send(ws, { type: 'chat', text: `~ You don't have item ${itemId} in your hands.` });
+          return;
+        }
+
         // Get adjacent position based on player's facing direction
         const adjacentPos = getAdjacentPosition(playerData.pos_x, playerData.pos_y, playerData.direction);
         
@@ -6410,6 +6427,22 @@ wss.on('connection', (ws) => {
           mapItems[key] = itemId;
           // Save to database
           saveItemToDatabase(adjacentPos.x, adjacentPos.y, itemId, playerData.map_id);
+        }
+
+        // Remove item from player's hands if placing a non-zero item
+        if (itemId > 0 && playerData.hands === itemId) {
+          playerData.hands = 0;
+          
+          // Update database
+          updateStatsInDb(playerData.id, { hands: playerData.hands })
+            .catch(err => console.error('Error updating hands after place:', err));
+          
+          // Broadcast equipment update
+          broadcast({
+            type: 'player_equipment_update',
+            id: playerData.id,
+            hands: playerData.hands
+          });
         }
 
         // Broadcast item update to all clients
@@ -6875,6 +6908,11 @@ setInterval(async () => {
 setInterval(async () => {
   const updates = [];
   for (const [ws, p] of clients.entries()) {
+    // Don't regenerate life for dead players (hp <= 0)
+    if ((p.life ?? 20) <= 0) {
+      continue;
+    }
+    
     const baseInc = Math.max(1, Math.floor((p.max_life ?? 0) * 0.05));
     const buffBonus = getBuffBonus(p, 'hp');
     const totalInc = baseInc + buffBonus;
@@ -7100,7 +7138,7 @@ setInterval(async () => {
       console.error(`Error handling death for player ${playerData.username}:`, error);
     }
   }
-}, 5000); // Run every 5 seconds
+}, 2000); // Run every 2 seconds (more frequent than regen)
 
 // NPC Speaker system - runs every 60 seconds
 setInterval(() => {
