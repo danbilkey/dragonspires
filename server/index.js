@@ -1044,12 +1044,16 @@ function getItemAtPosition(x, y, mapSpec, mapId = 1) {
   // Check both map items and placed items
   const mapItem = (mapSpec && mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
     ? mapSpec.items[y][x] : 0;
-  const key = `${x},${y}`;
-  const placedItem = mapItems[key]; // For now, still use old format for backwards compatibility
+  
+  // Try both key formats for backwards compatibility
+  const oldKey = `${x},${y}`;
+  const newKey = `${mapId}:${x},${y}`;
+  const placedItem = mapItems[newKey] !== undefined ? mapItems[newKey] : mapItems[oldKey];
   
   // Debug logging for potion positions
   if (mapItem === 165 || mapItem === 239 || mapItem === 164 || mapItem === 248 || mapItem === 308 || mapItem === 240) {
-    console.log(`getItemAtPosition(${x},${y}): mapItem=${mapItem}, placedItem=${placedItem}, key="${key}"`);
+    console.log(`getItemAtPosition(${x},${y}): mapItem=${mapItem}, placedItem=${placedItem}, oldKey="${oldKey}", newKey="${newKey}"`);
+    console.log(`  mapItems[oldKey]=${mapItems[oldKey]}, mapItems[newKey]=${mapItems[newKey]}`);
   }
   
   // If there's a placed item entry (but not -1 which means "picked up"), it overrides the map item
@@ -1277,15 +1281,20 @@ async function saveItemToDatabase(x, y, itemId, mapId = 1) {
     );
     
     // Update in-memory mapItems for item pickup
-    const key = `${x},${y}`;
+    const oldKey = `${x},${y}`;
+    const newKey = `${mapId}:${x},${y}`;
+    
     if (itemId === 0) {
-      delete mapItems[key];
+      delete mapItems[oldKey];
+      delete mapItems[newKey];
     } else {
       // Don't overwrite -1 values (removed potions/statues) with drop containers
-      if (mapItems[key] !== -1) {
-        mapItems[key] = itemId;
+      const currentValue = mapItems[newKey] !== undefined ? mapItems[newKey] : mapItems[oldKey];
+      if (currentValue !== -1) {
+        mapItems[newKey] = itemId;
+        delete mapItems[oldKey]; // Clean up old format
       } else {
-        console.log(`Not overwriting removed potion/statue at ${key} with item ${itemId}`);
+        console.log(`Not overwriting removed potion/statue at ${newKey} with item ${itemId}`);
       }
     }
   } catch (error) {
@@ -1776,9 +1785,11 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
   console.log(`Confirmed potion ${itemId} at (${x}, ${y}), proceeding with removal and spawning`);
   
   // Remove the potion from map
-  const key = `${x},${y}`;
-  mapItems[key] = -1; // Mark as removed
-  console.log(`Set mapItems[${key}] = -1`);
+  const oldKey = `${x},${y}`;
+  const newKey = `${mapId}:${x},${y}`;
+  mapItems[newKey] = -1; // Mark as removed
+  delete mapItems[oldKey]; // Clean up old format
+  console.log(`Set mapItems[${newKey}] = -1`);
   console.log(`Current mapItems state:`, mapItems);
   
   // Save removal to database
@@ -1853,8 +1864,10 @@ async function handleStatueAttack(mapId, x, y, itemId, statueConfig) {
   console.log(`Processing statue at (${x}, ${y}), item ${itemId} -> enemy ${statueConfig.enemyType} facing ${statueConfig.direction}`);
   
   // Remove the statue from map
-  const key = `${x},${y}`;
-  mapItems[key] = -1; // Mark as removed
+  const oldKey = `${x},${y}`;
+  const newKey = `${mapId}:${x},${y}`;
+  mapItems[newKey] = -1; // Mark as removed
+  delete mapItems[oldKey]; // Clean up old format
   
   // Save removal to database
   await saveItemToDatabase(x, y, 0, mapId);
@@ -6684,8 +6697,26 @@ loadFloorCollision();
 // Initialize NPC details
 loadNPCDetails();
 
-// Load NPC locations after all maps are loaded
-setTimeout(() => {
+// Load map items from database at startup
+async function initializeMapItems() {
+  try {
+    mapItems = await loadItemsFromDatabase();
+    console.log(`Loaded ${Object.keys(mapItems).length} map items from database`);
+    
+    // Debug: Show potion positions
+    for (const [key, itemId] of Object.entries(mapItems)) {
+      if ([165, 239, 164, 248, 308, 240].includes(Math.abs(itemId))) {
+        console.log(`Debug: Loaded potion/statue at ${key} with itemId ${itemId}`);
+      }
+    }
+  } catch (error) {
+    console.error('Error loading map items at startup:', error);
+  }
+}
+
+// Initialize map items and load NPC locations after all maps are loaded
+setTimeout(async () => {
+  await initializeMapItems();
   loadNPCLocations();
 }, 1000); // Delay to ensure maps are loaded first
 
