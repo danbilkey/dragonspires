@@ -2840,10 +2840,33 @@
           for (let x = 0; x < mapSpec.width; x++) {
             const { screenX, screenY } = isoScreen(x, y);
 
-            const effectiveItemId = getItemAtPosition(x, y);
+            // Get both base map item and placed item for layered rendering
+            const baseMapItemId = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
+                                  ? mapSpec.items[y][x] : 0;
+            const placedItemId = mapItems[`${x},${y}`];
             
-            if (effectiveItemId > 0) {
-              drawItemAtTile(screenX, screenY, effectiveItemId);
+            // If there's a placed item that's different from base, check if we should render both
+            if (placedItemId !== undefined && placedItemId !== baseMapItemId) {
+              // Check if base item is non-pickupable (should render underneath)
+              const baseItemDetails = getItemDetails(baseMapItemId);
+              const nonPickupableTypes = ['nothing', 'container', 'sign', 'portal', 'interactable', 'npc'];
+              const isBaseNonPickupable = baseItemDetails && nonPickupableTypes.includes(baseItemDetails.type);
+              
+              if (isBaseNonPickupable && baseMapItemId > 0) {
+                // Render base item first (underneath)
+                drawItemAtTile(screenX, screenY, baseMapItemId);
+              }
+              
+              // Render placed item on top (if it exists)
+              if (placedItemId > 0) {
+                drawItemAtTile(screenX, screenY, placedItemId);
+              }
+            } else {
+              // Normal single item rendering
+              const effectiveItemId = placedItemId !== undefined ? placedItemId : baseMapItemId;
+              if (effectiveItemId > 0) {
+                drawItemAtTile(screenX, screenY, effectiveItemId);
+              }
             }
 
             // Draw enemies after items but before players
