@@ -1662,6 +1662,9 @@ function broadcastToMap(mapId, obj) {
   }
 }
 
+// Track ongoing potion attacks to prevent race conditions
+let ongoingPotionAttacks = new Set();
+
 // Potion and Statue attack system
 async function handlePotionStatueAttack(playerData, ws, attackPos) {
   const playerMapSpec = getMapSpec(playerData.map_id);
@@ -1685,11 +1688,26 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
   };
   
   console.log(`Player ${playerData.username} attacking item ${targetItemId} at (${attackPos.x}, ${attackPos.y})`);
+  console.log(`Current mapItems at target position:`, mapItems[`${attackPos.x},${attackPos.y}`]);
+  console.log(`Potion mappings check - targetItemId ${targetItemId} is potion:`, !!potionMappings[targetItemId]);
   
   // Check if attacking a potion
   if (potionMappings[targetItemId]) {
-    console.log(`Potion attack detected: item ${targetItemId}`);
-    await handlePotionAttack(playerData.map_id, attackPos.x, attackPos.y, targetItemId, potionMappings[targetItemId], new Set());
+    console.log(`Potion attack detected: item ${targetItemId} -> enemy ${potionMappings[targetItemId]}`);
+    
+    // Create unique attack ID to prevent race conditions
+    const attackId = `${playerData.map_id}:${attackPos.x},${attackPos.y}:${Date.now()}`;
+    if (ongoingPotionAttacks.has(attackId)) {
+      console.log(`Potion attack already in progress for ${attackPos.x},${attackPos.y}, skipping`);
+      return;
+    }
+    
+    ongoingPotionAttacks.add(attackId);
+    try {
+      await handlePotionAttack(playerData.map_id, attackPos.x, attackPos.y, targetItemId, potionMappings[targetItemId], new Set());
+    } finally {
+      ongoingPotionAttacks.delete(attackId);
+    }
     return;
   }
   
@@ -1699,26 +1717,52 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
     await handleStatueAttack(playerData.map_id, attackPos.x, attackPos.y, targetItemId, statueMappings[targetItemId]);
     return;
   }
+  
+  console.log(`No potion or statue match for item ${targetItemId}`);
 }
 
 // Handle potion attack with chain reaction
 async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPositions) {
   const posKey = `${x},${y}`;
   
+  console.log(`=== Processing potion at (${x}, ${y}), item ${itemId} -> enemy ${enemyType} ===`);
+  console.log(`ProcessedPositions so far:`, Array.from(processedPositions));
+  
   // Prevent infinite loops in chain reactions
   if (processedPositions.has(posKey)) {
+    console.log(`Position ${posKey} already processed, skipping to prevent loop`);
     return;
   }
   processedPositions.add(posKey);
   
-  console.log(`Processing potion at (${x}, ${y}), item ${itemId} -> enemy ${enemyType}`);
+  // Double-check that the item is still there and is actually a potion
+  const playerMapSpec = getMapSpec(mapId);
+  const currentItemId = getItemAtPosition(x, y, playerMapSpec, mapId);
+  
+  const potionMappings = {
+    165: 2, 239: 10, 164: 33, 248: 14, 308: 6, 240: 12
+  };
+  
+  if (!potionMappings[currentItemId]) {
+    console.log(`Item at (${x}, ${y}) is no longer a potion (currentItemId: ${currentItemId}), skipping`);
+    return;
+  }
+  
+  if (currentItemId !== itemId) {
+    console.log(`Item ID mismatch at (${x}, ${y}): expected ${itemId}, found ${currentItemId}, skipping`);
+    return;
+  }
+  
+  console.log(`Confirmed potion ${itemId} at (${x}, ${y}), proceeding with removal and spawning`);
   
   // Remove the potion from map
   const key = `${x},${y}`;
   mapItems[key] = -1; // Mark as removed
+  console.log(`Set mapItems[${key}] = -1`);
   
   // Save removal to database
   await saveItemToDatabase(x, y, 0, mapId);
+  console.log(`Saved item removal to database for (${x}, ${y})`);
   
   // Broadcast item removal
   broadcast({
@@ -1727,15 +1771,17 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
     y: y,
     itemId: 0
   });
+  console.log(`Broadcasted item removal for (${x}, ${y})`);
   
   // Create temporary spell effect (item #124) for 0.5 seconds
   const effectId = Date.now() + Math.random();
   createPotionEffect(effectId, x, y, mapId);
+  console.log(`Created potion effect ${effectId} at (${x}, ${y})`);
   
   // Spawn enemy immediately (effect overlays the enemy)
   const spawnedEnemy = await spawnEnemy(enemyType, mapId, x, y, true); // Mark as admin spawned for tracking
   if (spawnedEnemy) {
-    console.log(`Spawned enemy ${enemyType} at (${x}, ${y}) from potion attack`);
+    console.log(`Successfully spawned enemy ${enemyType} (ID: ${spawnedEnemy.id}) at (${x}, ${y}) from potion attack`);
     
     // Broadcast new enemy to all clients
     broadcastToMap(mapId, {
@@ -1750,9 +1796,13 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
         hp: spawnedEnemy.hp
       }
     });
+    console.log(`Broadcasted enemy spawn for enemy ${spawnedEnemy.id}`);
+  } else {
+    console.error(`Failed to spawn enemy ${enemyType} at (${x}, ${y})`);
   }
   
   // Check for adjacent potions (4 directions) for chain reaction
+  console.log(`Checking for adjacent potions around (${x}, ${y})...`);
   const directions = [
     { x: x, y: y - 1 },     // up
     { x: x, y: y + 1 },     // down
@@ -1760,15 +1810,11 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
     { x: x + 1, y: y }      // right
   ];
   
-  const playerMapSpec = getMapSpec(mapId);
-  const potionMappings = {
-    165: 2, 239: 10, 164: 33, 248: 14, 308: 6, 240: 12
-  };
-  
   for (const dir of directions) {
     // Check map bounds
     if (dir.x >= 0 && dir.x < MAP_WIDTH && dir.y >= 0 && dir.y < MAP_HEIGHT) {
       const adjacentItemId = getItemAtPosition(dir.x, dir.y, playerMapSpec, mapId);
+      console.log(`Adjacent tile (${dir.x}, ${dir.y}): item ${adjacentItemId}`);
       
       // If adjacent tile has a potion, trigger chain reaction
       if (potionMappings[adjacentItemId]) {
@@ -1777,6 +1823,8 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
       }
     }
   }
+  
+  console.log(`=== Finished processing potion at (${x}, ${y}) ===`);
 }
 
 // Handle statue attack
