@@ -1337,6 +1337,27 @@ async function loadItemsFromDatabase(mapId = null) {
   }
 }
 
+async function initializeMapItems() {
+  try {
+    console.log('Loading all map items from database...');
+    const allItems = await loadItemsFromDatabase(); // Load all maps
+    
+    // Clear existing mapItems and repopulate
+    mapItems = {};
+    
+    for (const [key, itemId] of Object.entries(allItems)) {
+      // Only store non-zero items (0 means removed/empty)
+      if (itemId !== 0) {
+        mapItems[key] = itemId;
+      }
+    }
+    
+    console.log(`Loaded ${Object.keys(mapItems).length} map items from database`);
+  } catch (error) {
+    console.error('Error initializing map items:', error);
+  }
+}
+
 // Inventory management functions
 async function initializePlayerInventory(playerId) {
   try {
@@ -6156,8 +6177,8 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        // Update item in memory and database
-        const key = `${adjacentPos.x},${adjacentPos.y}`;
+        // Update item in memory and database using proper key format
+        const key = `${playerData.map_id}:${adjacentPos.x},${adjacentPos.y}`;
         if (itemId === 0) {
           delete mapItems[key];
           // Remove from database
@@ -6427,8 +6448,8 @@ wss.on('connection', (ws) => {
         }
         
         try {
-          const playerPos = `${playerData.pos_x},${playerData.pos_y}`;
-          const containerKey = `${playerData.map_id}:${playerPos}`;
+          const playerPos = `${playerData.map_id}:${playerData.pos_x},${playerData.pos_y}`;
+          const containerKey = `${playerData.map_id}:${playerData.pos_x},${playerData.pos_y}`;
           
           // Simple approach: Create a container in memory and place a gold pile visual (item #25)
           let existingContainer = mapContainers[containerKey];
@@ -6750,6 +6771,9 @@ loadFloorCollision();
 
 // Initialize NPC details
 loadNPCDetails();
+
+// Load all map items from database at startup
+initializeMapItems();
 
 // Load NPC locations after all maps are loaded
 setTimeout(() => {
