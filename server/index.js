@@ -1281,7 +1281,12 @@ async function saveItemToDatabase(x, y, itemId, mapId = 1) {
     if (itemId === 0) {
       delete mapItems[key];
     } else {
-      mapItems[key] = itemId;
+      // Don't overwrite -1 values (removed potions/statues) with drop containers
+      if (mapItems[key] !== -1) {
+        mapItems[key] = itemId;
+      } else {
+        console.log(`Not overwriting removed potion/statue at ${key} with item ${itemId}`);
+      }
     }
   } catch (error) {
     console.error('Error saving item to database:', error);
