@@ -1315,14 +1315,17 @@
             break;
 
         case 'item_placed':
-          const key = `${msg.x},${msg.y}`;
-          console.log(`Client received item_placed: (${msg.x},${msg.y}) -> ${msg.itemId}`);
-          if (msg.itemId === 0) {
-            mapItems[key] = -1; // Use -1 to permanently override base map data
-            console.log(`Set item at (${msg.x},${msg.y}) to -1 (permanently removed)`);
-          } else {
-            mapItems[key] = msg.itemId;
-            console.log(`Placed item ${msg.itemId} at (${msg.x},${msg.y})`);
+          // Only process item updates for the current map
+          if (localPlayer && msg.mapId && Number(msg.mapId) === Number(localPlayer.map_id)) {
+            const key = `${msg.x},${msg.y}`;
+            console.log(`Client received item_placed: (${msg.x},${msg.y}) -> ${msg.itemId} on map ${msg.mapId}`);
+            if (msg.itemId === 0) {
+              mapItems[key] = 0; // Use 0 to indicate removed item
+              console.log(`Set item at (${msg.x},${msg.y}) to 0 (removed)`);
+            } else {
+              mapItems[key] = msg.itemId;
+              console.log(`Placed item ${msg.itemId} at (${msg.x},${msg.y})`);
+            }
           }
           break;
 
@@ -2845,31 +2848,38 @@
                                   ? mapSpec.items[y][x] : 0;
             const placedItemId = mapItems[`${x},${y}`];
             
-            // If there's a placed item, check if it's a drop container (item #201)
-            if (placedItemId !== undefined && placedItemId === 201) {
-              // Drop container completely hides base item - only render the container
-              drawItemAtTile(screenX, screenY, 201);
-            } else if (placedItemId !== undefined && placedItemId !== baseMapItemId) {
-              // Other placed items: check if we should render both
-              const baseItemDetails = getItemDetails(baseMapItemId);
-              const nonPickupableTypes = ['nothing', 'container', 'sign', 'portal', 'interactable', 'npc'];
-              const isBaseNonPickupable = baseItemDetails && nonPickupableTypes.includes(baseItemDetails.type);
-              
-              if (isBaseNonPickupable && baseMapItemId > 0) {
-                // Render base item first (underneath)
-                drawItemAtTile(screenX, screenY, baseMapItemId);
-              }
-              
-              // Render placed item on top (if it exists)
-              if (placedItemId > 0) {
-                drawItemAtTile(screenX, screenY, placedItemId);
+            // Determine which item to render based on overrides
+            let effectiveItemId;
+            
+            if (placedItemId !== undefined) {
+              // If placed item is 0 or -1, the item has been removed - don't render anything
+              if (placedItemId <= 0) {
+                effectiveItemId = 0;
+              } else if (placedItemId === 201) {
+                // Drop container completely hides base item - only render the container
+                effectiveItemId = 201;
+              } else {
+                // Check if we should render both base and placed items
+                const baseItemDetails = getItemDetails(baseMapItemId);
+                const nonPickupableTypes = ['nothing', 'container', 'sign', 'portal', 'interactable', 'npc'];
+                const isBaseNonPickupable = baseItemDetails && nonPickupableTypes.includes(baseItemDetails.type);
+                
+                if (isBaseNonPickupable && baseMapItemId > 0) {
+                  // Render base item first (underneath)
+                  drawItemAtTile(screenX, screenY, baseMapItemId);
+                }
+                
+                // Render placed item on top
+                effectiveItemId = placedItemId;
               }
             } else {
-              // Normal single item rendering
-              const effectiveItemId = placedItemId !== undefined ? placedItemId : baseMapItemId;
-              if (effectiveItemId > 0) {
-                drawItemAtTile(screenX, screenY, effectiveItemId);
-              }
+              // No placed item, use base map item
+              effectiveItemId = baseMapItemId;
+            }
+            
+            // Render the effective item (if any)
+            if (effectiveItemId > 0) {
+              drawItemAtTile(screenX, screenY, effectiveItemId);
             }
 
             // Draw enemies after items but before players
