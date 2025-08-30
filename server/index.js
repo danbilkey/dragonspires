@@ -1116,20 +1116,22 @@ function getItemAtPosition(x, y, mapSpec, mapId = 1) {
   const key = `${mapId}:${x},${y}`;
   const placedItem = mapItems[key];
   
-  // Enhanced debug logging for potion/statue items
+  // Enhanced debug logging for potion/statue items and collision checking
   const isSpecialItem = [165, 239, 164, 248, 308, 240, 182, 183, 191, 202].includes(mapItem);
+  const isCollisionCheck = new Error().stack.includes('canMoveTo');
+  const isLookCheck = new Error().stack.includes('look');
   
   // If there's a placed item, it overrides the base map item
   if (placedItem !== undefined) {
-    if (isSpecialItem || placedItem !== mapItem) {
-      console.log(`getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, overrideItem=${placedItem}, returning=${placedItem}`);
+    if (isSpecialItem || placedItem !== mapItem || isCollisionCheck || isLookCheck) {
+      console.log(`🔍 getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, overrideItem=${placedItem}, returning=${placedItem} ${isCollisionCheck ? '[COLLISION_CHECK]' : ''} ${isLookCheck ? '[LOOK_CHECK]' : ''}`);
     }
     return placedItem;
   }
   
   // Debug logging for special items with no override
-  if (isSpecialItem) {
-    console.log(`getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, NO_OVERRIDE, returning=${mapItem}`);
+  if (isSpecialItem || isCollisionCheck || isLookCheck) {
+    console.log(`🔍 getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, NO_OVERRIDE, returning=${mapItem} ${isCollisionCheck ? '[COLLISION_CHECK]' : ''} ${isLookCheck ? '[LOOK_CHECK]' : ''}`);
   }
   
   return mapItem;
@@ -1595,6 +1597,49 @@ async function updateContainerItem(x, y, mapId, itemId) {
   }
 }
 
+// Function to load NPC locations from map data
+function loadNPCLocations() {
+  try {
+    npcLocations = []; // Clear existing locations
+    
+    // Load NPCs from all map data files
+    const mapIds = [1, 2, 3, 4, 5, 99];
+    for (const mapId of mapIds) {
+      const mapData = getMapData(mapId);
+      if (mapData && mapData.npcs) {
+        for (const npc of mapData.npcs) {
+          const [x, y] = npc.coordinates.split(',').map(Number);
+          const npcType = npc.type;
+          
+          npcLocations.push({
+            type: npcType,
+            x: x,
+            y: y,
+            mapId: mapId
+          });
+        }
+        console.log(`Loaded ${mapData.npcs.length} NPCs for map ${mapId}`);
+      }
+    }
+    
+    console.log(`Total NPCs loaded: ${npcLocations.length}`);
+    
+    // Debug: Show all speaker NPCs
+    const speakerNPCs = npcLocations.filter(npc => {
+      const npcDetails = getNPCDetails(npc.type);
+      return npcDetails && npcDetails.speaker;
+    });
+    console.log(`Found ${speakerNPCs.length} speaker NPCs:`);
+    speakerNPCs.forEach(npc => {
+      const npcDetails = getNPCDetails(npc.type);
+      console.log(`  - NPC type ${npc.type} at (${npc.x},${npc.y}) on map ${npc.mapId}: "${npcDetails.speaker_phrase_1}"`);
+    });
+    
+  } catch (error) {
+    console.error('Error loading NPC locations:', error);
+  }
+}
+
 // Enemy management functions
 let enemies = {}; // Store enemies in memory by ID for quick access
 
@@ -1904,7 +1949,8 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
   const key = `${mapId}:${x},${y}`;
   mapItems[key] = 0;
   saveItemToDatabase(x, y, 0, mapId);
-  console.log(`Stored potion removal in mapItems at (${x}, ${y}) -> 0`);
+  console.log(`🧪 Stored potion removal in mapItems[${key}] = 0 (mapId=${mapId})`);
+  console.log(`🧪 Current mapItems keys for map ${mapId}:`, Object.keys(mapItems).filter(k => k.startsWith(`${mapId}:`)));
   
   // Broadcast item removal to all clients
   broadcast({
@@ -1978,7 +2024,8 @@ async function handleStatueAttack(mapId, x, y, itemId, statueConfig) {
   const key = `${mapId}:${x},${y}`;
   mapItems[key] = 0;
   saveItemToDatabase(x, y, 0, mapId);
-  console.log(`Stored statue removal in mapItems at (${x}, ${y}) -> 0`);
+  console.log(`🗿 Stored statue removal in mapItems[${key}] = 0 (mapId=${mapId})`);
+  console.log(`🗿 Current mapItems keys for map ${mapId}:`, Object.keys(mapItems).filter(k => k.startsWith(`${mapId}:`)));
   
   // Broadcast item removal to all clients
   broadcast({
