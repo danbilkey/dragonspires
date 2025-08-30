@@ -7382,11 +7382,7 @@ setInterval(() => {
     let playersMessaged = 0;
     
     // Find all players within 6-tile square range
-    console.log(`🎯 Checking NPC type ${npcLocation.type} at (${npcLocation.x},${npcLocation.y}) map ${npcLocation.mapId} against all players...`);
     for (const [ws, playerData] of clients.entries()) {
-      if (playerData) {
-        console.log(`  Player ${playerData.username}: map ${playerData.map_id}, pos (${playerData.pos_x},${playerData.pos_y}), dead: ${playerData.is_dead}, ws: ${ws.readyState}`);
-      }
       // Enhanced validation: check map, death state, and position validity
       if (playerData && 
           Number(playerData.map_id) === Number(npcLocation.mapId) && 
@@ -7406,11 +7402,9 @@ setInterval(() => {
                              npcLocation.y >= 0 && npcLocation.y < MAP_HEIGHT;
           
           if (playerInBounds && npcInBounds) {
-            // Debug: Track which exact NPC is sending to which player
-            console.log(`🔊 SENDING: NPC type ${npcLocation.type} at (${npcLocation.x},${npcLocation.y}) map ${npcLocation.mapId} -> Player ${playerData.username} at (${playerData.pos_x},${playerData.pos_y}) map ${playerData.map_id}: "${phrase}"`);
             send(ws, {
               type: 'chat',
-              text: `[NPC ${npcLocation.type}@Map${npcLocation.mapId}] ${phrase}`,
+              text: phrase,
               color: 'black'
             });
             playersMessaged++;
