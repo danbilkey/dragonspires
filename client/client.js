@@ -2720,10 +2720,10 @@
           if (window.getItemMeta && window.itemsReady()) {
             const goldMeta = window.getItemMeta(25);
             if (goldMeta && goldMeta.img && goldMeta.img.complete) {
-              // Draw at original size with x:-23, y:-24 offset + 7px lower
+              // Draw at original size with x:-23+28, y:-24 offset + 7px lower
               const goldOriginalWidth = goldMeta.img.naturalWidth || goldMeta.img.width;
               const goldOriginalHeight = goldMeta.img.naturalHeight || goldMeta.img.height;
-              ctx.drawImage(goldMeta.img, valueColumnX + 30 - 23, currentY + 16 - (goldOriginalHeight / 2) - 24 + 7, goldOriginalWidth, goldOriginalHeight);
+              ctx.drawImage(goldMeta.img, valueColumnX + 30 - 23 + 28, currentY + 16 - (goldOriginalHeight / 2) - 24 + 7, goldOriginalWidth, goldOriginalHeight);
             }
           }
           
@@ -2732,11 +2732,11 @@
       }
     }
     
-    // Add "5. Return to main menu" option at fixed position (303, 171)
+    // Add "5. Return to main menu" option at fixed position (303, 171) with offset x+64, y+11
     const returnText = '5. Return to main menu';
     const returnTextWidth = ctx.measureText(returnText).width;
-    const centerX = 303 - (returnTextWidth / 2); // Center at x=303
-    const returnTextY = 171; // Fixed y position
+    const centerX = 303 + 64 - (returnTextWidth / 2); // Center at x=303+64
+    const returnTextY = 171 + 11; // Fixed y position + 11
     
     // Draw black background for text (like player names)
     ctx.fillStyle = 'black';
@@ -2858,18 +2858,23 @@
                 // Drop container completely hides base item - only render the container
                 effectiveItemId = 201;
               } else {
-                // Check if we should render both base and placed items
-                const baseItemDetails = getItemDetails(baseMapItemId);
-                const nonPickupableTypes = ['nothing', 'container', 'sign', 'portal', 'interactable', 'npc'];
-                const isBaseNonPickupable = baseItemDetails && nonPickupableTypes.includes(baseItemDetails.type);
-                
-                if (isBaseNonPickupable && baseMapItemId > 0) {
-                  // Render base item first (underneath)
-                  drawItemAtTile(screenX, screenY, baseMapItemId);
+                // Special case: Coffin transition (202 -> 203) should only show the opened coffin
+                if (baseMapItemId === 202 && placedItemId === 203) {
+                  effectiveItemId = 203; // Only render the opened coffin
+                } else {
+                  // Check if we should render both base and placed items
+                  const baseItemDetails = getItemDetails(baseMapItemId);
+                  const nonPickupableTypes = ['nothing', 'container', 'sign', 'portal', 'interactable', 'npc'];
+                  const isBaseNonPickupable = baseItemDetails && nonPickupableTypes.includes(baseItemDetails.type);
+                  
+                  if (isBaseNonPickupable && baseMapItemId > 0) {
+                    // Render base item first (underneath)
+                    drawItemAtTile(screenX, screenY, baseMapItemId);
+                  }
+                  
+                  // Render placed item on top
+                  effectiveItemId = placedItemId;
                 }
-                
-                // Render placed item on top
-                effectiveItemId = placedItemId;
               }
             } else {
               // No placed item, use base map item
