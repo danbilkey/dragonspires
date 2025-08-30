@@ -4470,6 +4470,41 @@ wss.on('connection', (ws) => {
       
       console.log(`Attack attempt by ${playerData.username}: stamina ${playerData.stamina ?? 0}/10, attacking fountain: ${isFountain}`);
       
+      // Handle fountain attack effect (item 309)
+      if (isFountain) {
+        // Create fountain effect (item 309) visible to all players
+        const effectId = Date.now() + Math.random();
+        
+        // Create fountain healing effect at adjacent position
+        const fountainEffect = {
+          id: effectId,
+          x: adjacentPos.x,
+          y: adjacentPos.y,
+          mapId: playerData.map_id,
+          itemId: 309, // Fountain effect item
+          startTime: Date.now()
+        };
+        
+        // Broadcast fountain effect creation to all players on the map
+        broadcastToMap(playerData.map_id, {
+          type: 'fountain_effect_created',
+          effectId: effectId,
+          x: adjacentPos.x,
+          y: adjacentPos.y,
+          itemId: 309
+        });
+        
+        // Schedule effect removal after 1 second
+        setTimeout(() => {
+          broadcastToMap(playerData.map_id, {
+            type: 'fountain_effect_removed',
+            effectId: effectId
+          });
+        }, 1000);
+        
+        console.log(`Fountain attack effect ${effectId} created at (${adjacentPos.x}, ${adjacentPos.y}) by ${playerData.username}`);
+      }
+      
       if (!isFountain) {
         // Check stamina requirement (at least 10) - only for non-fountain attacks
         if ((playerData.stamina ?? 0) < 10) {
