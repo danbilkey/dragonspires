@@ -2653,14 +2653,14 @@
   function drawNPCShopDialog(npcDetails, x, y, width, height, textColor, lineHeight, padding, shopType) {
     let currentY = y + padding + 12;
     
-    // Draw table headers
-    const valueColumnX = x + (width * 0.75); // 75% across the dialog
+    // Draw table headers  
+    const valueColumnX = x + (width * 0.75) - 20; // 75% across the dialog, moved 20px left
     
-    ctx.fillText(`Item to ${shopType === 'buy' ? 'Buy' : 'Sell'}`, x + padding, currentY);
-    ctx.fillText('Value', valueColumnX, currentY);
+    ctx.fillText(`Item to ${shopType === 'buy' ? 'Buy' : 'Sell'}`, x + padding, currentY + 7); // 7px lower
+    ctx.fillText('Value', valueColumnX, currentY + 7); // 7px lower
     
     // Move horizontal line up more and adjust currentY
-    const headerLineY = currentY + 5; // Move line up closer to headers
+    const headerLineY = currentY + 5 + 7; // Move line up closer to headers, 7px lower
     currentY = headerLineY + 15; // Start items closer to the line
     
     // Draw horizontal line under headers
@@ -2688,12 +2688,12 @@
       if (itemId > 0) {
         const itemDetails = getItemDetails(itemId);
         if (itemDetails) {
-          // Draw item number to the left of the image with y:-16 offset
-          ctx.fillText(`${i}.`, x + padding, currentY + 16 - 16); // y:-16 offset
+          // Draw item number to the left of the image with y:-16 offset + 7px lower
+          ctx.fillText(`${i}.`, x + padding, currentY + 16 - 16 + 7); // y:-16 offset + 7px lower
           
-          // Draw item image if available (original size, no scaling) with x:-16, y:-20 offset
+          // Draw item image if available (original size, no scaling) with x:-16, y:-20 offset + 7px lower
           const imageX = x + padding + 20; // Space after number
-          const imageY = currentY; // Image Y position
+          const imageY = currentY + 7; // Image Y position + 7px lower
           if (window.getItemMeta && window.itemsReady()) {
             const meta = window.getItemMeta(itemId);
             if (meta && meta.img && meta.img.complete) {
@@ -2704,40 +2704,39 @@
             }
           }
           
-          // Draw item name to the right of the image with y:-16 offset
+          // Draw item name to the right of the image with y:-16 offset + 7px lower
           let itemText = itemDetails.name;
           const nameX = imageX + 35; // Space after image
           const maxTextWidth = (valueColumnX - 10) - nameX; // Leave space before value column
           while (ctx.measureText(itemText).width > maxTextWidth && itemText.length > 10) {
             itemText = itemText.slice(0, -1);
           }
-          ctx.fillText(itemText, nameX, currentY + 16 - 16); // y:-16 offset
+          ctx.fillText(itemText, nameX, currentY + 16 - 16 + 7); // y:-16 offset + 7px lower
           
-          // Draw price with y:-16 offset
-          ctx.fillText(`${price}`, valueColumnX, currentY + 16 - 16); // y:-16 offset
+          // Draw price with y:-16 offset + 7px lower
+          ctx.fillText(`${price}`, valueColumnX, currentY + 16 - 16 + 7); // y:-16 offset + 7px lower
           
           // Draw gold pile image with x:-23, y:-24 offset
           if (window.getItemMeta && window.itemsReady()) {
             const goldMeta = window.getItemMeta(25);
             if (goldMeta && goldMeta.img && goldMeta.img.complete) {
-              // Draw at original size with x:-23, y:-24 offset
+              // Draw at original size with x:-23, y:-24 offset + 7px lower
               const goldOriginalWidth = goldMeta.img.naturalWidth || goldMeta.img.width;
               const goldOriginalHeight = goldMeta.img.naturalHeight || goldMeta.img.height;
-              ctx.drawImage(goldMeta.img, valueColumnX + 30 - 23, currentY + 16 - (goldOriginalHeight / 2) - 24, goldOriginalWidth, goldOriginalHeight);
+              ctx.drawImage(goldMeta.img, valueColumnX + 30 - 23, currentY + 16 - (goldOriginalHeight / 2) - 24 + 7, goldOriginalWidth, goldOriginalHeight);
             }
           }
           
-          currentY += 32; // Move down for next item
+          currentY += 27; // Move down for next item (32 - 5 = 27px gap)
         }
       }
     }
     
-    // Add "5. Return to main menu" option at bottom center with new color and black background
-    currentY += 20; // Space before return option
+    // Add "5. Return to main menu" option at fixed position (303, 171)
     const returnText = '5. Return to main menu';
     const returnTextWidth = ctx.measureText(returnText).width;
-    const centerX = x + (width / 2) - (returnTextWidth / 2);
-    const returnTextY = currentY - 16 + 14; // y:-16 then y:+14 offset
+    const centerX = 303 - (returnTextWidth / 2); // Center at x=303
+    const returnTextY = 171; // Fixed y position
     
     // Draw black background for text (like player names)
     ctx.fillStyle = 'black';
@@ -3139,8 +3138,8 @@
       pushChat("- TAB key to Attack");
       pushChat("- 'G' key to pick-up / drop an item, 'U' to use an item");
       pushChat("- 'T' key to equip a weapon in your hand, 'Y' for armor");
-      pushChat("- 'I' key to open / close your inventory");
-      pushChat("- 'C' key to swap an item from your inventory to your hand");
+      pushChat("- 'I' key to open / close your inventory, 'C' to swap with item from hands.");
+      pushChat("- 'L' key to look at what's ahead of you, or interact with NPC/shop.");
     }
 
     function clearChatMessages() {
