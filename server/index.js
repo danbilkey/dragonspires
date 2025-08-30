@@ -1116,22 +1116,23 @@ function getItemAtPosition(x, y, mapSpec, mapId = 1) {
   const key = `${mapId}:${x},${y}`;
   const placedItem = mapItems[key];
   
-  // Enhanced debug logging for potion/statue items and collision checking
-  const isSpecialItem = [165, 239, 164, 248, 308, 240, 182, 183, 191, 202].includes(mapItem);
+  // Enhanced debug logging for potion/statue items, collision checking, and gate positions
+  const isSpecialItem = [165, 239, 164, 248, 308, 240, 182, 183, 191, 202, 188, 233].includes(mapItem);
   const isCollisionCheck = new Error().stack.includes('canMoveTo');
   const isLookCheck = new Error().stack.includes('look');
+  const isGatePosition = (x === 39 && y === 35) || mapItem === 188 || mapItem === 233;
   
   // If there's a placed item, it overrides the base map item
   if (placedItem !== undefined) {
-    if (isSpecialItem || placedItem !== mapItem || isCollisionCheck || isLookCheck) {
-      console.log(`🔍 getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, overrideItem=${placedItem}, returning=${placedItem} ${isCollisionCheck ? '[COLLISION_CHECK]' : ''} ${isLookCheck ? '[LOOK_CHECK]' : ''}`);
+    if (isSpecialItem || placedItem !== mapItem || isCollisionCheck || isLookCheck || isGatePosition) {
+      console.log(`🔍 getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, overrideItem=${placedItem}, returning=${placedItem} ${isCollisionCheck ? '[COLLISION_CHECK]' : ''} ${isLookCheck ? '[LOOK_CHECK]' : ''} ${isGatePosition ? '[GATE]' : ''}`);
     }
     return placedItem;
   }
   
   // Debug logging for special items with no override
-  if (isSpecialItem || isCollisionCheck || isLookCheck) {
-    console.log(`🔍 getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, NO_OVERRIDE, returning=${mapItem} ${isCollisionCheck ? '[COLLISION_CHECK]' : ''} ${isLookCheck ? '[LOOK_CHECK]' : ''}`);
+  if (isSpecialItem || isCollisionCheck || isLookCheck || isGatePosition) {
+    console.log(`🔍 getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, NO_OVERRIDE, returning=${mapItem} ${isCollisionCheck ? '[COLLISION_CHECK]' : ''} ${isLookCheck ? '[LOOK_CHECK]' : ''} ${isGatePosition ? '[GATE]' : ''}`);
   }
   
   return mapItem;
@@ -1618,11 +1619,11 @@ function loadNPCLocations() {
             mapId: mapId
           });
         }
-        console.log(`Loaded ${mapData.npcs.length} NPCs for map ${mapId}`);
+        console.log(`🗣️ Loaded ${mapData.npcs.length} NPCs for map ${mapId}`);
       }
     }
     
-    console.log(`Total NPCs loaded: ${npcLocations.length}`);
+    console.log(`🗣️ Total NPCs loaded: ${npcLocations.length}`);
     
     // Debug: Show all speaker NPCs
     const speakerNPCs = npcLocations.filter(npc => {
@@ -7423,7 +7424,7 @@ setInterval(() => {
     }
   }
   
-  console.log(`NPC Speaker: Found ${speakerPhrases.length} speaker NPCs with valid phrases`);
+  console.log(`🗣️ NPC Speaker: Found ${speakerPhrases.length} speaker NPCs with valid phrases`);
   
   // Send phrases to players within range
   for (const speakerData of speakerPhrases) {
