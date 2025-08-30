@@ -2840,14 +2840,17 @@
           for (let x = 0; x < mapSpec.width; x++) {
             const { screenX, screenY } = isoScreen(x, y);
 
-            // Get both base map item and placed item for layered rendering
+            // Get both base map item and placed item for rendering
             const baseMapItemId = (mapSpec.items && mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
                                   ? mapSpec.items[y][x] : 0;
             const placedItemId = mapItems[`${x},${y}`];
             
-            // If there's a placed item that's different from base, check if we should render both
-            if (placedItemId !== undefined && placedItemId !== baseMapItemId) {
-              // Check if base item is non-pickupable (should render underneath)
+            // If there's a placed item, check if it's a drop container (item #201)
+            if (placedItemId !== undefined && placedItemId === 201) {
+              // Drop container completely hides base item - only render the container
+              drawItemAtTile(screenX, screenY, 201);
+            } else if (placedItemId !== undefined && placedItemId !== baseMapItemId) {
+              // Other placed items: check if we should render both
               const baseItemDetails = getItemDetails(baseMapItemId);
               const nonPickupableTypes = ['nothing', 'container', 'sign', 'portal', 'interactable', 'npc'];
               const isBaseNonPickupable = baseItemDetails && nonPickupableTypes.includes(baseItemDetails.type);
@@ -3041,6 +3044,10 @@
         }
         if (placedItem === 0) {
           return 0;
+        }
+        // If it's a drop container (item #201), return it and completely ignore base item
+        if (placedItem === 201) {
+          return 201;
         }
         return placedItem;
       }
