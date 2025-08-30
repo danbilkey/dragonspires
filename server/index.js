@@ -876,8 +876,8 @@ async function getAllMapItems(mapId) {
     const dbItems = await loadItemsFromDatabase(mapId);
     for (const [posKey, itemId] of Object.entries(dbItems)) {
       if (itemId === 0) {
-        // Item removed - delete from allItems
-        delete allItems[posKey];
+        // Item removed - set to 0 to override base map item (don't delete)
+        allItems[posKey] = 0;
       } else {
         // Item placed/changed - override base item
         allItems[posKey] = itemId;
@@ -890,8 +890,8 @@ async function getAllMapItems(mapId) {
       if (fullKey.startsWith(`${mapId}:`)) {
         const posKey = fullKey.split(':')[1]; // Extract "x,y" part
         if (itemId === 0) {
-          // Item removed - delete from allItems
-          delete allItems[posKey];
+          // Item removed - set to 0 to override base map item (don't delete)
+          allItems[posKey] = 0;
         } else {
           allItems[posKey] = itemId;
         }
@@ -1341,13 +1341,11 @@ async function saveItemToDatabase(x, y, itemId, mapId = 1) {
     
     // Update in-memory mapItems for dropped/placed items
     const key = `${mapId}:${x},${y}`;
-    if (itemId === 0) {
-      delete mapItems[key];
-    } else {
-      mapItems[key] = itemId;
-    }
+    // Always store the itemId, including 0 for removed items
+    // This ensures 0 acts as a persistent override to base map items
+    mapItems[key] = itemId;
     
-    console.log(`Updated mapItems[${key}] = ${itemId}`);
+    console.log(`Updated mapItems[${key}] = ${itemId} (${itemId === 0 ? 'REMOVED' : 'PLACED'})`);
   } catch (error) {
     console.error('Error saving item to database:', error);
   }
