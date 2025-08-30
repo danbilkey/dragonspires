@@ -1116,18 +1116,20 @@ function getItemAtPosition(x, y, mapSpec, mapId = 1) {
   const key = `${mapId}:${x},${y}`;
   const placedItem = mapItems[key];
   
+  // Enhanced debug logging for potion/statue items
+  const isSpecialItem = [165, 239, 164, 248, 308, 240, 182, 183, 191, 202].includes(mapItem);
+  
   // If there's a placed item, it overrides the base map item
   if (placedItem !== undefined) {
-    // Debug logging
-    if ([165, 239, 164, 248, 308, 240].includes(mapItem) || placedItem !== mapItem) {
-      console.log(`getItemAtPosition(${x},${y}): mapItem=${mapItem}, placedItem=${placedItem}, returning=${placedItem}`);
+    if (isSpecialItem || placedItem !== mapItem) {
+      console.log(`getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, overrideItem=${placedItem}, returning=${placedItem}`);
     }
     return placedItem;
   }
   
-  // Debug logging for potion positions
-  if ([165, 239, 164, 248, 308, 240].includes(mapItem)) {
-    console.log(`getItemAtPosition(${x},${y}): returning mapItem=${mapItem}`);
+  // Debug logging for special items with no override
+  if (isSpecialItem) {
+    console.log(`getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, NO_OVERRIDE, returning=${mapItem}`);
   }
   
   return mapItem;
@@ -1830,7 +1832,8 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
   };
   
   console.log(`Player ${playerData.username} attacking item ${targetItemId} at (${attackPos.x}, ${attackPos.y})`);
-  console.log(`Current mapItems at target position:`, mapItems[`${attackPos.x},${attackPos.y}`]);
+  const debugKey = `${playerData.map_id}:${attackPos.x},${attackPos.y}`;
+  console.log(`Current mapItems at target position [${debugKey}]:`, mapItems[debugKey]);
   console.log(`Potion mappings check - targetItemId ${targetItemId} is potion:`, !!potionMappings[targetItemId]);
   
   // Check if attacking a potion (only if the item hasn't been removed)
@@ -4760,7 +4763,7 @@ wss.on('connection', (ws) => {
         const handsItem = playerData.hands || 0;
         if (handsItem === 0) return; // Animation already started, just return
         
-        const key = `${x},${y}`;
+        const key = `${playerData.map_id}:${x},${y}`;
         const playerMapSpec = getMapSpec(playerData.map_id);
         const existingMapItem = getItemAtPosition(x, y, playerMapSpec, playerData.map_id);
         
