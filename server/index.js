@@ -1116,23 +1116,9 @@ function getItemAtPosition(x, y, mapSpec, mapId = 1) {
   const key = `${mapId}:${x},${y}`;
   const placedItem = mapItems[key];
   
-  // Enhanced debug logging for potion/statue items, collision checking, and gate positions
-  const isSpecialItem = [165, 239, 164, 248, 308, 240, 182, 183, 191, 202, 188, 233].includes(mapItem);
-  const isCollisionCheck = new Error().stack.includes('canMoveTo');
-  const isLookCheck = new Error().stack.includes('look');
-  const isGatePosition = (x === 39 && y === 35) || mapItem === 188 || mapItem === 233;
-  
   // If there's a placed item, it overrides the base map item
   if (placedItem !== undefined) {
-    if (isSpecialItem || placedItem !== mapItem || isCollisionCheck || isLookCheck || isGatePosition) {
-      console.log(`🔍 getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, overrideItem=${placedItem}, returning=${placedItem} ${isCollisionCheck ? '[COLLISION_CHECK]' : ''} ${isLookCheck ? '[LOOK_CHECK]' : ''} ${isGatePosition ? '[GATE]' : ''}`);
-    }
     return placedItem;
-  }
-  
-  // Debug logging for special items with no override
-  if (isSpecialItem || isCollisionCheck || isLookCheck || isGatePosition) {
-    console.log(`🔍 getItemAtPosition(${x},${y}) [mapId=${mapId}]: baseItem=${mapItem}, NO_OVERRIDE, returning=${mapItem} ${isCollisionCheck ? '[COLLISION_CHECK]' : ''} ${isLookCheck ? '[LOOK_CHECK]' : ''} ${isGatePosition ? '[GATE]' : ''}`);
   }
   
   return mapItem;
@@ -1345,7 +1331,7 @@ async function saveItemToDatabase(x, y, itemId, mapId = 1) {
     // This ensures 0 acts as a persistent override to base map items
     mapItems[key] = itemId;
     
-    console.log(`Updated mapItems[${key}] = ${itemId} (${itemId === 0 ? 'REMOVED' : 'PLACED'})`);
+    // console.log(`Item ${itemId === 0 ? 'removed' : 'placed'} at (${x},${y})`);
   } catch (error) {
     console.error('Error saving item to database:', error);
   }
@@ -1875,19 +1861,14 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
     191: { enemyType: 9, direction: 'down' }     // item# 191 -> enemy# 9 facing down
   };
   
-  console.log(`Player ${playerData.username} attacking item ${targetItemId} at (${attackPos.x}, ${attackPos.y})`);
-  const debugKey = `${playerData.map_id}:${attackPos.x},${attackPos.y}`;
-  console.log(`Current mapItems at target position [${debugKey}]:`, mapItems[debugKey]);
-  console.log(`Potion mappings check - targetItemId ${targetItemId} is potion:`, !!potionMappings[targetItemId]);
+
+
   
   // Check if attacking a potion (only if the item hasn't been removed)
   if (potionMappings[targetItemId] && targetItemId > 0) {
-    console.log(`🧪 Potion attack detected: item ${targetItemId} -> enemy ${potionMappings[targetItemId]}`);
-    
     // Create unique attack ID to prevent race conditions
     const attackId = `${playerData.map_id}:${attackPos.x},${attackPos.y}:${Date.now()}`;
     if (ongoingPotionAttacks.has(attackId)) {
-      console.log(`Potion attack already in progress for ${attackPos.x},${attackPos.y}, skipping`);
       return;
     }
     
@@ -1902,24 +1883,17 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
   
   // Check if attacking a statue (only if the item hasn't been removed)
   if (statueMappings[targetItemId] && targetItemId > 0) {
-    console.log(`🗿 Statue attack detected: item ${targetItemId}`);
     await handleStatueAttack(playerData.map_id, attackPos.x, attackPos.y, targetItemId, statueMappings[targetItemId]);
     return;
   }
-  
-  console.log(`No potion or statue match for item ${targetItemId}`);
 }
 
 // Handle potion attack with chain reaction
 async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPositions) {
   const posKey = `${x},${y}`;
   
-  console.log(`=== Processing potion at (${x}, ${y}), item ${itemId} -> enemy ${enemyType} ===`);
-  console.log(`ProcessedPositions so far:`, Array.from(processedPositions));
-  
   // Prevent infinite loops in chain reactions
   if (processedPositions.has(posKey)) {
-    console.log(`Position ${posKey} already processed, skipping to prevent loop`);
     return;
   }
   processedPositions.add(posKey);
@@ -1932,24 +1906,14 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
     165: 2, 239: 10, 164: 33, 248: 14, 308: 6, 240: 12
   };
   
-  if (!potionMappings[currentItemId]) {
-    console.log(`Item at (${x}, ${y}) is no longer a potion (currentItemId: ${currentItemId}), skipping`);
+  if (!potionMappings[currentItemId] || currentItemId !== itemId) {
     return;
   }
-  
-  if (currentItemId !== itemId) {
-    console.log(`Item ID mismatch at (${x}, ${y}): expected ${itemId}, found ${currentItemId}, skipping`);
-    return;
-  }
-  
-  console.log(`Confirmed potion ${itemId} at (${x}, ${y}), proceeding with removal and spawning`);
   
   // Remove the potion using mapItems for persistence across map reloads
   const key = `${mapId}:${x},${y}`;
   mapItems[key] = 0;
   saveItemToDatabase(x, y, 0, mapId);
-  console.log(`🧪 Stored potion removal in mapItems[${key}] = 0 (mapId=${mapId})`);
-  console.log(`🧪 Current mapItems keys for map ${mapId}:`, Object.keys(mapItems).filter(k => k.startsWith(`${mapId}:`)));
   
   // Broadcast item removal to all clients
   broadcast({
@@ -1959,17 +1923,14 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
     itemId: 0,
     mapId: mapId
   });
-  console.log(`Broadcasted item removal for (${x}, ${y}) to item 0`);
   
   // Create temporary spell effect (item #124) for 0.5 seconds
   const effectId = Date.now() + Math.random();
   createPotionEffect(effectId, x, y, mapId);
-  console.log(`Created potion effect ${effectId} at (${x}, ${y})`);
   
   // Spawn enemy immediately (effect overlays the enemy)
   const spawnedEnemy = await spawnEnemy(enemyType, mapId, x, y, true); // Mark as admin spawned for tracking
   if (spawnedEnemy) {
-    console.log(`Successfully spawned enemy ${enemyType} (ID: ${spawnedEnemy.id}) at (${x}, ${y}) from potion attack`);
     
     // Broadcast new enemy to all clients
     broadcastToMap(mapId, {
@@ -1984,13 +1945,9 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
         hp: spawnedEnemy.hp
       }
     });
-    console.log(`Broadcasted enemy spawn for enemy ${spawnedEnemy.id}`);
-  } else {
-    console.error(`Failed to spawn enemy ${enemyType} at (${x}, ${y})`);
   }
   
   // Check for adjacent potions (4 directions) for chain reaction
-  console.log(`Checking for adjacent potions around (${x}, ${y})...`);
   const directions = [
     { x: x, y: y - 1 },     // up
     { x: x, y: y + 1 },     // down
@@ -2002,22 +1959,17 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
     // Check map bounds
     if (dir.x >= 0 && dir.x < MAP_WIDTH && dir.y >= 0 && dir.y < MAP_HEIGHT) {
       const adjacentItemId = getItemAtPosition(dir.x, dir.y, playerMapSpec, mapId);
-      console.log(`Adjacent tile (${dir.x}, ${dir.y}): item ${adjacentItemId}`);
       
       // If adjacent tile has a potion, trigger chain reaction
       if (potionMappings[adjacentItemId]) {
-        console.log(`Chain reaction: found adjacent potion ${adjacentItemId} at (${dir.x}, ${dir.y})`);
         await handlePotionAttack(mapId, dir.x, dir.y, adjacentItemId, potionMappings[adjacentItemId], processedPositions);
       }
     }
   }
-  
-  console.log(`=== Finished processing potion at (${x}, ${y}) ===`);
 }
 
 // Handle statue attack
 async function handleStatueAttack(mapId, x, y, itemId, statueConfig) {
-  console.log(`Processing statue at (${x}, ${y}), item ${itemId} -> enemy ${statueConfig.enemyType} facing ${statueConfig.direction}`);
   
   // Remove the statue using mapItems for persistence across map reloads
   const key = `${mapId}:${x},${y}`;
@@ -7431,8 +7383,13 @@ setInterval(() => {
     
     // Find all players within 6-tile square range
     for (const [ws, playerData] of clients.entries()) {
-      console.log(`🗣️ Checking player ${playerData?.username} on map ${playerData?.map_id} vs NPC on map ${npcLocation.mapId}`);
-      if (playerData && Number(playerData.map_id) === Number(npcLocation.mapId)) {
+      // Enhanced validation: check map, death state, and position validity
+      if (playerData && 
+          Number(playerData.map_id) === Number(npcLocation.mapId) && 
+          !playerData.is_dead && 
+          typeof playerData.pos_x === 'number' && 
+          typeof playerData.pos_y === 'number' &&
+          ws.readyState === 1) { // WebSocket.OPEN
         const dx = Math.abs(playerData.pos_x - npcLocation.x);
         const dy = Math.abs(playerData.pos_y - npcLocation.y);
         
@@ -7451,12 +7408,7 @@ setInterval(() => {
               color: 'black'
             });
             playersMessaged++;
-            console.log(`🗣️ Sent phrase to player ${playerData.username} at (${playerData.pos_x},${playerData.pos_y}) on map ${playerData.map_id}, NPC at (${npcLocation.x},${npcLocation.y}) on map ${npcLocation.mapId}, distance: (${dx},${dy})`);
           }
-        }
-      } else {
-        if (playerData) {
-          console.log(`🗣️ Skipped player ${playerData.username} - different map (player: ${playerData.map_id}, NPC: ${npcLocation.mapId})`);
         }
       }
     }
