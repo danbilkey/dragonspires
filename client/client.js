@@ -2919,10 +2919,10 @@
               }
             }
 
-            // Draw electrocute effects after spells (renders item 291 for electrocute)
+            // Draw electrocute effects after spells (renders item 288 for electrocute)
             for (const [effectId, effect] of Object.entries(electrocuteEffects)) {
               if (effect.x === x && effect.y === y) {
-                drawItemAtTile(screenX, screenY, 291);
+                drawItemAtTile(screenX, screenY, 288);
               }
             }
 
