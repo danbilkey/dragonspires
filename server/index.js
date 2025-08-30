@@ -851,19 +851,51 @@ function getOppositeDirection(direction) {
   return opposites[direction] || 'down';
 }
 
-// Helper function to get all current map items (database + memory)
+// Helper function to get all current map items (base map + database + memory)
 async function getAllMapItems(mapId) {
   try {
-    // Load database items
+    // Start with base map items
+    const allItems = {};
+    const mapSpec = getMapSpec(mapId);
+    
+    // Load base map items from map file
+    if (mapSpec && mapSpec.items) {
+      for (let y = 0; y < mapSpec.height; y++) {
+        for (let x = 0; x < mapSpec.width; x++) {
+          const baseItemId = (mapSpec.items[y] && typeof mapSpec.items[y][x] !== 'undefined') 
+            ? mapSpec.items[y][x] : 0;
+          if (baseItemId > 0) {
+            const posKey = `${x},${y}`;
+            allItems[posKey] = baseItemId;
+          }
+        }
+      }
+    }
+    
+    // Load database items and override base items
     const dbItems = await loadItemsFromDatabase(mapId);
+    for (const [posKey, itemId] of Object.entries(dbItems)) {
+      if (itemId === 0) {
+        // Item removed - delete from allItems
+        delete allItems[posKey];
+      } else {
+        // Item placed/changed - override base item
+        allItems[posKey] = itemId;
+      }
+    }
     
-    // Merge with memory items (dropped gold, etc.)
-    const allItems = { ...dbItems };
-    
-    // Add memory items (like dropped gold piles) and items from containers for this specific map
-    for (const [posKey, itemId] of Object.entries(mapItems)) {
-      // Memory items override database items for the same position
-      allItems[posKey] = itemId;
+    // Add memory items (like dropped gold piles) - these override everything
+    for (const [fullKey, itemId] of Object.entries(mapItems)) {
+      // Memory items are stored as "mapId:x,y", filter by current map
+      if (fullKey.startsWith(`${mapId}:`)) {
+        const posKey = fullKey.split(':')[1]; // Extract "x,y" part
+        if (itemId === 0) {
+          // Item removed - delete from allItems
+          delete allItems[posKey];
+        } else {
+          allItems[posKey] = itemId;
+        }
+      }
     }
     
     // Add gold pile visuals from containers for this specific map
@@ -884,9 +916,13 @@ async function getAllMapItems(mapId) {
     // Return filtered memory items as fallback
     const memoryItems = {};
     
-    // Include regular memory items
-    for (const [posKey, itemId] of Object.entries(mapItems)) {
-      memoryItems[posKey] = itemId;
+    // Include regular memory items for this map
+    for (const [fullKey, itemId] of Object.entries(mapItems)) {
+      // Memory items are stored as "mapId:x,y", filter by current map
+      if (fullKey.startsWith(`${mapId}:`) && itemId > 0) {
+        const posKey = fullKey.split(':')[1]; // Extract "x,y" part
+        memoryItems[posKey] = itemId;
+      }
     }
     
     // Include gold piles for this map
@@ -1725,6 +1761,38 @@ function broadcast(obj) {
 
 function send(ws, obj) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+// Helper function to split long chat messages into multiple lines
+function sendLongChatMessage(ws, text, color = 'black', maxLength = 80) {
+  if (!text || text.length <= maxLength) {
+    send(ws, { type: 'chat', text: text || '', color: color });
+    return;
+  }
+  
+  // Split into words
+  const words = text.split(' ');
+  let currentLine = '';
+  
+  for (const word of words) {
+    // Check if adding this word would exceed the limit
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    
+    if (testLine.length <= maxLength) {
+      currentLine = testLine;
+    } else {
+      // Send current line and start new one
+      if (currentLine) {
+        send(ws, { type: 'chat', text: currentLine, color: color });
+      }
+      currentLine = word;
+    }
+  }
+  
+  // Send the last line if there's any content
+  if (currentLine) {
+    send(ws, { type: 'chat', text: currentLine, color: color });
+  }
 }
 
 function broadcastToMap(mapId, obj) {
@@ -5937,11 +6005,7 @@ wss.on('connection', (ws) => {
           
           // Check if player has nothing in hands
           if (playerHandsItem === 0) {
-            send(ws, {
-              type: 'chat',
-              text: `There is nothing in your hands to give to ${npcDetails.name}.`,
-              color: 'black'
-            });
+            sendLongChatMessage(ws, `There is nothing in your hands to give to ${npcDetails.name}.`, 'black');
           }
           // Check if player has the required quest item
           else if (playerHandsItem === questItemRequired && questItemRequired > 0) {
@@ -5963,30 +6027,18 @@ wss.on('connection', (ws) => {
               
               // Send quest completion response in gold color
               if (npcDetails.response_4 && npcDetails.response_4.trim() !== '') {
-                send(ws, {
-                  type: 'chat',
-                  text: npcDetails.response_4,
-                  color: 'gold'
-                });
+                sendLongChatMessage(ws, npcDetails.response_4, 'gold');
               }
               
               console.log(`Player ${playerData.username} completed quest for NPC ${npcDetails.name}, gave item ${questItemRequired}, received item ${questItemReward}`);
             } else {
               // Invalid reward item
-              send(ws, {
-                type: 'chat',
-                text: `${npcDetails.name} seems uninterested in the item in your hands.`,
-                color: 'black'
-              });
+              sendLongChatMessage(ws, `${npcDetails.name} seems uninterested in the item in your hands.`, 'black');
             }
           }
           // Player has wrong item or quest_item_required is 0
           else {
-            send(ws, {
-              type: 'chat',
-              text: `${npcDetails.name} seems uninterested in the item in your hands.`,
-              color: 'black'
-            });
+            sendLongChatMessage(ws, `${npcDetails.name} seems uninterested in the item in your hands.`, 'black');
           }
         }
         // Handle regular question/response NPCs (including quest NPCs for responses 1-3)
@@ -5995,12 +6047,8 @@ wss.on('connection', (ws) => {
           const response = npcDetails[responseKey];
           
           if (response && response.trim() !== '') {
-            // Send NPC response with pink color
-            send(ws, { 
-              type: 'chat', 
-              text: response,
-              color: 'pink'
-            });
+            // Send NPC response with pink color (with line wrapping)
+            sendLongChatMessage(ws, response, 'pink');
           }
         }
         
