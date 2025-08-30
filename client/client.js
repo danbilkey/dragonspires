@@ -1318,13 +1318,10 @@
           // Only process item updates for the current map
           if (localPlayer && msg.mapId && Number(msg.mapId) === Number(localPlayer.map_id)) {
             const key = `${msg.x},${msg.y}`;
-            console.log(`Client received item_placed: (${msg.x},${msg.y}) -> ${msg.itemId} on map ${msg.mapId}`);
             if (msg.itemId === 0) {
               mapItems[key] = 0; // Use 0 to indicate removed item
-              console.log(`Set item at (${msg.x},${msg.y}) to 0 (removed)`);
             } else {
               mapItems[key] = msg.itemId;
-              console.log(`Placed item ${msg.itemId} at (${msg.x},${msg.y})`);
             }
           }
           break;
@@ -1453,7 +1450,6 @@
 
       // Capture chat text
       if (chatMode) {
-        console.log(`Debug: In chat mode, ignoring key: ${e.key}`);
         if (e.key === 'Backspace') { typingBuffer = typingBuffer.slice(0, -1); e.preventDefault(); }
         else if (e.key.length === 1 && typingBuffer.length < CHAT_INPUT.maxLen) typingBuffer += e.key;
         return;
@@ -1479,11 +1475,7 @@
         return;
       }
 
-      // Debug: Log all key presses and state
-      console.log(`Debug: Key pressed: '${e.key}', loggedIn=${loggedIn}, localPlayer=${!!localPlayer}`);
-      if (loggedIn && localPlayer) {
-        console.log(`Debug: Player state - hands: ${localPlayer.hands}, magic: ${localPlayer.magic}`);
-      }
+
 
       // Handle NPC interaction number keys (1-5) - only when not in chat mode
       if (loggedIn && localPlayer && npcInteraction && /^[1-5]$/.test(e.key) && !chatMode) {
