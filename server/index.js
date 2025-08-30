@@ -1765,8 +1765,8 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
   console.log(`Current mapItems at target position:`, mapItems[`${attackPos.x},${attackPos.y}`]);
   console.log(`Potion mappings check - targetItemId ${targetItemId} is potion:`, !!potionMappings[targetItemId]);
   
-  // Check if attacking a potion
-  if (potionMappings[targetItemId]) {
+  // Check if attacking a potion (only if the item hasn't been removed)
+  if (potionMappings[targetItemId] && targetItemId > 0) {
     console.log(`Potion attack detected: item ${targetItemId} -> enemy ${potionMappings[targetItemId]}`);
     
     // Create unique attack ID to prevent race conditions
@@ -1785,8 +1785,8 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
     return;
   }
   
-  // Check if attacking a statue
-  if (statueMappings[targetItemId]) {
+  // Check if attacking a statue (only if the item hasn't been removed)
+  if (statueMappings[targetItemId] && targetItemId > 0) {
     console.log(`Statue attack detected: item ${targetItemId}`);
     await handleStatueAttack(playerData.map_id, attackPos.x, attackPos.y, targetItemId, statueMappings[targetItemId]);
     return;
@@ -2043,7 +2043,7 @@ async function handleCoffinAttack(playerData, ws, attackPos) {
   // Check both placed items and base map items
   const targetItemId = getItemAtPosition(attackPos.x, attackPos.y, playerMapSpec, playerData.map_id);
   
-  // Check if attacking item #202 (coffin)
+  // Check if attacking item #202 (coffin) and it hasn't been opened yet
   if (targetItemId !== 202) {
     return; // Not a coffin, no action needed
   }
