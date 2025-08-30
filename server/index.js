@@ -1883,7 +1883,7 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
   
   // Check if attacking a potion (only if the item hasn't been removed)
   if (potionMappings[targetItemId] && targetItemId > 0) {
-    console.log(`Potion attack detected: item ${targetItemId} -> enemy ${potionMappings[targetItemId]}`);
+    console.log(`🧪 Potion attack detected: item ${targetItemId} -> enemy ${potionMappings[targetItemId]}`);
     
     // Create unique attack ID to prevent race conditions
     const attackId = `${playerData.map_id}:${attackPos.x},${attackPos.y}:${Date.now()}`;
@@ -1903,7 +1903,7 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
   
   // Check if attacking a statue (only if the item hasn't been removed)
   if (statueMappings[targetItemId] && targetItemId > 0) {
-    console.log(`Statue attack detected: item ${targetItemId}`);
+    console.log(`🗿 Statue attack detected: item ${targetItemId}`);
     await handleStatueAttack(playerData.map_id, attackPos.x, attackPos.y, targetItemId, statueMappings[targetItemId]);
     return;
   }
@@ -4891,7 +4891,7 @@ wss.on('connection', (ws) => {
       const oldHands = playerData.hands || 0;
       playerData.hands = itemId;
       
-      const key = `${x},${y}`;
+      const key = `${playerData.map_id}:${x},${y}`;
       
       console.log(`Picking up item ${itemId} at (${x},${y}), oldHands: ${oldHands}`);
       
@@ -5357,24 +5357,23 @@ wss.on('connection', (ws) => {
       
       console.log(`Key usage successful: Found gate ${targetItemId} at (${targetPos.x},${targetPos.y}), proceeding with removal`);
       
-      // Remove the gate completely using direct map modification (like potions/statues)
+      // Remove the gate using mapItems override system (like coffin attack)
       try {
-        // Directly modify the base map data to remove the gate permanently
-        if (playerMapSpec && playerMapSpec.items && playerMapSpec.items[targetPos.y] && 
-            typeof playerMapSpec.items[targetPos.y][targetPos.x] !== 'undefined') {
-          playerMapSpec.items[targetPos.y][targetPos.x] = 0;
-          
-          console.log(`Gate removed: Direct map modification at (${targetPos.x},${targetPos.y}) -> 0`);
-          
-          // Broadcast map item change to all clients on this map
-          broadcast({
-            type: 'map_item_changed',
-            x: targetPos.x,
-            y: targetPos.y,
-            itemId: 0,
-            mapId: playerData.map_id
-          });
-        }
+        // Use mapItems override system for persistence across map reloads
+        const key = `${playerData.map_id}:${targetPos.x},${targetPos.y}`;
+        mapItems[key] = 0;
+        saveItemToDatabase(targetPos.x, targetPos.y, 0, playerData.map_id);
+        
+        console.log(`🔑 Gate removed: Stored in mapItems[${key}] = 0 for persistence`);
+        
+        // Broadcast item update using item_placed message (same as coffin/potion)
+        broadcast({
+          type: 'item_placed',
+          x: targetPos.x,
+          y: targetPos.y,
+          itemId: 0,
+          mapId: playerData.map_id
+        });
       } catch (error) {
         console.error('Error removing gate:', error);
       }
@@ -7433,6 +7432,7 @@ setInterval(() => {
     
     // Find all players within 6-tile square range
     for (const [ws, playerData] of clients.entries()) {
+      console.log(`🗣️ Checking player ${playerData?.username} on map ${playerData?.map_id} vs NPC on map ${npcLocation.mapId}`);
       if (playerData && Number(playerData.map_id) === Number(npcLocation.mapId)) {
         const dx = Math.abs(playerData.pos_x - npcLocation.x);
         const dy = Math.abs(playerData.pos_y - npcLocation.y);
@@ -7452,8 +7452,12 @@ setInterval(() => {
               color: 'black'
             });
             playersMessaged++;
-            console.log(`NPC Speaker: Sent phrase to player ${playerData.username} at (${playerData.pos_x},${playerData.pos_y}), distance: (${dx},${dy})`);
+            console.log(`🗣️ Sent phrase to player ${playerData.username} at (${playerData.pos_x},${playerData.pos_y}) on map ${playerData.map_id}, NPC at (${npcLocation.x},${npcLocation.y}) on map ${npcLocation.mapId}, distance: (${dx},${dy})`);
           }
+        }
+      } else {
+        if (playerData) {
+          console.log(`🗣️ Skipped player ${playerData.username} - different map (player: ${playerData.map_id}, NPC: ${npcLocation.mapId})`);
         }
       }
     }
