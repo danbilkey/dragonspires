@@ -1483,6 +1483,20 @@ async function logChatMessage(playerId, username, messageType, message, mapId = 
   }
 }
 
+// Function to clear all drop containers
+async function clearDropContainers() {
+  try {
+    // Clear existing drop containers
+    await pool.query('DELETE FROM drop_containers');
+    mapContainers = {}; // Clear in-memory drop containers
+    console.log('Cleared all drop containers');
+    return true;
+  } catch (error) {
+    console.error('Error clearing drop containers:', error);
+    return false;
+  }
+}
+
 // Function to clear all map containers and reload from map data
 async function reloadMapContainers() {
   try {
@@ -3555,6 +3569,110 @@ async function initializeDatabase() {
   }
 }
 
+// Database player functions
+async function loadPlayer(username) {
+  try {
+    const result = await pool.query('SELECT * FROM players WHERE username = $1', [username]);
+    return result.rows[0] || null;
+  } catch (error) {
+    console.error('Error loading player:', error);
+    return null;
+  }
+}
+
+async function createPlayer(username, password) {
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      `INSERT INTO players (username, password, pos_x, pos_y, map_id, life, max_life, stamina, max_stamina, magic, max_magic, gold, weapon, armor, hands, direction, step) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
+      [username, hashedPassword, 32, 32, 1, 20, 20, 10, 10, 0, 0, 0, 0, 0, 0, 'down', 2]
+    );
+    
+    const player = result.rows[0];
+    
+    // Initialize player inventory
+    await initializePlayerInventory(player.id);
+    
+    return player;
+  } catch (error) {
+    console.error('Error creating player:', error);
+    throw error;
+  }
+}
+
+async function updateStatsInDb(playerId, stats) {
+  try {
+    const fields = [];
+    const values = [];
+    let paramIndex = 1;
+    
+    for (const [key, value] of Object.entries(stats)) {
+      fields.push(`${key} = $${paramIndex}`);
+      values.push(value);
+      paramIndex++;
+    }
+    
+    if (fields.length === 0) return;
+    
+    const query = `UPDATE players SET ${fields.join(', ')} WHERE id = $${paramIndex}`;
+    values.push(playerId);
+    
+    await pool.query(query, values);
+  } catch (error) {
+    console.error('Error updating player stats:', error);
+  }
+}
+
+async function updatePosition(playerId, x, y) {
+  try {
+    await pool.query('UPDATE players SET pos_x = $1, pos_y = $2 WHERE id = $3', [x, y, playerId]);
+  } catch (error) {
+    console.error('Error updating player position:', error);
+  }
+}
+
+async function updateDirectionAndStep(playerId, direction, step) {
+  try {
+    await pool.query('UPDATE players SET direction = $1, step = $2 WHERE id = $3', [direction, step, playerId]);
+  } catch (error) {
+    console.error('Error updating player direction and step:', error);
+  }
+}
+
+async function updateAnimationState(playerId, direction, isMoving, isAttacking, animationFrame, movementSequenceIndex) {
+  try {
+    await pool.query(
+      'UPDATE players SET direction = $1, is_moving = $2, is_attacking = $3, animation_frame = $4, movement_sequence_index = $5 WHERE id = $6',
+      [direction, isMoving, isAttacking, animationFrame, movementSequenceIndex, playerId]
+    );
+  } catch (error) {
+    console.error('Error updating player animation state:', error);
+  }
+}
+
+async function updateEnemyPosition(enemyId, x, y, direction, step) {
+  try {
+    await pool.query(
+      'UPDATE enemies SET pos_x = $1, pos_y = $2, direction = $3, step = $4, last_move_time = CURRENT_TIMESTAMP WHERE id = $5',
+      [x, y, direction, step, enemyId]
+    );
+  } catch (error) {
+    console.error('Error updating enemy position:', error);
+  }
+}
+
+async function updateEnemyDirectionAndStep(enemyId, direction, step) {
+  try {
+    await pool.query(
+      'UPDATE enemies SET direction = $1, step = $2, last_move_time = CURRENT_TIMESTAMP WHERE id = $3',
+      [direction, step, enemyId]
+    );
+  } catch (error) {
+    console.error('Error updating enemy direction and step:', error);
+  }
+}
+
 // Initialize database on startup
 initializeDatabase();
 loadItemDetails();
@@ -3645,12 +3763,6 @@ wss.on('connection', (ws) => {
         
         send(ws, { type: 'login_success', player: { ...playerData, temporarySprite: 0 }, players: others.map(p => ({ ...p, temporarySprite: p.temporarySprite || 0 })), items: playerMapItems, inventory: inventory, enemies: mapEnemies });
         broadcast({ type: 'player_joined', player: { ...playerData, isBRB: playerData.isBRB || false, map_id: playerData.map_id } });
-        
-        // Join message is handled by the player_joined broadcast and client-side logic
-        // Log the login message (non-blocking)
-        const joinMessage = `${playerData.username} has entered DragonSpires.`;
-        logChatMessage(playerData.id, playerData.username, 'login', joinMessage, playerData.map_id)
-          .catch(() => {}); // Silently ignore logging errors
       } catch (e) {
         console.error('Login error', e);
         send(ws, { type: 'login_error', message: 'Server error' });
@@ -3728,12 +3840,6 @@ wss.on('connection', (ws) => {
         
         send(ws, { type: 'signup_success', player: playerData, players: others, items: playerMapItems, inventory: inventory, enemies: mapEnemies });
         broadcast({ type: 'player_joined', player: { ...playerData, temporarySprite: playerData.temporarySprite || 0, map_id: playerData.map_id } });
-        
-        // Join message is handled by the player_joined broadcast and client-side logic
-        // Log the login message (non-blocking)
-        const joinMessage = `${playerData.username} has entered DragonSpires.`;
-        logChatMessage(playerData.id, playerData.username, 'login', joinMessage, playerData.map_id)
-          .catch(() => {}); // Silently ignore logging errors
       } catch (e) {
         console.error('Signup error', e);
         send(ws, { type: 'signup_error', message: 'Server error' });
@@ -5924,6 +6030,13 @@ wss.on('connection', (ws) => {
           const reloadSuccess = await reloadGameData();
           if (!reloadSuccess) {
             send(ws, { type: 'chat', text: '~ Error: Failed to reload game data.' });
+            return;
+          }
+
+          // Clear drop containers
+          const dropContainersSuccess = await clearDropContainers();
+          if (!dropContainersSuccess) {
+            send(ws, { type: 'chat', text: '~ Error: Failed to clear drop containers.' });
             return;
           }
 
