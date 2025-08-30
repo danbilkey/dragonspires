@@ -1826,7 +1826,8 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
     type: 'item_placed',
     x: x,
     y: y,
-    itemId: 0
+    itemId: 0,
+    mapId: mapId
   });
   console.log(`Broadcasted item removal for (${x}, ${y}) to item 0`);
   
@@ -1899,7 +1900,8 @@ async function handleStatueAttack(mapId, x, y, itemId, statueConfig) {
     type: 'item_placed',
     x: x,
     y: y,
-    itemId: 0
+    itemId: 0,
+    mapId: mapId
   });
   
   // Spawn enemy immediately with specified direction
@@ -2005,7 +2007,8 @@ async function handleSkeletonAttack(playerData, ws, attackPos) {
       type: 'item_placed',
       x: attackPos.x,
       y: attackPos.y,
-      itemId: 211
+      itemId: 211,
+      mapId: playerData.map_id
     });
     
     // Send chat message
@@ -2046,7 +2049,8 @@ async function handleCoffinAttack(playerData, ws, attackPos) {
       type: 'item_placed',
       x: attackPos.x,
       y: attackPos.y,
-      itemId: 203
+      itemId: 203,
+      mapId: playerData.map_id
     });
     
     // Find closest adjacent tile to spawn enemy #33
@@ -4229,7 +4233,8 @@ wss.on('connection', (ws) => {
                   type: 'item_placed',
                   x: adjacentPos.x,
                   y: adjacentPos.y,
-                  itemId: 31
+                  itemId: 31,
+                  mapId: playerData.map_id
                 });
               }
               
@@ -4624,7 +4629,8 @@ wss.on('connection', (ws) => {
           type: 'item_placed',
           x: x,
           y: y,
-          itemId: handsItem
+          itemId: handsItem,
+          mapId: playerData.map_id
         });
         
         broadcast({
@@ -4678,7 +4684,8 @@ wss.on('connection', (ws) => {
         type: 'item_placed',
         x: x,
         y: y,
-        itemId: -1
+        itemId: -1,
+        mapId: playerData.map_id
       });
       
       broadcast({
@@ -6004,7 +6011,8 @@ wss.on('connection', (ws) => {
                   type: 'item_placed',
                   x: x,
                   y: y,
-                  itemId: 0 // Remove item
+                  itemId: 0, // Remove item
+                  mapId: mapId
                 }));
               }
             }
@@ -6439,7 +6447,8 @@ wss.on('connection', (ws) => {
           type: 'item_placed',
           x: adjacentPos.x,
           y: adjacentPos.y,
-          itemId: itemId
+          itemId: itemId,
+          mapId: playerData.map_id
         });
 
         send(ws, { 
