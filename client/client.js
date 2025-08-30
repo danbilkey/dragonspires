@@ -1298,6 +1298,27 @@
               pushChat("You are refreshed by the fountains healing waters!", 'cornflowerblue');
             }
             break;
+
+        case 'fountain_effect_created':
+          // Store fountain attack effect visible to all players
+          if (!window.fountainAttackEffects) {
+            window.fountainAttackEffects = {};
+          }
+          window.fountainAttackEffects[msg.effectId] = {
+            id: msg.effectId,
+            x: msg.x,
+            y: msg.y,
+            itemId: msg.itemId || 309
+          };
+          console.log(`Fountain attack effect ${msg.effectId} created at (${msg.x}, ${msg.y})`);
+          break;
+
+        case 'fountain_effect_removed':
+          if (window.fountainAttackEffects && window.fountainAttackEffects[msg.effectId]) {
+            delete window.fountainAttackEffects[msg.effectId];
+            console.log(`Fountain attack effect ${msg.effectId} removed`);
+          }
+          break;
           
           case 'fountain_effect':
               if (msg.playerId !== undefined) {
@@ -2273,7 +2294,17 @@
           }
         }
       } else {
-        animFrame = getCurrentAnimationFrame(p, false);
+        // For other players, check if they have an explicit animation frame (for attacks/special animations)
+        if (p.animationFrame !== null && p.animationFrame !== undefined) {
+          animFrame = p.animationFrame;
+        } else if (p.isAttacking) {
+          // Other player is attacking - use their current attack animation frame
+          const attackSeq = ATTACK_SEQUENCES[p.direction] || ATTACK_SEQUENCES.down;
+          // Use the first attack frame as fallback if no specific frame is set
+          animFrame = attackSeq[0];
+        } else {
+          animFrame = getCurrentAnimationFrame(p, false);
+        }
       }
       
       // Check for temporary sprite first
@@ -2923,7 +2954,7 @@
 
             // Draw spells after players (renders item 289 for fire pillars)
             for (const [spellId, spell] of Object.entries(spells)) {
-              if (spell.currentX === x && spell.currentY === y && spell.mapId === localPlayer.map_id) {
+              if (spell.currentX === x && spell.currentY === y && Number(spell.mapId) === Number(localPlayer.map_id)) {
                 drawItemAtTile(screenX, screenY, spell.itemId);
               }
             }
@@ -2953,6 +2984,15 @@
             for (const [effectId, effect] of Object.entries(potionEffects)) {
               if (effect.x === x && effect.y === y) {
                 drawItemAtTile(screenX, screenY, 124);
+              }
+            }
+
+            // Draw fountain attack effects after potion effects (renders item 309 for fountain attacks)
+            if (window.fountainAttackEffects) {
+              for (const [effectId, effect] of Object.entries(window.fountainAttackEffects)) {
+                if (effect.x === x && effect.y === y) {
+                  drawItemAtTile(screenX, screenY, effect.itemId || 309);
+                }
               }
             }
           }
