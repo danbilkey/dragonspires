@@ -1,0 +1,55 @@
+{
+  "start": "13,32",
+  "exits": "4,3,0,2",
+  "stamval": -1,
+  "diemap": 6,
+  "allowupload": false,
+  "maxuploads": 0,
+  "allowcombat": true,
+  "combatarea": "19,21,24,26",
+  "portals": [
+    "0,6,3,62,32",
+    "0,7,3,62,33",
+    "0,8,3,62,34",
+    "8,22,6,16,26",
+    "8,24,6,16,28",
+    "63,35,7,1,4",
+    "63,36,7,1,5"
+  ],
+  "readables": [
+    {
+      "coordinates": "22,23",
+      "message": "The sign reads: Welcome to the Royal Castle!"
+    },
+    {
+      "coordinates": "22,23",
+      "message": "The sign reads: Royal Sparring Arena. Combat encouraged."
+    },
+    {
+      "coordinates": "4,57",
+      "message": "The sign reads: Delapidated Hall."
+    },
+    {
+      "coordinates": "36,17",
+      "message": "The sign reads: Not-so-hidden Path to the Great City."
+    }
+  ],
+  "holders": [
+    {
+      "coordinates": "0,0",
+      "item": 0
+    }
+  ],
+  "enemies": [
+    {
+      "type": 17,
+      "coordinates": "31,10"
+    }
+  ],
+  "npcs": [ 
+    {
+      "type": 9,
+      "coordinates": "11,53"
+    }
+  ]
+}
