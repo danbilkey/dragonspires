@@ -2356,7 +2356,11 @@ async function playerAttackEnemy(playerData, playerWs) {
 
   // Send attack message to player
   const enemyName = enemyDetails?.name || `Enemy ${targetEnemy.enemy_type}`;
-  send(playerWs, { type: 'chat', text: `~ You attack ${enemyName} for ${finalDamage} damage!` });
+  if (finalDamage <= 0) {
+    send(playerWs, { type: 'chat', text: `~ You attack ${enemyName}, but it dodges your attack!` });
+  } else {
+    send(playerWs, { type: 'chat', text: `~ You attack ${enemyName} for ${finalDamage} damage!` });
+  }
   
   // Send electrocute message after attack message if electrocute triggered
   if (electrocuteTriggered) {
