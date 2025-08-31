@@ -3659,7 +3659,7 @@ async function createPlayer(username, password) {
     const result = await pool.query(
       `INSERT INTO players (username, password, pos_x, pos_y, map_id, life, max_life, stamina, max_stamina, magic, max_magic, gold, weapon, armor, hands, direction, step) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
-      [username, hashedPassword, 32, 32, 1, 100, 100, 100, 100, 30, 30, 0, 0, 0, 0, 'down', 2]
+      [username, hashedPassword, 32, 32, 1, 20, 20, 100, 100, 30, 30, 0, 0, 0, 0, 'down', 2]
     );
     
     const player = result.rows[0];
