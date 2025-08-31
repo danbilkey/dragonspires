@@ -396,6 +396,34 @@
                 pushChat(`Map cleared: all floors set to tile 6, all items removed`);
             }
 
+            function fillMapWithCurrentFloor() {
+                if (!mapReady) return;
+                
+                // Set all floor tiles to 6 (default grass)
+                for (let y = 0; y < mapSpec.height; y++) {
+                    if (!mapSpec.tiles[y]) {
+                        mapSpec.tiles[y] = new Array(mapSpec.width).fill(6);
+                    } else {
+                        for (let x = 0; x < mapSpec.width; x++) {
+                            mapSpec.tiles[y][x] = selectedFloorTile;
+                        }
+                    }
+                }
+                
+                // Set all items to 0 (empty)
+                for (let y = 0; y < mapSpec.height; y++) {
+                    if (!mapSpec.items[y]) {
+                        mapSpec.items[y] = new Array(mapSpec.width).fill(0);
+                    } else {
+                        for (let x = 0; x < mapSpec.width; x++) {
+                            mapSpec.items[y][x] = 0;
+                        }
+                    }
+                }
+                
+                pushChat(`Map cleared: all floors set to current floor tile, all items removed`);
+            }
+
             function fillWithItem14() {
                 if (!mapReady) return;
                 
@@ -773,6 +801,7 @@
                 // Clear map
                 else if (k === 'n') {
                     //clearMap();
+                    fillMapWithCurrentFloor();
                     e.preventDefault();
                 }
 
@@ -858,6 +887,7 @@
     </script>
 </body>
 </html>
+
 
 
 
