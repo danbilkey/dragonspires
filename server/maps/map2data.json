@@ -35,6 +35,14 @@
     {
       "type": 3,
       "coordinates": "18,33"
+    },
+    {
+      "type": 10,
+      "coordinates": "49,40"
+    },
+    {
+      "type": 4,
+      "coordinates": "49,60"
     }
   ],
   "npcs": [
