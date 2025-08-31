@@ -1,0 +1,44 @@
+{
+  "start": "13,32",
+  "exits": "4,3,0,2",
+  "stamval": -1,
+  "diemap": 7,
+  "allowupload": false,
+  "maxuploads": 0,
+  "allowcombat": false,
+  "combatarea": "19,21,24,26",
+  "portals": [
+    "63,19,6,1,47",
+    "63,30,6,1,57",
+    "63,31,6,1,58",
+    "63,32,6,1,59"
+  ],
+  "readables": [
+    {
+      "coordinates": "51,51",
+      "message": "The sign reads: The Guild Hall Courtyard"
+    },
+    {
+      "coordinates": "45,54",
+      "message": "The sign reads: City Dock: 15 GP tax per lb. on all imported items."
+    }
+  ],
+  "holders": [
+    {
+      "coordinates": "0,0",
+      "item": 0
+    }
+  ],
+  "enemies": [
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
+  ],
+  "npcs": [ 
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
+  ]
+}
