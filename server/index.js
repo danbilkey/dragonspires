@@ -1078,7 +1078,7 @@ function loadNPCLocations() {
   npcLocations = [];
   
   // Load NPCs from all map data files
-  const mapIds = [1, 2, 3, 4, 5, 6, 7, 99];
+  const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 99];
   for (const mapId of mapIds) {
     const mapData = getMapData(mapId);
     if (mapData && mapData.npcs) {
@@ -1140,7 +1140,7 @@ async function loadAllMaps() {
     const path = require('path');
     
     // Load maps 1-5 and 99
-    const mapIds = [1, 2, 3, 4, 5, 6, 7, 99];
+    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 99];
     for (const mapId of mapIds) {
       await loadSingleMap(mapId);
       await loadSingleMapData(mapId);
@@ -1530,7 +1530,7 @@ async function reloadMapContainers() {
     console.log('Cleared all map containers');
     
     // Reload containers from all map data files
-    const mapIds = [1, 2, 3, 4, 5, 6, 7, 99];
+    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 99];
     for (const mapId of mapIds) {
       const mapData = getMapData(mapId);
       if (mapData && mapData.holders) {
@@ -1588,7 +1588,7 @@ function loadNPCLocations() {
     npcLocations = []; // Clear existing locations
     
     // Load NPCs from all map data files
-    const mapIds = [1, 2, 3, 4, 5, 6, 7, 99];
+    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 99];
     for (const mapId of mapIds) {
       const mapData = getMapData(mapId);
       if (mapData && mapData.npcs) {
@@ -1637,7 +1637,7 @@ async function reloadEnemies() {
     console.log('Cleared all enemies');
     
     // Reload enemies from all map data files
-    const mapIds = [1, 2, 3, 4, 5, 6, 7, 99];
+    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 99];
     for (const mapId of mapIds) {
       const mapData = getMapData(mapId);
       if (mapData && mapData.enemies) {
@@ -6290,7 +6290,7 @@ wss.on('connection', (ws) => {
         }
 
         const targetMapId = parseInt(gotoMapMatch[1]);
-        const validMaps = [1, 2, 3, 4, 5, 6, 7, 99];
+        const validMaps = [1, 2, 3, 4, 5, 6, 7, 8, 99];
         if (!validMaps.includes(targetMapId)) {
           send(ws, { type: 'chat', text: `~ Invalid map ID. Valid maps: ${validMaps.join(', ')}` });
           return;
