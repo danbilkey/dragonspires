@@ -137,7 +137,7 @@
     ["Belt", "false", "armor", 0, 3, "A shiny golden belt.", "none", ""],
     ["Vase", "false", "nothing", 0, 0, "A delicate vase.", "none", ""],
     ["Pillow", "false", "garbage", 0, 0, "A delicate cotton pillow.", "none", ""],
-    ["Lint", "false", "garbage", 0, 0, "Ew, lint.", "none", ""],
+    ["Ashes", "false", "garbage", 0, 0, "You see a pile of ashes.", "none", ""],
     ["Birds Nest", "false", "interactable", 0, 0, "A birds nest - I wonder what's inside?", "none", ""],
     ["Crystal Ball", "false", "consumable", 10, 10, "A magical crystal ball.. don't smash it.", "magic", "You smash the crystal ball and feel the magic inside refresh you."],
     ["Unlit Fire Pedestal", "true", "interactable", 0, 0, "An unlit fire pedestal.", "none", ""],
