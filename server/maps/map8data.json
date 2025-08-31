@@ -37,8 +37,8 @@
   ],
   "npcs": [ 
     {
-      "type": 0,
-      "coordinates": "0,0"
+      "type": 10,
+      "coordinates": "52,7"
     }
   ]
 }
