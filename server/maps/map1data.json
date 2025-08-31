@@ -77,6 +77,10 @@
     {
       "type": 4,
       "coordinates": "51,36"
+    },
+    {
+      "type": 7,
+      "coordinates": "30,27"
     }
   ]
 }
