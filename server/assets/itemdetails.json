@@ -255,7 +255,7 @@
     ["Mandrake Buried", "false", "nothing", 0, 0, "You see a mandrake buried in the ground.", "none", ""],
     ["Mandrake Unburied", "false", "garbage", 0, 0, "It's a mandrake root.", "none", ""],
     ["Red Berry", "false", "consumable", 5, 5, "It's a red berry, looks delicious.", "hp", "You eat the berry and feel invigorated!"],
-    ["Purple Berry", "false", "consumable", 2, 2, "It's a purple berry, looks delicious.", "hp", "You eat the berry and feel invigorated!"],
+    ["Violet Berry", "false", "consumable", 2, 2, "It's a violet berry, looks delicious.", "hp", "You eat the berry and feel invigorated!"],
     ["Ant Hill", "false", "nothing", 0, 0, "You see an hill with fire ants coming out of it.", "none", ""],
     ["Skeleton Buried", "false", "nothing", 0, 0, "Is that skeleton.. climbing out of the dirt?", "none", ""],
     ["Stairs Down", "false", "teleport", 0, 0, "A set of stairs leads down somewhere.", "none", ""],
