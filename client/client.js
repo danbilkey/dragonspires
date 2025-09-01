@@ -942,7 +942,7 @@
             mapItems = { ...msg.items };
           }
 
-          pushChat("Welcome to DragonSpires!", 'blue');
+          pushChat("Welcome to DragonSpires: Fragmented Memories!", 'blue');
           break;
           
         case 'player_joined':
