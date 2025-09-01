@@ -5,11 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DragonSpires: Fragmented Memories</title>
   <style>
-    :root {
-      --scroll-scale: 0.90; /* 0.90 = 10% smaller; raise toward 1.0 to make bigger */
-      --scroll-left: 16px;  /* gutter from left edge */
-    }
-
     html, body { height: 100%; }
     body {
       margin: 0;
@@ -17,7 +12,6 @@
       overflow: hidden;             /* prevent scrolling */
       overscroll-behavior: none;
     }
-
     /* Natural-size background image at top-center, no stretching */
     body::before {
       content: "";
@@ -35,27 +29,24 @@
     #loreWrap {
       position: fixed;
       top: 50%;
-      left: var(--scroll-left);
+      left: 16px;                   /* small gutter; change if desired */
       transform: translateY(-50%);
       z-index: 0;
       pointer-events: none;         /* don't block game input */
     }
 
-    /* Scale only the image, so canvas position is never impacted */
+    /* Image scales proportionally; width set by JS after load */
     #lorescroll {
       display: block;
-      transform: scale(var(--scroll-scale));
-      transform-origin: left center;
-      will-change: transform;
-      max-height: 90vh;             /* keep it within the viewport height */
       height: auto;
-      width: auto;
+      max-height: 90vh;             /* avoid exceeding viewport height */
+      width: auto;                   /* JS will set an explicit px width */
     }
 
-    /* 640x480 canvas: fixed position, always centered horizontally, 400px from top */
+    /* 640x480 canvas, fixed position, centered horizontally, now 373px from top */
     #gameCanvas {
       position: fixed;
-      top: 400px;
+      top: 373px;                   /* 400 - 27 = 373 */
       left: 50%;
       transform: translateX(-50%);
       width: 640px;
@@ -69,10 +60,41 @@
 </head>
 <body>
   <div id="loreWrap">
+    <!-- Try .jpg first; fallback to /assets/lore_scroll/jpg if that’s the actual path -->
     <img id="lorescroll" src="/assets/lore_scroll.jpg" alt="Lore Scroll" />
   </div>
 
   <canvas id="gameCanvas" width="640" height="480"></canvas>
+
+  <script>
+    (function () {
+      const img = document.getElementById('lorescroll');
+
+      function resizeToMinus117px() {
+        // Use the intrinsic width and subtract 117px; clamp to at least 1px
+        const nw = img.naturalWidth || 0;
+        if (nw > 0) {
+          const target = Math.max(1, nw - 117);
+          img.style.width = target + 'px';
+          img.style.height = 'auto'; // keep aspect ratio
+        }
+      }
+
+      if (img.complete && img.naturalWidth) {
+        resizeToMinus117px();
+      } else {
+        img.addEventListener('load', resizeToMinus117px, { once: true });
+      }
+
+      // If the first src path fails, try the alternate path the moment we know it errored.
+      img.addEventListener('error', function onErr() {
+        if (img.dataset.altTried) return;
+        img.dataset.altTried = '1';
+        img.src = '/assets/lore_scroll/jpg';
+      });
+    })();
+  </script>
+
   <script src="client.js"></script>
 </body>
 </html>
