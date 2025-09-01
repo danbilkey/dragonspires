@@ -12,6 +12,7 @@
       overflow: hidden;             /* prevent scrolling */
       overscroll-behavior: none;
     }
+
     /* Natural-size background image at top-center, no stretching */
     body::before {
       content: "";
@@ -25,28 +26,28 @@
       pointer-events: none;
     }
 
-    /* Wrapper pins the scroll to the left and centers it vertically */
+    /* Pin the scroll to the left, centered vertically */
     #loreWrap {
       position: fixed;
       top: 50%;
-      left: 16px;                   /* small gutter; change if desired */
+      left: 16px;                   /* gutter from edge; tweak as needed */
       transform: translateY(-50%);
       z-index: 0;
       pointer-events: none;         /* don't block game input */
     }
 
-    /* Image scales proportionally; width set by JS after load */
+    /* Proportional image; JS will set the final width */
     #lorescroll {
       display: block;
+      width: auto;                  /* start at natural/computed size */
       height: auto;
-      max-height: 90vh;             /* avoid exceeding viewport height */
-      width: auto;                   /* JS will set an explicit px width */
+      max-height: 90vh;             /* never exceed viewport height */
     }
 
-    /* 640x480 canvas, fixed position, centered horizontally, now 373px from top */
+    /* 640x480 canvas, fixed position, centered horizontally, 27px higher than before */
     #gameCanvas {
       position: fixed;
-      top: 373px;                   /* 400 - 27 = 373 */
+      top: 373px;                   /* 400 - 27 */
       left: 50%;
       transform: translateX(-50%);
       width: 640px;
@@ -60,7 +61,7 @@
 </head>
 <body>
   <div id="loreWrap">
-    <!-- Try .jpg first; fallback to /assets/lore_scroll/jpg if that’s the actual path -->
+    <!-- Try .jpg, fall back to the path without a dot extension if that's your actual file -->
     <img id="lorescroll" src="/assets/lore_scroll.jpg" alt="Lore Scroll" />
   </div>
 
@@ -70,24 +71,31 @@
     (function () {
       const img = document.getElementById('lorescroll');
 
-      function resizeToMinus117px() {
-        // Use the intrinsic width and subtract 117px; clamp to at least 1px
-        const nw = img.naturalWidth || 0;
-        if (nw > 0) {
-          const target = Math.max(1, nw - 117);
-          img.style.width = target + 'px';
-          img.style.height = 'auto'; // keep aspect ratio
+      function applyMinus117() {
+        // Measure current on-screen width (after any constraints like max-height)
+        const current = img.getBoundingClientRect().width;
+        if (current > 0) {
+          const target = Math.max(1, Math.round(current - 117));
+          img.style.width = target + 'px';     // proportional shrink
+          img.style.height = 'auto';
         }
       }
 
-      if (img.complete && img.naturalWidth) {
-        resizeToMinus117px();
-      } else {
-        img.addEventListener('load', resizeToMinus117px, { once: true });
+      function recalc() {
+        // Reset to natural/computed size, then shrink by 117px
+        img.style.width = 'auto';
+        img.style.height = 'auto';
+        requestAnimationFrame(applyMinus117);
       }
 
-      // If the first src path fails, try the alternate path the moment we know it errored.
-      img.addEventListener('error', function onErr() {
+      // Run once when ready, and on viewport changes
+      if (img.complete) recalc();
+      else img.addEventListener('load', recalc, { once: true });
+
+      window.addEventListener('resize', recalc);
+
+      // Fallback path if the first src fails
+      img.addEventListener('error', function () {
         if (img.dataset.altTried) return;
         img.dataset.altTried = '1';
         img.src = '/assets/lore_scroll/jpg';
