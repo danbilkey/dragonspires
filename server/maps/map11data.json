@@ -1,0 +1,38 @@
+{
+  "start": "14,52",
+  "exits": "4,3,0,2",
+  "stamval": -1,
+  "diemap": 11,
+  "allowupload": false,
+  "maxuploads": 0,
+  "allowcombat": false,
+  "combatarea": "19,21,24,26",
+  "portals": [
+    "33,63,2,12,1",
+    "34,63,2,13,1"
+  ],
+  "readables": [
+    {
+      "coordinates": "18,52",
+      "message": "The sign reads: Druid Temple"
+    }
+  ],
+  "holders": [
+    {
+      "coordinates": "0,0",
+      "item": 0
+    }
+  ],
+  "enemies": [
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
+  ],
+  "npcs": [ 
+    {
+      "type": 15,
+      "coordinates": "14,51"
+    }
+  ]
+}
