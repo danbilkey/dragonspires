@@ -1,15 +1,32 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>DragonSpires: Fragmented Memories</title>
-    <style>
-        canvas { background: #222; display: block; margin: auto; }
-        #loginContainer { text-align: center; margin-top: 20px; }
-    </style>
-</head>
-<body bgcolor="black">
-<canvas id="gameCanvas" width="640" height="480"></canvas>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DragonSpires: Fragmented Memories</title>
+  <style>
+    html, body { height: 100%; }
+    body {
+      margin: 0; /* ensure the 300px offset is exact */
+      background: #000 url('/assets/webpage_background.jpg') no-repeat center top;
+      background-size: cover;
+    }
 
-<script src="client.js"></script>
+    /* 640x480 canvas, centered horizontally and 300px from the top */
+    #gameCanvas {
+      display: block;
+      margin: 300px auto 0; /* top | sides | bottom */
+      background: #222;
+      width: 640px;
+      height: 480px;
+      image-rendering: pixelated;   /* optional: crisp pixel look */
+      image-rendering: crisp-edges; /* fallback for some browsers */
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="640" height="480"></canvas>
+
+  <script src="client.js"></script>
 </body>
 </html>
