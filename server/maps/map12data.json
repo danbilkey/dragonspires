@@ -35,7 +35,7 @@
     },
     {
       "type": 33,
-      "coordinates": "4,53"
+      "coordinates": "28,33"
     },
     {
       "type": 33,
@@ -48,11 +48,11 @@
   ],
   "npcs": [ 
     {
-      "type": 17,
+      "type": 16,
       "coordinates": "37,16"
     },
     {
-      "type": 18,
+      "type": 17,
       "coordinates": "26,56"
     }
   ]
