@@ -10,44 +10,25 @@
       margin: 0;
       background: #000;
       overflow: hidden;             /* prevent scrolling */
-      overscroll-behavior: none;
+      overscroll-behavior: none;    /* extra: blocks bounce/overscroll on some devices */
     }
-
     /* Natural-size background image at top-center, no stretching */
     body::before {
       content: "";
       position: fixed;
       inset: 0;
       background-image: url('/assets/website_background.jpg');
-      background-repeat: no-repeat;
+      background-repeat: no-repeat;     /* change to repeat-x if you have a tiling sky */
       background-position: top center;
-      background-size: auto;        /* keep intrinsic size */
+      background-size: auto;            /* keep intrinsic size */
       z-index: -1;
       pointer-events: none;
     }
 
-    /* Pin the scroll to the left, centered vertically */
-    #loreWrap {
-      position: fixed;
-      top: 50%;
-      left: 16px;                   /* gutter from edge; tweak as needed */
-      transform: translateY(-50%);
-      z-index: 0;
-      pointer-events: none;         /* don't block game input */
-    }
-
-    /* Proportional image; JS will set the final width */
-    #lorescroll {
-      display: block;
-      width: auto;                  /* start at natural/computed size */
-      height: auto;
-      max-height: 90vh;             /* never exceed viewport height */
-    }
-
-    /* 640x480 canvas, fixed position, centered horizontally, 27px higher than before */
+    /* 640x480 canvas, fixed 400px from top and centered horizontally */
     #gameCanvas {
       position: fixed;
-      top: 373px;                   /* 400 - 27 */
+      top: 400px;
       left: 50%;
       transform: translateX(-50%);
       width: 640px;
@@ -55,54 +36,11 @@
       background: #222;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
-      z-index: 1;                   /* above the scroll image */
     }
   </style>
 </head>
 <body>
-  <div id="loreWrap">
-    <!-- Try .jpg, fall back to the path without a dot extension if that's your actual file -->
-    <img id="lorescroll" src="/assets/lore_scroll.jpg" alt="Lore Scroll" />
-  </div>
-
   <canvas id="gameCanvas" width="640" height="480"></canvas>
-
-  <script>
-    (function () {
-      const img = document.getElementById('lorescroll');
-
-      function applyMinus117() {
-        // Measure current on-screen width (after any constraints like max-height)
-        const current = img.getBoundingClientRect().width;
-        if (current > 0) {
-          const target = Math.max(1, Math.round(current - 117));
-          img.style.width = target + 'px';     // proportional shrink
-          img.style.height = 'auto';
-        }
-      }
-
-      function recalc() {
-        // Reset to natural/computed size, then shrink by 117px
-        img.style.width = 'auto';
-        img.style.height = 'auto';
-        requestAnimationFrame(applyMinus117);
-      }
-
-      // Run once when ready, and on viewport changes
-      if (img.complete) recalc();
-      else img.addEventListener('load', recalc, { once: true });
-
-      window.addEventListener('resize', recalc);
-
-      // Fallback path if the first src fails
-      img.addEventListener('error', function () {
-        if (img.dataset.altTried) return;
-        img.dataset.altTried = '1';
-        img.src = '/assets/lore_scroll/jpg';
-      });
-    })();
-  </script>
-
   <script src="client.js"></script>
 </body>
 </html>
