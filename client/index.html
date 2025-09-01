@@ -18,23 +18,30 @@
       position: fixed;
       inset: 0;
       background-image: url('/assets/website_background.jpg');
-      background-repeat: no-repeat;     /* change to repeat-x if it tiles horizontally */
+      background-repeat: no-repeat;
       background-position: top center;
-      background-size: auto;            /* keep intrinsic size */
+      background-size: auto;        /* keep intrinsic size */
       z-index: -1;
       pointer-events: none;
     }
 
-    /* Lore scroll on left, centered vertically; scales down if too tall */
+    /* Lore scroll: left side, vertically centered, scaled down by 26% */
     #lorescroll {
       position: fixed;
       top: 50%;
-      left: 0;                          /* adjust to e.g. 16px if you want a gutter */
-      transform: translateY(-50%);
-      max-height: 90vh;                 /* never larger than viewport height */
+      left: 0;                      /* adjust to e.g. 16px for a gutter */
+      /* Modern transform-level-2 props */
+      translate: 0 -50%;
+      scale: 0.74;                  /* 26% reduction */
+      transform-origin: left center;
+
+      /* Fallback for older browsers */
+      transform: translateY(-50%) scale(0.74);
+
+      max-height: 90vh;             /* still won’t exceed viewport height */
       height: auto;
-      width: auto;                      /* no stretching */
-      pointer-events: none;             /* don't block clicks/keys for the game */
+      width: auto;
+      pointer-events: none;         /* don't block game input */
       z-index: 0;
     }
 
@@ -49,12 +56,12 @@
       background: #222;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
-      z-index: 1;                       /* keep canvas above the scroll image */
+      z-index: 1;                   /* keep canvas above the scroll image */
     }
   </style>
 </head>
 <body>
-  <img id="lorescroll" src="/assets/lore_scroll.jpg" alt="DragonSpires: Fragmented Memories Lore Scroll" />
+  <img id="lorescroll" src="/assets/lorescroll.jpg" alt="Lore Scroll" />
   <canvas id="gameCanvas" width="640" height="480"></canvas>
   <script src="client.js"></script>
 </body>
