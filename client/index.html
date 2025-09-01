@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DragonSpires: Fragmented Memories</title>
   <style>
+    :root {
+      --scroll-scale: 0.90; /* 0.90 = 10% smaller; raise toward 1.0 to make bigger */
+      --scroll-left: 16px;  /* gutter from left edge */
+    }
+
     html, body { height: 100%; }
     body {
       margin: 0;
@@ -12,6 +17,7 @@
       overflow: hidden;             /* prevent scrolling */
       overscroll-behavior: none;
     }
+
     /* Natural-size background image at top-center, no stretching */
     body::before {
       content: "";
@@ -25,27 +31,28 @@
       pointer-events: none;
     }
 
-    /* Lore scroll: left side, vertically centered, scaled down by 26% */
-    #lorescroll {
+    /* Wrapper pins the scroll to the left and centers it vertically */
+    #loreWrap {
       position: fixed;
       top: 50%;
-      left: 0;                      /* adjust to e.g. 16px for a gutter */
-      /* Modern transform-level-2 props */
-      translate: 0 -50%;
-      scale: 0.74;                  /* 26% reduction */
-      transform-origin: left center;
-
-      /* Fallback for older browsers */
-      transform: translateY(-50%) scale(0.74);
-
-      max-height: 90vh;             /* still won’t exceed viewport height */
-      height: auto;
-      width: auto;
-      pointer-events: none;         /* don't block game input */
+      left: var(--scroll-left);
+      transform: translateY(-50%);
       z-index: 0;
+      pointer-events: none;         /* don't block game input */
     }
 
-    /* 640x480 canvas, fixed 400px from top and centered horizontally */
+    /* Scale only the image, so canvas position is never impacted */
+    #lorescroll {
+      display: block;
+      transform: scale(var(--scroll-scale));
+      transform-origin: left center;
+      will-change: transform;
+      max-height: 90vh;             /* keep it within the viewport height */
+      height: auto;
+      width: auto;
+    }
+
+    /* 640x480 canvas: fixed position, always centered horizontally, 400px from top */
     #gameCanvas {
       position: fixed;
       top: 400px;
@@ -56,12 +63,15 @@
       background: #222;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
-      z-index: 1;                   /* keep canvas above the scroll image */
+      z-index: 1;                   /* above the scroll image */
     }
   </style>
 </head>
 <body>
-  <img id="lorescroll" src="/assets/lore_scroll.jpg" alt="DragonSpires: Fragmented Memories Lore Scroll" />
+  <div id="loreWrap">
+    <img id="lorescroll" src="/assets/lorescroll.jpg" alt="Lore Scroll" />
+  </div>
+
   <canvas id="gameCanvas" width="640" height="480"></canvas>
   <script src="client.js"></script>
 </body>
