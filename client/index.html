@@ -8,7 +8,9 @@
     html, body { height: 100%; }
     body {
       margin: 0;
-      background: #000; /* solid backdrop */
+      background: #000;
+      overflow: hidden;             /* prevent scrolling */
+      overscroll-behavior: none;    /* extra: blocks bounce/overscroll on some devices */
     }
     /* Natural-size background image at top-center, no stretching */
     body::before {
@@ -16,20 +18,22 @@
       position: fixed;
       inset: 0;
       background-image: url('/assets/webpage_background.jpg');
-      background-repeat: no-repeat;         /* use 'repeat-x' if your art tiles horizontally */
+      background-repeat: no-repeat;     /* change to repeat-x if you have a tiling sky */
       background-position: top center;
-      background-size: auto;                /* keep intrinsic size (no scaling) */
+      background-size: auto;            /* keep intrinsic size */
       z-index: -1;
       pointer-events: none;
     }
 
-    /* 640x480 canvas, centered horizontally and 300px from top */
+    /* 640x480 canvas, fixed 400px from top and centered horizontally */
     #gameCanvas {
-      display: block;
-      margin: 400px auto 0;
-      background: #222;
+      position: fixed;
+      top: 400px;
+      left: 50%;
+      transform: translateX(-50%);
       width: 640px;
       height: 480px;
+      background: #222;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
     }
