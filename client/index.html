@@ -10,7 +10,7 @@
       margin: 0;
       background: #000;
       overflow: hidden;             /* prevent scrolling */
-      overscroll-behavior: none;    /* extra: blocks bounce/overscroll on some devices */
+      overscroll-behavior: none;
     }
     /* Natural-size background image at top-center, no stretching */
     body::before {
@@ -18,17 +18,30 @@
       position: fixed;
       inset: 0;
       background-image: url('/assets/website_background.jpg');
-      background-repeat: no-repeat;     /* change to repeat-x if you have a tiling sky */
+      background-repeat: no-repeat;     /* change to repeat-x if it tiles horizontally */
       background-position: top center;
       background-size: auto;            /* keep intrinsic size */
       z-index: -1;
       pointer-events: none;
     }
 
+    /* Lore scroll on left, centered vertically; scales down if too tall */
+    #lorescroll {
+      position: fixed;
+      top: 50%;
+      left: 0;                          /* adjust to e.g. 16px if you want a gutter */
+      transform: translateY(-50%);
+      max-height: 90vh;                 /* never larger than viewport height */
+      height: auto;
+      width: auto;                      /* no stretching */
+      pointer-events: none;             /* don't block clicks/keys for the game */
+      z-index: 0;
+    }
+
     /* 640x480 canvas, fixed 400px from top and centered horizontally */
     #gameCanvas {
       position: fixed;
-      top: 375px;
+      top: 400px;
       left: 50%;
       transform: translateX(-50%);
       width: 640px;
@@ -36,10 +49,12 @@
       background: #222;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
+      z-index: 1;                       /* keep canvas above the scroll image */
     }
   </style>
 </head>
 <body>
+  <img id="lorescroll" src="/assets/lorescroll.jpg" alt="Lore Scroll" />
   <canvas id="gameCanvas" width="640" height="480"></canvas>
   <script src="client.js"></script>
 </body>
