@@ -1,0 +1,66 @@
+{
+  "start": "18,20",
+  "exits": "4,3,0,2",
+  "stamval": -1,
+  "diemap": 10,
+  "allowupload": false,
+  "maxuploads": 0,
+  "allowcombat": false,
+  "combatarea": "19,21,24,26",
+  "portals": [
+    "18,0,2,49,62",
+    "19,0,2,50,62"
+  ],
+  "readables": [
+    {
+      "coordinates": "17,19",
+      "message": "This sign reads: North: Swamp, East: Desert, South: Temple."
+    }
+  ],
+  "holders": [
+    {
+      "coordinates": "0,0",
+      "item": 0
+    }
+  ],
+  "enemies": [
+    {
+      "type": 24,
+      "coordinates": "20,32"
+    },
+    {
+      "type": 24,
+      "coordinates": "24,31"
+    },
+    {
+      "type": 24,
+      "coordinates": "23,34"
+    },
+    {
+      "type": 24,
+      "coordinates": "26,33"
+    },
+    {
+      "type": 37,
+      "coordinates": "8,47"
+    },
+    {
+      "type": 4,
+      "coordinates": "17,10"
+    },
+    {
+      "type": 4,
+      "coordinates": "14,27"
+    },
+    {
+      "type": 23,
+      "coordinates": "17,43"
+    }
+  ],
+  "npcs": [ 
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
+  ]
+}
