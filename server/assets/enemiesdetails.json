@@ -577,7 +577,7 @@
   {
     "name": "An OgRe WiZaRd",
     "attack_text": "An OgRe WiZaRd casts an eternal stench spell on you!",
-    "drop_item": 113,
+    "drop_item": 135,
     "drop_chance": 75,
     "drop_gold_min": 75,
     "drop_gold_max": 90,
