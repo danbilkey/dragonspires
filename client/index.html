@@ -7,26 +7,36 @@
   <style>
     html, body { height: 100%; }
     body {
-      margin: 0; /* ensure the 300px offset is exact */
-      background: #000 url('/assets/webpage_background.jpg') no-repeat center top;
-      background-size: cover;
+      margin: 0;
+      background: #000; /* solid backdrop */
+    }
+    /* Natural-size background image at top-center, no stretching */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: url('/assets/website_background.jpg');
+      background-repeat: no-repeat;         /* use 'repeat-x' if your art tiles horizontally */
+      background-position: top center;
+      background-size: auto;                /* keep intrinsic size (no scaling) */
+      z-index: -1;
+      pointer-events: none;
     }
 
-    /* 640x480 canvas, centered horizontally and 300px from the top */
+    /* 640x480 canvas, centered horizontally and 300px from top */
     #gameCanvas {
       display: block;
-      margin: 300px auto 0; /* top | sides | bottom */
+      margin: 300px auto 0;
       background: #222;
       width: 640px;
       height: 480px;
-      image-rendering: pixelated;   /* optional: crisp pixel look */
-      image-rendering: crisp-edges; /* fallback for some browsers */
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
     }
   </style>
 </head>
 <body>
   <canvas id="gameCanvas" width="640" height="480"></canvas>
-
   <script src="client.js"></script>
 </body>
 </html>
