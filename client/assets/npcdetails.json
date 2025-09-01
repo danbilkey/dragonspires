@@ -548,7 +548,7 @@
     },
     {
       "name": "Druidic Master",
-      "description": "You see a beautiful Faerie in a clearing in the woods!",
+      "description": "You see a powerful Druid Master!",
       "item_number": 184,
       "shop": "false",
       "quest_giver": "true",
@@ -561,7 +561,7 @@
       "speaker_phrase_3": "Druidic Master: If the real power of the ten scrolls is realized.. we druids can kiss our staffs goodbye.",
       "speaker_phrase_4": "",
       "question_1": "1. You look tired.",
-      "question_2": "2. How much magic does a druidic master like you need?",
+      "question_2": "2. How much magic do you need?",
       "question_3": "",
       "question_4": "4. I have a Violet Berry for you!",
       "response_1": "Druidic Master: Yes, fending off looters all day takes all my strength. I wish I had thought to stock up on some more violet berries.",
