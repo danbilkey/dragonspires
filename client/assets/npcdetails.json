@@ -158,7 +158,7 @@
     },
     {
       "name": "Swamp Hag",
-      "description": "You stare in awe at her beauty.",
+      "description": "You see an old Swamp Hang, she looks kind of sad.",
       "item_number": 229,
       "shop": "false",
       "quest_giver": "true",
@@ -370,7 +370,7 @@
       "question_3": "",
       "question_4": "4. Would you like Large Fish? It's very stinky!",
       "response_1": "Alchemist: Woman troubles. I want to cast a love spell on Succubus, but I don't have enough stinky fish for the potion to work. I need five, but I only have four.",
-      "response_2": "Alchemist: Well.. I suppose I could part with it if you could get me 10 stinky fish. I really need them! *twitch*",
+      "response_2": "Alchemist: Well.. I suppose I could part with it if you could get me a stinky fish. I really need it! *twitch*",
       "response_3": "",
       "response_4": "Alchemist: Oh. Yes. You have the fish! Here, take the stone.",
       "buy_item_1": 0,
