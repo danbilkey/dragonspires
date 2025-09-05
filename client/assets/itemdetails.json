@@ -178,7 +178,7 @@
   ["Cool Dodgeball","false","garbage",0,0,"It's a dodgeball (too cool for school).", "none", ""],
   ["Angry Dodgeball","false","garbage",0,0,"It's a dodgeball (it looks angry).", "none", ""],
   ["Demon Pod","false","nothing",0,0,"You don't want to think about what's in that pod..", "none", ""],
-  ["Treasure Chest","false","container",0,0,"It's a treasure chest, definitely not a mimic..", "none", ""],
+  ["Treasure Chest","true","container",0,0,"It's a treasure chest, definitely not a mimic..", "none", ""],
   ["Unicorn","true","nothing",0,0,"WOAH! It's a unicorn!!", "none", ""],
   ["BRB","false","nothing",0,0,"They'll BRB.", "none", ""],
   ["Knight Down","true","interactable",0,0,"It's knights armor! (Is something moving inside?)", "none", ""],
