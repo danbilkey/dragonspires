@@ -3659,7 +3659,7 @@ async function createPlayer(username, password) {
     const result = await pool.query(
       `INSERT INTO players (username, password, pos_x, pos_y, map_id, life, max_life, stamina, max_stamina, magic, max_magic, gold, weapon, armor, hands, direction, step) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
-      [username, hashedPassword, 32, 32, 1, 20, 20, 100, 100, 30, 30, 0, 0, 0, 0, 'down', 2]
+      [username, hashedPassword, 32, 32, 1, 20, 20, 100, 100, 30, 30, 200, 0, 0, 0, 'down', 2]
     );
     
     const player = result.rows[0];
@@ -6279,6 +6279,137 @@ wss.on('connection', (ws) => {
         }
         return;
       }
+
+      // Check for -goto admin command (teleport to player)
+const gotoPlayerMatch = t.match(/^-goto\s+(.+)$/i);
+if (gotoPlayerMatch) {
+  // Validate admin role
+  if (playerData.role !== 'admin') {
+    // Do nothing for non-admin users
+    return;
+  }
+
+  const targetUsername = gotoPlayerMatch[1].trim();
+  
+  // Find target player (case-insensitive search)
+  let targetPlayer = null;
+  for (const [clientWs, clientPlayer] of clients.entries()) {
+    if (clientPlayer && clientPlayer.username.toLowerCase() === targetUsername.toLowerCase()) {
+      targetPlayer = clientPlayer;
+      break;
+    }
+  }
+  
+  if (!targetPlayer) {
+    send(ws, { 
+      type: 'chat', 
+      text: `~ Player "${targetUsername}" not found or not online. Use -players to see who's online.` 
+    });
+    return;
+  }
+  
+  // Don't allow teleporting to yourself
+  if (targetPlayer.id === playerData.id) {
+    send(ws, { 
+      type: 'chat', 
+      text: '~ You cannot teleport to yourself.' 
+    });
+    return;
+  }
+
+  try {
+    // Update player's position and map to match target player
+    const oldMapId = playerData.map_id;
+    playerData.map_id = targetPlayer.map_id;
+    playerData.pos_x = targetPlayer.pos_x;
+    playerData.pos_y = targetPlayer.pos_y;
+    
+    // Update database
+    await Promise.allSettled([
+      updatePosition(playerData.id, targetPlayer.pos_x, targetPlayer.pos_y),
+      pool.query('UPDATE players SET map_id = $1 WHERE id = $2', [targetPlayer.map_id, playerData.id])
+    ]);
+    
+    // Broadcast player moved to all clients
+    broadcast({
+      type: 'player_moved',
+      id: playerData.id,
+      x: targetPlayer.pos_x,
+      y: targetPlayer.pos_y,
+      map_id: targetPlayer.map_id,
+      direction: playerData.direction || 'down',
+      step: playerData.step || 2,
+      isMoving: false,
+      isAttacking: false
+    });
+    
+    // If map changed, send teleport result to admin
+    if (oldMapId !== targetPlayer.map_id) {
+      // Send loading message
+      send(ws, { type: 'chat', text: '* Loading map. Please wait. *', color: 'cornflowerblue' });
+      
+      const mapItems = await loadItemsFromDatabase(targetPlayer.map_id);
+      const mapEnemies = getEnemiesForMap(targetPlayer.map_id);
+      
+      // Get other players on target map (excluding the teleporting admin)
+      const mapPlayers = [];
+      for (const [otherWs, otherPlayer] of clients.entries()) {
+        if (otherPlayer && 
+            Number(otherPlayer.map_id) === Number(targetPlayer.map_id) && 
+            otherPlayer.id !== playerData.id) {
+          mapPlayers.push({
+            id: otherPlayer.id,
+            username: otherPlayer.username,
+            pos_x: otherPlayer.pos_x,
+            pos_y: otherPlayer.pos_y,
+            map_id: otherPlayer.map_id,
+            direction: otherPlayer.direction || 'down',
+            step: otherPlayer.step || 2,
+            isMoving: otherPlayer.isMoving || false,
+            isAttacking: otherPlayer.isAttacking || false,
+            isPickingUp: otherPlayer.isPickingUp || false,
+            isBRB: otherPlayer.isBRB || false,
+            temporarySprite: otherPlayer.temporarySprite || 0,
+            weapon: otherPlayer.weapon || 0,
+            armor: otherPlayer.armor || 0,
+            hands: otherPlayer.hands || 0
+          });
+        }
+      }
+      
+      send(ws, {
+        type: 'teleport_result',
+        success: true,
+        id: playerData.id,
+        x: targetPlayer.pos_x,
+        y: targetPlayer.pos_y,
+        mapId: targetPlayer.map_id,
+        items: mapItems,
+        enemies: mapEnemies,
+        players: mapPlayers,
+        showLoadingScreen: {
+          imagePath: '/assets/loadscreen.gif',
+          x: 232,
+          y: 20,
+          duration: 500
+        }
+      });
+    }
+    
+    // Send confirmation message
+    send(ws, { 
+      type: 'chat', 
+      text: `~ Teleported to ${targetPlayer.username} at (${targetPlayer.pos_x}, ${targetPlayer.pos_y}) on map ${targetPlayer.map_id}` 
+    });
+    
+    console.log(`Admin ${playerData.username} teleported to player ${targetPlayer.username} at (${targetPlayer.pos_x}, ${targetPlayer.pos_y}) on map ${targetPlayer.map_id}`);
+    
+  } catch (error) {
+    console.error('Error during goto teleport:', error);
+    send(ws, { type: 'chat', text: '~ Error occurred during teleport.' });
+  }
+  return;
+}
 
       // Check for -gotomap admin command
       const gotoMapMatch = t.match(/^-gotomap\s+(\d+)$/i);
