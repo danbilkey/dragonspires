@@ -1453,7 +1453,7 @@
           const toSend = typingBuffer.trim();
         if (toSend === '-pos' && localPlayer) {
             pushChat(`~ ${localPlayer.username} is currently on Map ${localPlayer.map_id ?? 1} at location x:${localPlayer.pos_x}, y:${localPlayer.pos_y}.`);
-          } else if (toSend === '-help') {
+          } else if (toSend === '-help' || toSend === '-commands' || toSend === '-controls') {
             showHelpControls();
           } else if (toSend === '-cls') {
             clearChatMessages();
@@ -3186,14 +3186,15 @@
     function showPlayerStats() {
       if (!localPlayer) return;
       
-      pushChat("[*] Player Stats [*]");
+      pushChat("[*] DragonSpires - Player Stats [*]");
       
       // Get weapon stats
       let weaponStats = "None";
       if (localPlayer.weapon && localPlayer.weapon > 0) {
         const weaponDetails = getItemDetails(localPlayer.weapon);
         if (weaponDetails) {
-          weaponStats = `${weaponDetails.statMin}-${weaponDetails.statMax} damage`;
+          weaponStats = `${weaponDetails.name} (${weaponDetails.statMin}-${weaponDetails.statMax} damage)`;
+          //weaponStats = `${weaponDetails.statMin}-${weaponDetails.statMax} damage`;
         }
       }
       
@@ -3202,7 +3203,8 @@
       if (localPlayer.armor && localPlayer.armor > 0) {
         const armorDetails = getItemDetails(localPlayer.armor);
         if (armorDetails) {
-          armorStats = `${armorDetails.statMin}-${armorDetails.statMax} defense`;
+          armorStats = `${armorDetails.name} (${armorDetails.statMin}-${armorDetails.statMax} defense)`;
+          //armorStats = `${armorDetails.statMin}-${armorDetails.statMax} defense`;
         }
       }
       
