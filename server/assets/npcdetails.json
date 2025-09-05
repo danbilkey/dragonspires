@@ -73,7 +73,7 @@
       "sell_item_2": 0,
       "sell_item_3": 0,
       "sell_item_4": 0,
-      "sell_price_1": 25,
+      "sell_price_1": 100,
       "sell_price_2": 0,
       "sell_price_3": 0,
       "sell_price_4": 0
@@ -112,9 +112,9 @@
       "sell_item_2": 12,
       "sell_item_3": 2,
       "sell_item_4": 0,
-      "sell_price_1": 10,
-      "sell_price_2": 20,
-      "sell_price_3": 15,
+      "sell_price_1": 50,
+      "sell_price_2": 100,
+      "sell_price_3": 75,
       "sell_price_4": 0
     },
     {
@@ -229,8 +229,8 @@
       "sell_item_2": 104,
       "sell_item_3": 0,
       "sell_item_4": 0,
-      "sell_price_1": 2500,
-      "sell_price_2": 1200,
+      "sell_price_1": 5000,
+      "sell_price_2": 4500,
       "sell_price_3": 0,
       "sell_price_4": 0
     },
@@ -338,7 +338,7 @@
       "buy_item_2": 0,
       "buy_item_3": 0,
       "buy_item_4": 0,
-      "buy_price_1": 25000,
+      "buy_price_1": 10000,
       "buy_price_2": 0,
       "buy_price_3": 0,
       "buy_price_4": 0,
