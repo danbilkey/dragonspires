@@ -1,0 +1,69 @@
+{
+  "start": "31,59",
+  "exits": "0,0,0,0",
+  "stamval": -1,
+  "diemap": 1,
+  "allowupload": false,
+  "maxuploads": 0,
+  "allowcombat": false,
+  "combatarea": "19,21,24,26",
+  "portals": [
+    "20,56,1,33,27"
+  ],
+  "readables": [
+    {
+      "coordinates": "28,40",
+      "message": "The sign reads: West to Jamie's Shop, North to Swamp Path"
+    },
+    {
+      "coordinates": "17,36",
+      "message": "The sign reads: Jamie's Shop"
+    },
+    {
+      "coordinates": "30,32",
+      "message": "The sign reads: Caution - Swamp Dweller creatures along the northern path."
+    },
+    {
+      "coordinates": "23,7",
+      "message": "The gravestone reads: Here lies Tara Gregors."
+    }
+  ],
+  "holders": [
+    {
+      "coordinates": "29,56",
+      "item": 2
+    }
+  ],
+  "enemies": [
+    {
+      "type": 3,
+      "coordinates": "8,12"
+    },
+   {
+      "type": 3,
+      "coordinates": "11,14"
+    }
+  ],
+  "npcs": [ 
+    {
+      "type": 19,
+      "coordinates": "29,57"
+    },
+    {
+      "type": 20,
+      "coordinates": "29,40"
+    },
+    {
+      "type": 21,
+      "coordinates": "15,37"
+    },
+    {
+      "type": 22,
+      "coordinates": "24,7"
+    },
+    {
+      "type": 23,
+      "coordinates": "38,10"
+    }
+  ]
+}
