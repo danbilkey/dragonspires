@@ -1078,7 +1078,7 @@ function loadNPCLocations() {
   npcLocations = [];
   
   // Load NPCs from all map data files
-  const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 99];
+  const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 98, 99];
   for (const mapId of mapIds) {
     const mapData = getMapData(mapId);
     if (mapData && mapData.npcs) {
@@ -1140,7 +1140,7 @@ async function loadAllMaps() {
     const path = require('path');
     
     // Load maps 1-5 and 99
-    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 99];
+    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 98, 99];
     for (const mapId of mapIds) {
       await loadSingleMap(mapId);
       await loadSingleMapData(mapId);
@@ -1530,7 +1530,7 @@ async function reloadMapContainers() {
     console.log('Cleared all map containers');
     
     // Reload containers from all map data files
-    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 99];
+    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 98, 99];
     for (const mapId of mapIds) {
       const mapData = getMapData(mapId);
       if (mapData && mapData.holders) {
@@ -1588,7 +1588,7 @@ function loadNPCLocations() {
     npcLocations = []; // Clear existing locations
     
     // Load NPCs from all map data files
-    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 99];
+    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 98, 99];
     for (const mapId of mapIds) {
       const mapData = getMapData(mapId);
       if (mapData && mapData.npcs) {
@@ -1637,7 +1637,7 @@ async function reloadEnemies() {
     console.log('Cleared all enemies');
     
     // Reload enemies from all map data files
-    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 99];
+    const mapIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 98, 99];
     for (const mapId of mapIds) {
       const mapData = getMapData(mapId);
       if (mapData && mapData.enemies) {
@@ -3659,7 +3659,7 @@ async function createPlayer(username, password) {
     const result = await pool.query(
       `INSERT INTO players (username, password, pos_x, pos_y, map_id, life, max_life, stamina, max_stamina, magic, max_magic, gold, weapon, armor, hands, direction, step) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
-      [username, hashedPassword, 32, 32, 1, 20, 20, 100, 100, 30, 30, 200, 0, 0, 0, 'down', 2]
+      [username, hashedPassword, 31, 59, 98, 20, 20, 100, 100, 30, 30, 200, 0, 0, 0, 'down', 2]
     );
     
     const player = result.rows[0];
@@ -6421,7 +6421,7 @@ if (gotoPlayerMatch) {
         }
 
         const targetMapId = parseInt(gotoMapMatch[1]);
-        const validMaps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 99];
+        const validMaps = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 98, 99];
         if (!validMaps.includes(targetMapId)) {
           send(ws, { type: 'chat', text: `~ Invalid map ID. Valid maps: ${validMaps.join(', ')}` });
           return;
