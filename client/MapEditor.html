@@ -527,7 +527,7 @@
                             playerY = Math.min(playerY, mapSpec.height - 1);
                             
                             pushChat(`Map loaded: ${file.name} (${mapSpec.width}x${mapSpec.height})`);
-                            mapFileName = ${file.name};
+                            mapFileName = file.name;
                             
                         } catch (error) {
                             pushChat('Error: Failed to parse JSON file');
@@ -889,6 +889,7 @@
     </script>
 </body>
 </html>
+
 
 
 
