@@ -1850,7 +1850,7 @@ async function handlePotionStatueAttack(playerData, ws, attackPos) {
     239: 10,  // item# 239 -> enemy# 10
     164: 33,  // item# 164 -> enemy# 33
     248: 14,  // item# 248 -> enemy# 14
-    308: 6,   // item# 308 -> enemy# 6
+    121: 6,   // item# 121 -> enemy# 6
     240: 12   // item# 240 -> enemy# 12
   };
   
@@ -1903,7 +1903,7 @@ async function handlePotionAttack(mapId, x, y, itemId, enemyType, processedPosit
   const currentItemId = getItemAtPosition(x, y, playerMapSpec, mapId);
   
   const potionMappings = {
-    165: 2, 239: 10, 164: 33, 248: 14, 308: 6, 240: 12
+    165: 2, 239: 10, 164: 33, 248: 14, 121: 6, 240: 12
   };
   
   if (!potionMappings[currentItemId] || currentItemId !== itemId) {
