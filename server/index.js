@@ -1975,8 +1975,8 @@ async function handleStatueAttack(mapId, x, y, itemId, statueConfig) {
   const key = `${mapId}:${x},${y}`;
   mapItems[key] = 0;
   saveItemToDatabase(x, y, 0, mapId);
-  console.log(`🗿 Stored statue removal in mapItems[${key}] = 0 (mapId=${mapId})`);
-  console.log(`🗿 Current mapItems keys for map ${mapId}:`, Object.keys(mapItems).filter(k => k.startsWith(`${mapId}:`)));
+  console.log(`Stored statue removal in mapItems[${key}] = 0 (mapId=${mapId})`);
+  console.log(`Current mapItems keys for map ${mapId}:`, Object.keys(mapItems).filter(k => k.startsWith(`${mapId}:`)));
   
   // Broadcast item removal to all clients
   broadcast({
