@@ -71,6 +71,10 @@
     {
       "type": 14,
       "coordinates": "53,45"
+    },
+    {
+      "type": 30,
+      "coordinates": "17,18"
     }
   ]
 }
