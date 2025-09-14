@@ -295,7 +295,7 @@
     ["Hearty Meal", "false", "consumable", 100, 100, "It's a hearty meal, very nutricious!", "hp", "You eat a hearty meal - you're stuffed!"],
     ["Spidra", "true", "nothing", 0, 0, "You see Spidra, queen of the spiders!", "none", ""],
     ["NPC 21 A Demon Princess", "true", "nothing", 0, 0, "You gaze upon the Demon Princess, in awe of her beauty.", "none", ""],
-    ["Candle on Stand", "true", "nothing", 0, 0, "It's a candle on a stand.", "none", ""],
+    ["Ashe", "true", "nothing", 0, 0, "You see Ashe, survivor of the prime universe.", "none", ""],
     ["Flowers on Table", "true", "nothing", 0, 0, "You see a vase of flowers on a table.", "none", ""],
     ["Hearty Meal", "false", "consumable", 100, 100, "It's a hearty meal, very nutricious!", "hp", "You eat a hearty meal - you're stuffed!"],
     ["Spider Necklace", "false", "garbage", 0, 0, "It's a necklace with a spider pendant, feels ominous.", "none", ""],
