@@ -53,6 +53,10 @@
     {
       "type": 5,
       "coordinates": "10,22"
+    },
+    {
+      "type": 28,
+      "coordinates": "13,21"
     }
   ]
 }
