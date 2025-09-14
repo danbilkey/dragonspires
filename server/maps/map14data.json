@@ -33,6 +33,10 @@
     {
       "type": 8,
       "coordinates": "32,22"
+    },
+    {
+      "type": 30,
+      "coordinates": "29,24"
     }
   ]
 }
