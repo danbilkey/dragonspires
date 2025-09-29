@@ -1,0 +1,53 @@
+{
+  "start": "31,52",
+  "exits": "0,0,0,0",
+  "stamval": -2,
+  "diemap": 16,
+  "allowupload": false,
+  "maxuploads": 0,
+  "allowcombat": true,
+  "combatarea": "26,6,40,35",
+  "portals": [
+    "20,63,7,54,1",
+    "21,63,7,55,1",
+    "1,26,18,32,32",
+    "22,0,17,32,32",
+    "23,0,17,32,32"
+  ],
+  "readables": [
+    {
+      "coordinates": "35,33",
+      "message": "This sign reads: Guild Hall Combat Zone, mind your head."
+    },
+    {
+      "coordinates": "35,49",
+      "message": "This sign reads: Guild Hall (I hope you like hot sauce)."
+    }
+  ],
+  "holders": [
+    {
+      "coordinates": "33,9",
+      "item": 200
+    },
+    {
+      "coordinates": "35,9",
+      "item": 32
+    }
+  ],
+  "enemies": [
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
+  ],
+  "npcs": [ 
+    {
+      "type": 32,
+      "coordinates": "32,39"
+    },
+    {
+      "type": 33,
+      "coordinates": "27,29"
+    }
+  ]
+}
