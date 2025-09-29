@@ -16,8 +16,12 @@
   ],
   "readables": [
     {
-      "coordinates": "0,0",
-      "message": ""
+      "coordinates": "36,43",
+      "message": "The sign reads: Royal Shop"
+    },
+    {
+      "coordinates": "31,43",
+      "message": "The sign reads: Welcome to the Royal City!"
     }
   ],
   "holders": [
@@ -35,11 +39,11 @@
   "npcs": [ 
     {
       "type": 33,
-      "coordinates": "26,45"
+      "coordinates": "33,43"
     },
     {
       "type": 34,
-      "coordinates": "27,41"
+      "coordinates": "37,39"
     },
     {
       "type": 35,
