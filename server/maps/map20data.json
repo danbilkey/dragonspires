@@ -24,12 +24,6 @@
   ],
   "enemies": [
     {
-      "type": 0,
-      "coordinates": "0,0"
-    }
-  ],
-  "npcs": [ 
-    {
       "type": 8,
       "coordinates": "36,49"
     },
@@ -72,6 +66,12 @@
     {
       "type": 6,
       "coordinates": "44,23"
+    }
+  ],
+  "npcs": [ 
+    {
+      "type": 0,
+      "coordinates": "0,0"
     }
   ]
 }
