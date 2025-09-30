@@ -1,0 +1,77 @@
+{
+  "start": "10,56",
+  "exits": "0,0,0,0",
+  "stamval": -2,
+  "diemap": 17,
+  "allowupload": false,
+  "maxuploads": 0,
+  "allowcombat": false,
+  "combatarea": "26,6,40,35",
+  "portals": [
+    "12,25,1,33,27"
+  ],
+  "readables": [
+    {
+      "coordinates": "0,0",
+      "message": ""
+    }
+  ],
+  "holders": [
+    {
+      "coordinates": "0,0",
+      "item": 0
+    }
+  ],
+  "enemies": [
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
+  ],
+  "npcs": [ 
+    {
+      "type": 8,
+      "coordinates": "36,49"
+    },
+    {
+      "type": 8,
+      "coordinates": "24,32"
+    },
+    {
+      "type": 8,
+      "coordinates": "11,42"
+    },
+    {
+      "type": 12,
+      "coordinates": "50,49"
+    },
+    {
+      "type": 12,
+      "coordinates": "49,44"
+    },
+    {
+      "type": 12,
+      "coordinates": "51,41"
+    },
+    {
+      "type": 14,
+      "coordinates": "43,37"
+    },
+    {
+      "type": 14,
+      "coordinates": "47,18"
+    },
+    {
+      "type": 6,
+      "coordinates": "24,53"
+    },
+    {
+      "type": 6,
+      "coordinates": "50,20"
+    },
+    {
+      "type": 6,
+      "coordinates": "44,23"
+    }
+  ]
+}

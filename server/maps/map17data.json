@@ -1,16 +1,16 @@
 {
-  "start": "31,52",
+  "start": "27,40",
   "exits": "0,0,0,0",
-  "stamval": -2,
-  "diemap": 16,
+  "stamval": -1,
+  "diemap": 17,
   "allowupload": false,
   "maxuploads": 0,
-  "allowcombat": true,
+  "allowcombat": false,
   "combatarea": "26,6,40,35",
   "portals": [
     "27,63,16,22,1",
     "28,63,16,23,1",
-    "54,56,20,32,32",
+    "54,56,20,10,57",
     "0,47,14,62,19",
     "0,48,14,62,20"
   ],
