@@ -1,15 +1,16 @@
 {
-  "start": "60,14",
+  "start": "41,24",
   "exits": "0,0,0,0",
   "stamval": -1,
-  "diemap": 16,
+  "diemap": 21,
   "allowupload": false,
   "maxuploads": 0,
   "allowcombat": false,
   "combatarea": "26,6,40,35",
   "portals": [
-    "60,13,16,1,27",
-    "2,60,21,13,28"
+    "13,29,18,3,60",
+    "57,0,10,14,62",
+    "58,0,10,15,62"
   ],
   "readables": [
     {
@@ -19,12 +20,8 @@
   ],
   "holders": [
     {
-      "coordinates": "35,23",
-      "item": 92
-    },
-    {
-      "coordinates": "35,25",
-      "item": 10
+      "coordinates": "26,30",
+      "item": 210
     }
   ],
   "enemies": [
