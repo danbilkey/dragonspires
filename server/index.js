@@ -2889,7 +2889,6 @@ async function updateEnemyPosition(enemyId, x, y, direction, step) {
   }
 }
 
-// Move an enemy toward a target position
 async function moveEnemyToward(enemy, targetX, targetY) {
   const currentX = enemy.pos_x;
   const currentY = enemy.pos_y;
@@ -2923,18 +2922,19 @@ async function moveEnemyToward(enemy, targetX, targetY) {
     }
   }
   
-  // Always increment step and update direction (even if blocked)
-  // Enemies only use steps 1 and 2, alternating between them
-  // Ensure step is valid (1 or 2), then toggle
-  let newStep;
-  if (enemy.step !== 1 && enemy.step !== 2) {
-    newStep = 1; // Initialize if invalid
-  } else {
-    newStep = enemy.step === 1 ? 2 : 1; // Toggle between 1 and 2
-  }
+  // Always update direction and toggle step (even if blocked)
   enemy.direction = newDirection;
-  enemy.step = newStep;
+  
+  // Toggle step between 1 and 2
+  if (enemy.step !== 1 && enemy.step !== 2) {
+    enemy.step = 1; // Initialize if invalid
+  } else {
+    enemy.step = enemy.step === 1 ? 2 : 1; // Toggle between 1 and 2
+  }
+  
   enemy.last_move_time = Date.now();
+  
+  console.log(`Enemy ${enemy.id} (toward) toggled to step=${enemy.step}, direction=${enemy.direction}`);
   
   // Check if the move is valid (exclude this enemy from collision check)
   const mapSpec = getMapSpec(enemy.map_id);
@@ -2944,7 +2944,7 @@ async function moveEnemyToward(enemy, targetX, targetY) {
     enemy.pos_y = newY;
     
     // Update database with new position
-    await updateEnemyPosition(enemy.id, newX, newY, newDirection, newStep);
+    await updateEnemyPosition(enemy.id, newX, newY, enemy.direction, enemy.step);
     
     // Broadcast movement to all clients
     broadcast({
@@ -2952,24 +2952,22 @@ async function moveEnemyToward(enemy, targetX, targetY) {
       id: enemy.id,
       pos_x: newX,
       pos_y: newY,
-      direction: newDirection,
-      step: newStep,
+      direction: enemy.direction,
+      step: enemy.step,
       map_id: enemy.map_id
     });
     
     return true;
   } else {
     // Can't move to optimal position, but still update direction and step
-    await updateEnemyDirectionAndStep(enemy.id, newDirection, newStep);
+    await updateEnemyDirectionAndStep(enemy.id, enemy.direction, enemy.step);
     
-    // Check if we're adjacent to the target player - if so, just face them and animate
-    const dx = Math.abs(targetX - currentX);
-    const dy = Math.abs(targetY - currentY);
-    const isAdjacent = (dx <= 1 && dy <= 1) && (dx + dy === 1); // Only orthogonally adjacent
+    // Check if we're adjacent to the target player - if so, attack
+    const distX = Math.abs(targetX - currentX);
+    const distY = Math.abs(targetY - currentY);
+    const isAdjacent = (distX <= 1 && distY <= 1) && (distX + distY === 1);
     
     if (isAdjacent) {
-      // We're next to the player and can't move - this means there's a player blocking us
-      // Since we're moving toward a target player, we should attack
       console.log(`Enemy ${enemy.id} adjacent to player at (${targetX}, ${targetY}), attempting attack`);
       await enemyAttackPlayer(enemy, targetX, targetY);
       
@@ -2979,17 +2977,17 @@ async function moveEnemyToward(enemy, targetX, targetY) {
         id: enemy.id,
         pos_x: currentX,
         pos_y: currentY,
-        direction: newDirection,
-        step: newStep,
+        direction: enemy.direction,
+        step: enemy.step,
         map_id: enemy.map_id
       });
-      return false; // Didn't move but did animate
+      return false;
     }
     
     // Not adjacent to player, try other directions for actual movement
     const directions = ['up', 'down', 'left', 'right'];
     for (const direction of directions) {
-      if (direction === newDirection) continue; // Already tried this
+      if (direction === newDirection) continue;
       
       const pos = getAdjacentPosition(currentX, currentY, direction);
       if (canMoveTo(pos.x, pos.y, null, mapSpec, enemy.map_id, enemy.id)) {
@@ -2997,7 +2995,7 @@ async function moveEnemyToward(enemy, targetX, targetY) {
         enemy.pos_y = pos.y;
         enemy.direction = direction;
         
-        await updateEnemyPosition(enemy.id, pos.x, pos.y, direction, newStep);
+        await updateEnemyPosition(enemy.id, pos.x, pos.y, direction, enemy.step);
         
         broadcast({
           type: 'enemy_moved',
@@ -3005,7 +3003,7 @@ async function moveEnemyToward(enemy, targetX, targetY) {
           pos_x: pos.x,
           pos_y: pos.y,
           direction: direction,
-          step: newStep,
+          step: enemy.step,
           map_id: enemy.map_id
         });
         
@@ -3013,18 +3011,18 @@ async function moveEnemyToward(enemy, targetX, targetY) {
       }
     }
     
-    // Couldn't move anywhere, just animate in place facing the player
+    // Couldn't move anywhere, just animate in place
     broadcast({
       type: 'enemy_moved',
       id: enemy.id,
       pos_x: currentX,
       pos_y: currentY,
-      direction: newDirection,
-      step: newStep,
+      direction: enemy.direction,
+      step: enemy.step,
       map_id: enemy.map_id
     });
     
-    return false; // Couldn't move but did update animation
+    return false;
   }
 }
 
