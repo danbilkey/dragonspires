@@ -2824,14 +2824,16 @@ async function moveEnemyRandomly(enemy) {
   // Get map specification for collision checking
   const mapSpec = getMapSpec(enemy.map_id);
   
-  // Always update direction and step (even if blocked) to match moveEnemyToward behavior
+  // Always update direction and toggle step (even if blocked)
   enemy.direction = randomDirection.dir;
-  // Initialize step if it's not valid, then cycle between 1 and 2
+  
+  // Ensure step is valid (1 or 2), then toggle
   if (enemy.step !== 1 && enemy.step !== 2) {
-    enemy.step = 1;
+    enemy.step = 1; // Initialize if invalid
   } else {
-    enemy.step = enemy.step === 1 ? 2 : 1; // Cycle between 1 and 2
+    enemy.step = enemy.step === 1 ? 2 : 1; // Toggle between 1 and 2
   }
+  
   enemy.last_move_time = Date.now();
   
   // Check if the move is valid
@@ -2839,19 +2841,15 @@ async function moveEnemyRandomly(enemy) {
     // Update enemy position
     enemy.pos_x = newX;
     enemy.pos_y = newY;
-    if (enemy.is_admin_spawned) {
-      console.log(`Spawned enemy ${enemy.id} moved to (${newX},${newY}) facing ${enemy.direction}`);
-    }
+    
+    // Update database with new position
+    await updateEnemyPosition(enemy.id, newX, newY, enemy.direction, enemy.step);
   } else {
-    if (enemy.is_admin_spawned) {
-      console.log(`Spawned enemy ${enemy.id} blocked from moving to (${newX},${newY}), staying at (${enemy.pos_x},${enemy.pos_y})`);
-    }
+    // Blocked but still update direction and step in database
+    await updateEnemyDirectionAndStep(enemy.id, enemy.direction, enemy.step);
   }
   
-  // Always update database and broadcast (direction/step changes even if position doesn't)
-  await updateEnemyDirectionAndStep(enemy.id, enemy.direction, enemy.step);
-  
-  // Broadcast movement to all clients
+  // Always broadcast movement (position and/or direction/step changes)
   broadcast({
     type: 'enemy_moved',
     id: enemy.id,
@@ -2923,7 +2921,13 @@ async function moveEnemyToward(enemy, targetX, targetY) {
   
   // Always increment step and update direction (even if blocked)
   // Enemies only use steps 1 and 2, alternating between them
-  const newStep = enemy.step === 1 ? 2 : 1;
+  // Ensure step is valid (1 or 2), then toggle
+  let newStep;
+  if (enemy.step !== 1 && enemy.step !== 2) {
+    newStep = 1; // Initialize if invalid
+  } else {
+    newStep = enemy.step === 1 ? 2 : 1; // Toggle between 1 and 2
+  }
   enemy.direction = newDirection;
   enemy.step = newStep;
   enemy.last_move_time = Date.now();
