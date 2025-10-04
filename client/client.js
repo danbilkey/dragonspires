@@ -1086,16 +1086,17 @@
               pushChat(msg.message);
             }
             break;
-          case 'enemy_moved':
-              // Update enemy position and animation
+            case 'enemy_moved':
               if (enemies[msg.id]) {
                 enemies[msg.id].pos_x = msg.pos_x;
                 enemies[msg.id].pos_y = msg.pos_y;
                 enemies[msg.id].direction = msg.direction;
-                enemies[msg.id].step = msg.step; // Make sure this line is here and NOT using || 1
-                console.log(`Updated enemy ${msg.id}: step=${enemies[msg.id].step}, direction=${enemies[msg.id].direction}`);
-            }
-            break;
+                enemies[msg.id].step = msg.step; // Remove the || 1 fallback
+                console.log(`Enemy ${msg.id} updated in memory: step=${enemies[msg.id].step}, direction=${enemies[msg.id].direction}`);
+              } else {
+                console.log(`Received enemy_moved for unknown enemy ${msg.id}`);
+              }
+              break;
           
         case 'enemy_removed':
           // Remove enemy from current map
