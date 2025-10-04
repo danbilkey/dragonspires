@@ -6000,7 +6000,7 @@ wss.on('connection', (ws) => {
                 send(ws, { 
                   type: 'chat', 
                   text: response,
-                  color: 'blue'
+                  color: 'black'
                 });
               }
             }
@@ -6082,8 +6082,8 @@ wss.on('connection', (ws) => {
           const response = npcDetails[responseKey];
           
           if (response && response.trim() !== '') {
-            // Send NPC response with blue color (with line wrapping)
-            sendLongChatMessage(ws, response, 'blue');
+            // Send NPC response with black color (with line wrapping)
+            sendLongChatMessage(ws, response, 'black');
           }
         }
         
