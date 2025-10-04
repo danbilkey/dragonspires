@@ -3207,58 +3207,58 @@ async function moveEnemyToward(enemy, targetX, targetY) {
 
 // Move enemy in a random direction
 async function moveEnemyRandomly(enemy) {
-  const directions = ['up', 'down', 'left', 'right'];
+  const directions = [
+    { dx: 0, dy: -1, dir: 'up' },
+    { dx: 0, dy: 1, dir: 'down' },
+    { dx: -1, dy: 0, dir: 'left' },
+    { dx: 1, dy: 0, dir: 'right' }
+  ];
+  
+  // Pick a random direction
   const randomDirection = directions[Math.floor(Math.random() * directions.length)];
+  const newX = enemy.pos_x + randomDirection.dx;
+  const newY = enemy.pos_y + randomDirection.dy;
   
-  let newX = enemy.pos_x;
-  let newY = enemy.pos_y;
+  // Get map specification for collision checking
+  const mapSpec = getMapSpec(enemy.map_id);
   
-  switch (randomDirection) {
-    case 'up':
-      newY = enemy.pos_y - 1;
-      break;
-    case 'down':
-      newY = enemy.pos_y + 1;
-      break;
-    case 'left':
-      newX = enemy.pos_x - 1;
-      break;
-    case 'right':
-      newX = enemy.pos_x + 1;
-      break;
+  // Always update direction
+  enemy.direction = randomDirection.dir;
+  
+  // Toggle step between 1 and 2
+  if (enemy.step !== 1 && enemy.step !== 2) {
+    enemy.step = 1; // Initialize if invalid
+  } else {
+    enemy.step = enemy.step === 1 ? 2 : 1; // Toggle
   }
   
-  // Check if movement is allowed
-  const mapSpec = getMapSpec(enemy.map_id);
+  enemy.last_move_time = Date.now();
+  
+  console.log(`Enemy ${enemy.id} toggled to step=${enemy.step}, direction=${enemy.direction}`);
+  
+  // Check if the move is valid
   if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id, enemy.id)) {
-    // Check for spell collision before moving
-    const enemyDied = await checkEnemySpellCollision(enemy, newX, newY);
-    if (enemyDied) return; // Enemy died from spell, don't continue movement
-    
     // Update enemy position
     enemy.pos_x = newX;
     enemy.pos_y = newY;
-    enemy.direction = randomDirection;
-    enemy.last_move_time = Date.now();
     
-    // Update position in database
-    try {
-      await pool.query('UPDATE enemies SET pos_x = $1, pos_y = $2, direction = $3, last_move_time = $4 WHERE id = $5', 
-        [newX, newY, enemy.direction, new Date(), enemy.id]);
-    } catch (err) {
-      console.error('Error updating enemy position in database:', err);
-    }
-    
-    // Broadcast enemy movement to all players on the same map
-    broadcastToMap(enemy.map_id, {
-      type: 'enemy_moved',
-      id: enemy.id,
-      pos_x: newX,
-      pos_y: newY,
-      direction: randomDirection,
-      step: enemy.step || 1
-    });
+    // Update database with new position
+    await updateEnemyPosition(enemy.id, newX, newY, enemy.direction, enemy.step);
+  } else {
+    // Blocked but still update direction and step in database
+    await updateEnemyDirectionAndStep(enemy.id, enemy.direction, enemy.step);
   }
+  
+  // Always broadcast movement (position and/or direction/step changes)
+  broadcast({
+    type: 'enemy_moved',
+    id: enemy.id,
+    pos_x: enemy.pos_x,
+    pos_y: enemy.pos_y,
+    direction: enemy.direction,
+    step: enemy.step,
+    map_id: enemy.map_id
+  });
 }
 
 // Check if movement to position is allowed
