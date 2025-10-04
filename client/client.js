@@ -858,7 +858,8 @@
           if (msg.enemies) {
             for (const [enemyId, enemy] of Object.entries(msg.enemies)) {
               enemies[enemyId] = {
-                ...enemy
+                ...enemy,
+                step: enemy.step || 1  // Add this line to ensure step is set
               };
             }
           }
@@ -1079,15 +1080,16 @@
               pushChat(msg.message);
             }
             break;
-        case 'enemy_moved':
-          // Update enemy position and animation
-          if (enemies[msg.id]) {
-            enemies[msg.id].pos_x = msg.pos_x;
-            enemies[msg.id].pos_y = msg.pos_y;
-            enemies[msg.id].direction = msg.direction;
-            enemies[msg.id].step = msg.step;
-          }
-          break;
+          case 'enemy_moved':
+              // Update enemy position and animation
+              if (enemies[msg.id]) {
+                enemies[msg.id].pos_x = msg.pos_x;
+                enemies[msg.id].pos_y = msg.pos_y;
+                enemies[msg.id].direction = msg.direction;
+                enemies[msg.id].step = msg.step || 1;  // Make sure this line exists
+                console.log(`Enemy ${msg.id} moved: step=${msg.step}, direction=${msg.direction}`); // Debug log
+            }
+            break;
           
         case 'enemy_removed':
           // Remove enemy from current map
@@ -1189,14 +1191,15 @@
           }
           break;
           
-        case 'enemy_spawned':
-          // Add new enemy to the client
-          if (msg.enemy) {
-            enemies[msg.enemy.id] = {
-              ...msg.enemy
-            };
-          }
-          break;
+          case 'enemy_spawned':
+            // Add new enemy to the client
+            if (msg.enemy) {
+              enemies[msg.enemy.id] = {
+                ...msg.enemy,
+                step: msg.enemy.step || 1  // Add this line
+              };
+            }
+            break;
           
         case 'enemies_cleared':
           // Clear all enemies from client
