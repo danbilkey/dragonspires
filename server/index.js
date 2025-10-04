@@ -6082,8 +6082,8 @@ wss.on('connection', (ws) => {
           const response = npcDetails[responseKey];
           
           if (response && response.trim() !== '') {
-            // Send NPC response with pink color (with line wrapping)
-            sendLongChatMessage(ws, response, 'pink');
+            // Send NPC response with blue color (with line wrapping)
+            sendLongChatMessage(ws, response, 'blue');
           }
         }
         
