@@ -1092,8 +1092,8 @@
                 enemies[msg.id].pos_x = msg.pos_x;
                 enemies[msg.id].pos_y = msg.pos_y;
                 enemies[msg.id].direction = msg.direction;
-                enemies[msg.id].step = msg.step || 1;  // Make sure this line exists
-                console.log(`Enemy ${msg.id} moved: step=${msg.step}, direction=${msg.direction}`); // Debug log
+                enemies[msg.id].step = msg.step; // Make sure this line is here and NOT using || 1
+                console.log(`Updated enemy ${msg.id}: step=${enemies[msg.id].step}, direction=${enemies[msg.id].direction}`);
             }
             break;
           
@@ -2279,6 +2279,8 @@
     }
 
     function drawEnemy(enemy, screenX, screenY) {
+      console.log(`drawEnemy: enemy ${enemy.id}, step=${enemy.step}, direction=${enemy.direction}`);
+  
       if (!enemy || !enemySpritesReady) return;
       
       // Get the sprite ID for this enemy's current animation
