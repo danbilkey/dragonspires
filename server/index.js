@@ -2809,6 +2809,8 @@ async function removeDropContainer(mapId, x, y) {
 
 // Move enemy in a random direction
 async function moveEnemyRandomly(enemy) {
+  console.log(`BEFORE move - Enemy ${enemy.id}: step=${enemy.step}, direction=${enemy.direction}`);
+  
   const directions = [
     { dx: 0, dy: -1, dir: 'up' },
     { dx: 0, dy: 1, dir: 'down' },
@@ -2833,6 +2835,8 @@ async function moveEnemyRandomly(enemy) {
   } else {
     enemy.step = enemy.step === 1 ? 2 : 1; // Toggle between 1 and 2
   }
+  console.log(`AFTER toggle - Enemy ${enemy.id}: step=${enemy.step}, direction=${enemy.direction}`);
+  
   
   enemy.last_move_time = Date.now();
   
