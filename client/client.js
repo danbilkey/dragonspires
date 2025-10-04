@@ -124,18 +124,24 @@
     }
 
     function getEnemySpriteId(enemyType, direction, step) {
+      console.log(`getEnemySpriteId called: type=${enemyType}, direction=${direction}, step=${step}`);
+      
       if (!enemyDetailsReady || !enemyDetails || enemyType < 1 || enemyType > enemyDetails.length) {
         console.log(`getEnemySpriteId: Invalid - ready:${enemyDetailsReady}, type:${enemyType}, length:${enemyDetails.length}`);
         return 1; // Fallback sprite
       }
       
       const enemy = enemyDetails[enemyType - 1]; // Convert to 0-based index
+      console.log(`Enemy details for type ${enemyType}:`, enemy);
       
       // Map direction and step to the correct sprite field name
       const spriteField = `enemy_image_${direction}_${step}`;
+      console.log(`Looking for sprite field: ${spriteField}`);
       
       // Return the sprite ID from the enemy details
       const spriteId = enemy[spriteField];
+      console.log(`Sprite ID found: ${spriteId}`);
+      
       if (!spriteId) {
         console.log(`getEnemySpriteId: No sprite for type:${enemyType}, field:${spriteField}`);
         return 1;
