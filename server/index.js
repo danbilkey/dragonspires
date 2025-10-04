@@ -3140,67 +3140,57 @@ async function moveEnemyToward(enemy, targetX, targetY) {
   }
   
   // Check if movement is allowed
-  const mapSpec = getMapSpec(enemy.map_id);
-  if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id, enemy.id)) {
-    // Check for spell collision before moving
-    const enemyDied = await checkEnemySpellCollision(enemy, newX, newY);
-    if (enemyDied) return; // Enemy died from spell, don't continue movement
-    
-    // Update enemy position
-    enemy.pos_x = newX;
-    enemy.pos_y = newY;
-    enemy.last_move_time = Date.now();
-    
-    // Update position in database
-    try {
-      await pool.query('UPDATE enemies SET pos_x = $1, pos_y = $2, direction = $3, last_move_time = $4 WHERE id = $5', 
-        [newX, newY, enemy.direction, new Date(), enemy.id]);
-    } catch (err) {
-      console.error('Error updating enemy position in database:', err);
-    }
-    
-    // Broadcast enemy movement to all players on the same map
-    broadcastToMap(enemy.map_id, {
-      type: 'enemy_moved',
-      id: enemy.id,
-      pos_x: newX,
-      pos_y: newY,
-      direction: enemy.direction,
-      step: enemy.step || 1
-    });
-  } else {
-    // Can't move to target position - check if we're adjacent to the target player for attack
-    const dx = Math.abs(targetX - currentX);
-    const dy = Math.abs(targetY - currentY);
-    const isAdjacent = (dx <= 1 && dy <= 1) && (dx + dy === 1); // Only orthogonally adjacent
-    
-    if (isAdjacent) {
-      // We're next to the player and can't move - attempt to attack
-      console.log(`Enemy ${enemy.id} adjacent to player at (${targetX}, ${targetY}), attempting attack`);
-      await enemyAttackPlayer(enemy, targetX, targetY);
-    }
-    
-    // Update last move time and direction even if we can't move (for animation)
-    enemy.last_move_time = Date.now();
-    
-    // Update direction in database
-    try {
-      await pool.query('UPDATE enemies SET direction = $1, last_move_time = $2 WHERE id = $3', 
-        [enemy.direction, new Date(), enemy.id]);
-    } catch (err) {
-      console.error('Error updating enemy direction in database:', err);
-    }
-    
-    // Broadcast enemy "movement" (direction change) to show attack animation
-    broadcastToMap(enemy.map_id, {
-      type: 'enemy_moved',
-      id: enemy.id,
-      pos_x: currentX, // Stay in same position
-      pos_y: currentY, // Stay in same position
-      direction: enemy.direction,
-      step: enemy.step || 1
-    });
+const mapSpec = getMapSpec(enemy.map_id);
+if (canMoveTo(newX, newY, null, mapSpec, enemy.map_id, enemy.id)) {
+  // Check for spell collision before moving
+  const enemyDied = await checkEnemySpellCollision(enemy, newX, newY);
+  if (enemyDied) return; // Enemy died from spell, don't continue movement
+  
+  // Update enemy position
+  enemy.pos_x = newX;
+  enemy.pos_y = newY;
+  enemy.last_move_time = Date.now();
+  
+  // Update position in database WITH STEP
+  await updateEnemyPosition(enemy.id, newX, newY, enemy.direction, enemy.step);
+  
+  // Broadcast enemy movement to all players on the same map
+  broadcastToMap(enemy.map_id, {
+    type: 'enemy_moved',
+    id: enemy.id,
+    pos_x: newX,
+    pos_y: newY,
+    direction: enemy.direction,
+    step: enemy.step
+  });
+} else {
+  // Can't move to target position - check if we're adjacent to the target player for attack
+  const dx = Math.abs(targetX - currentX);
+  const dy = Math.abs(targetY - currentY);
+  const isAdjacent = (dx <= 1 && dy <= 1) && (dx + dy === 1); // Only orthogonally adjacent
+  
+  if (isAdjacent) {
+    // We're next to the player and can't move - attempt to attack
+    console.log(`Enemy ${enemy.id} adjacent to player at (${targetX}, ${targetY}), attempting attack`);
+    await enemyAttackPlayer(enemy, targetX, targetY);
   }
+  
+  // Update last move time even if we can't move
+  enemy.last_move_time = Date.now();
+  
+  // Update direction AND STEP in database
+  await updateEnemyDirectionAndStep(enemy.id, enemy.direction, enemy.step);
+  
+  // Broadcast enemy "movement" (direction/step change) to show animation
+  broadcastToMap(enemy.map_id, {
+    type: 'enemy_moved',
+    id: enemy.id,
+    pos_x: currentX,
+    pos_y: currentY,
+    direction: enemy.direction,
+    step: enemy.step
+  });
+}
 }
 
 // Move enemy in a random direction
