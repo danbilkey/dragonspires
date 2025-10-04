@@ -6000,7 +6000,7 @@ wss.on('connection', (ws) => {
                 send(ws, { 
                   type: 'chat', 
                   text: response,
-                  color: 'pink'
+                  color: 'blue'
                 });
               }
             }
