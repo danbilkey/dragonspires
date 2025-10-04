@@ -1,0 +1,41 @@
+{
+  "start": "10,56",
+  "exits": "0,0,0,0",
+  "stamval": -1,
+  "diemap": 6,
+  "allowupload": false,
+  "maxuploads": 0,
+  "allowcombat": false,
+  "combatarea": "26,6,40,35",
+  "portals": [
+    "31,63,6,13,1"
+  ],
+  "readables": [
+    {
+      "coordinates": "0,0",
+      "message": ""
+    }
+  ],
+  "holders": [
+    {
+      "coordinates": "0,0",
+      "item": 0
+    }
+  ],
+  "enemies": [
+    {
+      "type": 30,
+      "coordinates": "25,55"
+    },
+    {
+      "type": 30,
+      "coordinates": "37,52"
+    }
+  ],
+  "npcs": [ 
+    {
+      "type": 0,
+      "coordinates": "0,0"
+    }
+  ]
+}
