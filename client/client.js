@@ -123,103 +123,25 @@
       return result;
     }
 
-    // Get enemy sprite ID based on enemy type, direction, and step
     function getEnemySpriteId(enemyType, direction, step) {
-      // We need to get the sprite ID from the enemy details that were sent from server
-      // For now, we'll use a simple mapping that matches the server's enemiesdetails.json structure
+      if (!enemyDetailsReady || !enemyDetails || enemyType < 1 || enemyType > enemyDetails.length) {
+        console.log(`getEnemySpriteId: Invalid - ready:${enemyDetailsReady}, type:${enemyType}, length:${enemyDetails.length}`);
+        return 1; // Fallback sprite
+      }
+      
+      const enemy = enemyDetails[enemyType - 1]; // Convert to 0-based index
       
       // Map direction and step to the correct sprite field name
-      let spriteField;
-      if (step === 1) {
-        spriteField = `enemy_image_${direction}_1`;
-      } else {
-        spriteField = `enemy_image_${direction}_2`;
+      const spriteField = `enemy_image_${direction}_${step}`;
+      
+      // Return the sprite ID from the enemy details
+      const spriteId = enemy[spriteField];
+      if (!spriteId) {
+        console.log(`getEnemySpriteId: No sprite for type:${enemyType}, field:${spriteField}`);
+        return 1;
       }
       
-      // For now, we'll use a hardcoded mapping based on the enemy details structure
-      // This should ideally be loaded from the server, but for immediate fix:
-      const enemySpriteMappings = {
-        1: { // A rabid dog
-          enemy_image_up_1: 14, enemy_image_up_2: 15,
-          enemy_image_right_1: 6, enemy_image_right_2: 7,
-          enemy_image_down_1: 2, enemy_image_down_2: 3,
-          enemy_image_left_1: 10, enemy_image_left_2: 11
-        },
-        2: { // A giant wasp
-          enemy_image_up_1: 23, enemy_image_up_2: 24,
-          enemy_image_right_1: 19, enemy_image_right_2: 20,
-          enemy_image_down_1: 17, enemy_image_down_2: 18,
-          enemy_image_left_1: 21, enemy_image_left_2: 22
-        },
-        3: { // A Swamp Dweller
-          enemy_image_up_1: 31, enemy_image_up_2: 32,
-          enemy_image_right_1: 27, enemy_image_right_2: 28,
-          enemy_image_down_1: 25, enemy_image_down_2: 26,
-          enemy_image_left_1: 29, enemy_image_left_2: 30
-        },
-        4: { // An OgRe
-          enemy_image_up_1: 39, enemy_image_up_2: 40,
-          enemy_image_right_1: 35, enemy_image_right_2: 36,
-          enemy_image_down_1: 33, enemy_image_down_2: 34,
-          enemy_image_left_1: 37, enemy_image_left_2: 38
-        },
-        5: { // Enemy type 5 (add more as needed)
-          enemy_image_up_1: 47, enemy_image_up_2: 48,
-          enemy_image_right_1: 43, enemy_image_right_2: 44,
-          enemy_image_down_1: 41, enemy_image_down_2: 42,
-          enemy_image_left_1: 45, enemy_image_left_2: 46
-        },
-        6: { // Enemy type 6
-          enemy_image_up_1: 55, enemy_image_up_2: 56,
-          enemy_image_right_1: 51, enemy_image_right_2: 52,
-          enemy_image_down_1: 49, enemy_image_down_2: 50,
-          enemy_image_left_1: 53, enemy_image_left_2: 54
-        },
-        7: { // Enemy type 7
-          enemy_image_up_1: 63, enemy_image_up_2: 64,
-          enemy_image_right_1: 59, enemy_image_right_2: 60,
-          enemy_image_down_1: 57, enemy_image_down_2: 58,
-          enemy_image_left_1: 61, enemy_image_left_2: 62
-        },
-        8: { // Enemy type 8
-          enemy_image_up_1: 71, enemy_image_up_2: 72,
-          enemy_image_right_1: 67, enemy_image_right_2: 68,
-          enemy_image_down_1: 65, enemy_image_down_2: 66,
-          enemy_image_left_1: 69, enemy_image_left_2: 70
-        },
-        9: { // Enemy type 9
-          enemy_image_up_1: 79, enemy_image_up_2: 80,
-          enemy_image_right_1: 75, enemy_image_right_2: 76,
-          enemy_image_down_1: 73, enemy_image_down_2: 74,
-          enemy_image_left_1: 77, enemy_image_left_2: 78
-        },
-        10: { // Enemy type 10
-          enemy_image_up_1: 87, enemy_image_up_2: 88,
-          enemy_image_right_1: 83, enemy_image_right_2: 84,
-          enemy_image_down_1: 81, enemy_image_down_2: 82,
-          enemy_image_left_1: 85, enemy_image_left_2: 86
-        },
-        11: { // Enemy type 11
-          enemy_image_up_1: 95, enemy_image_up_2: 96,
-          enemy_image_right_1: 91, enemy_image_right_2: 92,
-          enemy_image_down_1: 89, enemy_image_down_2: 90,
-          enemy_image_left_1: 93, enemy_image_left_2: 94
-        },
-        12: { // Enemy type 12
-          enemy_image_up_1: 103, enemy_image_up_2: 104,
-          enemy_image_right_1: 99, enemy_image_right_2: 100,
-          enemy_image_down_1: 97, enemy_image_down_2: 98,
-          enemy_image_left_1: 101, enemy_image_left_2: 102
-        }
-      };
-      
-      const enemyMapping = enemySpriteMappings[enemyType];
-      if (enemyMapping && enemyMapping[spriteField]) {
-        return enemyMapping[spriteField];
-      }
-      
-      // Fallback to a default sprite if mapping not found
-      return 1;
+      return spriteId;
     }
 
     // ---------- STATE ----------
@@ -253,6 +175,9 @@
 
     // Floor collision data
     let floorCollision = []; // Array of collision data for tile types
+
+    let enemyDetails = []; // Array of enemy detail objects
+    let enemyDetailsReady = false;
 
     // Auth GUI
     let usernameStr = "";
@@ -3294,6 +3219,33 @@
               });
           });
       });
+
+    // Load enemy details
+    fetch(`${baseUrl}/assets/enemiesdetails.json`)
+    .then(r => r.json())
+    .then(data => {
+      if (data && Array.isArray(data)) {
+        enemyDetails = data;
+        enemyDetailsReady = true;
+        console.log(`Client loaded ${enemyDetails.length} enemy details`);
+      }
+    })
+    .catch(err => {
+      // Try alternative path
+      fetch('/client/assets/enemiesdetails.json')
+        .then(r => r.json())
+        .then(data => {
+          if (data && Array.isArray(data)) {
+            enemyDetails = data;
+            enemyDetailsReady = true;
+            console.log(`Client loaded ${enemyDetails.length} enemy details`);
+          }
+        })
+        .catch(err2 => {
+          console.warn('Failed to load enemy details:', err2);
+          enemyDetailsReady = true; // Set to true anyway to prevent blocking
+        });
+    });
 
     // Load item details - fix path issue
     fetch(`${baseUrl}/assets/itemdetails.json`)
